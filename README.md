@@ -64,17 +64,27 @@ Inferred claims are labeled with confidence and evidence and never silently prom
 ### Prerequisites
 
 - Rust stable
-- Optional: `pyright` + `typescript-language-server` (LSP resolution), `ollama` (semantic ranking), `zstd` (CBM adapter), `python3` + `node` (SDK and plugin tests)
+- Optional: `pyright` + `typescript-language-server` (LSP resolution), `ollama` (semantic ranking), `zstd` (CBM adapter), `python3` + `node/npm` (SDK, plugin tests, or npm installation)
 
 ### Install from npm
 
-If you're using Oh My Pi, install the published [`scc` package](https://www.npmjs.com/package/scc) by its npm name:
+Install the published [`scc` CLI package](https://www.npmjs.com/package/scc) globally:
+
+```bash
+npm install -g scc
+```
+
+Verify the installation:
+
+```bash
+scc --version
+```
+
+If you're using Oh My Pi, also install the native OMP extension:
 
 ```bash
 omp install scc
 ```
-
-This installs the native OMP extension. The `scc` CLI must also be available on your `PATH`; build it from source with the commands below or download a release binary.
 
 ```bash
 cargo build --release -p scc-cli     # → target/release/scc
@@ -130,7 +140,7 @@ The local daemon implements [`docs/openapi.yaml`](docs/openapi.yaml) on loopback
 | Codex | `scc setup codex` | AGENTS.md with capsule, usage rules, authority ordering |
 | OpenCode | `scc setup opencode` | AGENTS.md + `.opencode/opencode.json` wiring the SCC MCP server |
 | Hermes | `scc setup hermes` | Native plugin: ten tools + bundled `scc-system-context` skill |
-| Oh My Pi (OMP) | `omp install scc` (npm) or `scc setup omp` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
+| Oh My Pi (OMP) | `omp install scc` (npm extension) or `scc setup omp` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
 
 SDKs: TypeScript (`sdk/typescript`, `@scc/sdk`) and Python (`sdk/python`, `scc-sdk`) wrapping the CLI.
 
