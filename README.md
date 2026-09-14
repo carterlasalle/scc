@@ -66,6 +66,16 @@ Inferred claims are labeled with confidence and evidence and never silently prom
 - Rust stable
 - Optional: `pyright` + `typescript-language-server` (LSP resolution), `ollama` (semantic ranking), `zstd` (CBM adapter), `python3` + `node` (SDK and plugin tests)
 
+### Install from npm
+
+If you're using Oh My Pi, install the published [`scc` package](https://www.npmjs.com/package/scc) by its npm name:
+
+```bash
+omp install scc
+```
+
+This installs the native OMP extension. The `scc` CLI must also be available on your `PATH`; build it from source with the commands below or download a release binary.
+
 ```bash
 cargo build --release -p scc-cli     # → target/release/scc
 cargo test --workspace               # 290 tests
