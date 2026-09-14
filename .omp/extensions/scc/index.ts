@@ -43,8 +43,8 @@ const SCC_BIN = process.env.SCC_BIN || "scc";
 // Installed CLI version, memoized per process: `scc --version` costs a
 // subprocess spawn, so it runs at most once no matter how many sessions
 // start. Empty string (memoized failure) means "unknown, stay quiet".
-// trace:v1 id=ops.scc.update-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 let cachedInstalled: string | undefined;
+// trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)
 const installedVersion = async (
   pi: ExtensionAPI,
   cwd: string,
@@ -60,7 +60,7 @@ const installedVersion = async (
 // Session-startup update reminder. Cache read + semver compare only — the
 // only async work is the memoized version lookup. Notification goes to the
 // human via ctx.ui.notify, never into model context.
-// trace:v1 id=ops.scc.update-notify work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)
 const maybeNotifyUpdate = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,

@@ -1,5 +1,7 @@
+# trace:v1 id=ops.release-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 name: scc
-version: 0.1.0
+# trace:v1 id=ops.release-version-key work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+version: 0.2.0
 description: >-
   System Context Compiler — evidence-backed system context for coding tasks.
   Provides system_overview, task_context, component_context, flow_context,

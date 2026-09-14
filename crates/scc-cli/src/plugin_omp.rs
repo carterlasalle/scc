@@ -34,6 +34,7 @@ use crate::agents_md::{
 const EXTENSION_TS: &str = include_str!("../../../plugins/omp/scc/index.ts");
 const EXTENSION_PACKAGE: &str = include_str!("../../../plugins/omp/scc/package.json");
 const SKILL_MD: &str = include_str!("../../../plugins/omp/scc/skills/scc-system-context/SKILL.md");
+const UPDATE_CHECK_TS: &str = include_str!("../../../plugins/omp/scc/update-check.ts");
 
 // trace:exempt reason=const-data (behavior boundary is write_agents_rules)
 const AGENTS_RULES: &str = "<!-- SCC-OMP-SECTION -->\n\
@@ -59,6 +60,7 @@ pub fn cmd_setup_omp(root: &Path) -> crate::Result<()> {
     let ext_dir = omp_dir.join("extensions/scc");
     std::fs::create_dir_all(&ext_dir)?;
     std::fs::write(ext_dir.join("index.ts"), installable_extension_ts())?;
+    std::fs::write(ext_dir.join("update-check.ts"), installable_aux_ts(UPDATE_CHECK_TS))?;
     std::fs::write(ext_dir.join("package.json"), extension_package())?;
     println!("wrote {}", ext_dir.join("index.ts").display());
 
@@ -98,9 +100,61 @@ pub fn cmd_setup_omp(root: &Path) -> crate::Result<()> {
 /// edges under TraceLayer otherwise).
 // trace:exempt reason=internal-helper
 fn installable_extension_ts() -> String {
-    EXTENSION_TS.replace(
-        "// trace:v1 id=impl.omp.scc work=WORK-SCC-001 satisfies=REQ-SCC-API",
-        "// trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)",
+    strip_authoring_markers(EXTENSION_TS)
+}
+
+// The installed artifact runs in a user's repository, where this repo's
+// work/requirement nodes do not exist (dangling TL002 edges under
+// TraceLayer otherwise). Every authoring marker line becomes
+// an exempt comment; all other lines pass through byte-identical.
+// trace:exempt reason=internal-helper
+fn strip_authoring_markers(src: &str) -> String {
+    const EXEMPT: &str = "// trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)";
+    let mut out = String::with_capacity(src.len());
+    for line in src.split('\n') {
+        if line.trim_start().starts_with("// trace:v1 ") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            out.push_str(indent);
+            out.push_str(EXEMPT);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if src.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+// trace:exempt reason=internal-helper
+fn installable_aux_ts(src: &str) -> String {
+    strip_authoring_markers(src)
+}
+
+// Upstream Pi resolves the same extension API under its own scope; the
+// extension body only uses pi.on/pi.exec/ctx.ui/ctx.cwd, which exist on
+// both sides, so a scope rewrite is the entire port.
+// trace:v1 id=impl.crates-scc-cli-src-plugin-omp.cmd-setup-pi work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_setup_pi(root: &Path) -> crate::Result<()> {
+    let ext_dir = root.join(".pi").join("extensions").join("scc");
+    std::fs::create_dir_all(&ext_dir)?;
+    std::fs::write(ext_dir.join("index.ts"), installable_pi_ts(EXTENSION_TS))?;
+    std::fs::write(ext_dir.join("update-check.ts"), installable_aux_ts(UPDATE_CHECK_TS))?;
+    std::fs::write(ext_dir.join("package.json"), extension_package())?;
+    println!("wrote {}", ext_dir.join("index.ts").display());
+    println!();
+    println!("Pi integration installed (project-local .pi/extensions/scc).");
+    println!("Restart Pi; the extension hot-reloads with /reload.");
+    println!("The `scc` binary must be on PATH, or set SCC_BIN.");
+    Ok(())
+}
+
+// trace:exempt reason=internal-helper
+fn installable_pi_ts(src: &str) -> String {
+    strip_authoring_markers(src).replace(
+        "@oh-my-pi/pi-coding-agent",
+        "@mariozechner/pi-coding-agent",
     )
 }
 
@@ -204,6 +258,24 @@ fn write_agents_rules(root: &Path) -> crate::Result<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    // trace:exempt reason=unit-test
+    fn pi_setup_installs_retargeted_extension() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        cmd_setup_pi(&root).unwrap();
+        let ext = root.join(".pi").join("extensions").join("scc");
+        assert!(ext.join("index.ts").exists());
+        assert!(ext.join("update-check.ts").exists());
+        assert!(ext.join("package.json").exists());
+        let ts = std::fs::read_to_string(ext.join("index.ts")).unwrap();
+        assert!(ts.contains("@mariozechner/pi-coding-agent"), "pi scope retargeted");
+        assert!(!ts.contains("@oh-my-pi/"), "no fork scope remains");
+        assert!(ts.contains("maybeNotifyUpdate"), "notifier wired");
+        assert!(!ts.contains("trace:v1 id="), "authoring markers stripped");
+    }
+
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
@@ -257,7 +329,10 @@ mod tests {
 
         // Extension files are present.
         assert!(root.join(".omp/extensions/scc/index.ts").exists());
+        assert!(root.join(".omp/extensions/scc/update-check.ts").exists());
         assert!(root.join(".omp/extensions/scc/package.json").exists());
+        let installed_ts = std::fs::read_to_string(root.join(".omp/extensions/scc/index.ts")).unwrap();
+        assert!(!installed_ts.contains("trace:v1 id="), "authoring markers stripped at install");
         // The extension imports the resolvable package.
         let ts = installed_extension(&root);
         assert!(ts.contains("@oh-my-pi/pi-coding-agent"), "extension must import the canonical resolvable package");

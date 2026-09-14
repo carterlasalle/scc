@@ -235,6 +235,14 @@ pub fn capsule_markdown(root: &Path) -> crate::Result<String> {
     ))
 }
 
+// Shared SessionStart update checker (same file the Claude installer bakes
+// in): cache-only startup path, detached background refresh, systemMessage
+// JSON solely when an update is due.
+// trace:exempt reason=internal-detail
+const CHECK_UPDATE_SH: &str = include_str!("../../../plugins/claude/hooks/scc/check-update.sh");
+// trace:exempt reason=internal-detail
+const OPENCODE_UPDATE_TS: &str = include_str!("../../../plugins/opencode/scc-update.ts");
+
 /// `scc setup codex` — write AGENTS.md with the capsule + usage rules
 /// (docs/API_AND_INTEGRATIONS.md §5 for the Codex harness).
 // trace:v1 id=impl.crates-scc-cli-src-compress.cmd-setup-codex
@@ -258,6 +266,30 @@ pub fn cmd_setup_codex(root: &Path) -> crate::Result<()> {
     std::fs::write(&path, out)?;
     println!("wrote {}", path.display());
     println!("AGENTS.md now carries the system capsule; normal Codex sessions start with system understanding.");
+
+    install_codex_update_check(root)?;
+    Ok(())
+}
+
+// Update reminder: Codex hooks live in user scope (~/.codex/hooks.json),
+// which setup must never edit — install the checker into the repo and
+// print the exact entry for the user to add under "SessionStart".
+// trace:v1 id=impl.crates-scc-cli-src-compress.cmd-setup-codex-update-check work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+fn install_codex_update_check(root: &Path) -> crate::Result<()> {
+    let hook_path = root.join(".codex").join("scc-check-update.sh");
+    std::fs::create_dir_all(hook_path.parent().unwrap())?;
+    std::fs::write(&hook_path, CHECK_UPDATE_SH)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755))?;
+    }
+    println!("wrote {}", hook_path.display());
+    println!();
+    println!("To enable the SCC update reminder, add this entry to the");
+    println!("\"SessionStart\" array in ~/.codex/hooks.json:");
+    println!("  {{\"matcher\": \"\", \"hooks\": [{{\"type\": \"command\",");
+    println!("   \"command\": \"{}\", \"timeout\": 10}}]}}", hook_path.display());
     Ok(())
 }
 
@@ -284,14 +316,44 @@ pub fn cmd_setup_opencode(root: &Path) -> crate::Result<()> {
     v["mcp"] = serde_json::Value::Object(mcp);
     std::fs::write(&config, serde_json::to_string_pretty(&v)?)?;
     println!("wrote {}", config.display());
+    install_opencode_update_plugin(root)?;
     println!("OpenCode sessions will auto-connect the SCC MCP server (six semantic tools).");
     println!("Hermes and other harnesses read AGENTS.md (system capsule) — no per-harness config needed.");
+    Ok(())
+}
+
+// Update reminder project plugin: `session.created` shows a TUI toast when
+// a newer release is due (cache-only path, detached refresh). Installed
+// into the repo so no user-scope change is needed.
+// trace:v1 id=impl.crates-scc-cli-src-compress.cmd-setup-opencode-update-plugin work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+fn install_opencode_update_plugin(root: &Path) -> crate::Result<()> {
+    let path = root.join(".opencode").join("plugins").join("scc-update.ts");
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    std::fs::write(&path, OPENCODE_UPDATE_TS)?;
+    println!("wrote {}", path.display());
+    println!("OpenCode shows an update toast on session start when a newer SCC release exists.");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    // trace:exempt reason=unit-test
+    fn opencode_setup_installs_update_plugin() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        cmd_setup_opencode(&root).unwrap();
+        let path = root.join(".opencode").join("plugins").join("scc-update.ts");
+        assert!(path.exists(), "opencode update plugin installed");
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("session.created"), "plugin hooks session creation");
+        assert!(body.contains("showToast"), "plugin notifies via TUI toast");
+        assert!(body.contains("start_new_session") || body.contains("refreshInBackground"),
+            "plugin refreshes cache off the startup path");
+    }
 
     #[test]
 // trace:v1 id=impl.crates-scc-cli-src-compress.external-summarizer-runs-and-is-labeled
@@ -347,6 +409,21 @@ mod tests {
         std::fs::write(root.join("AGENTS.md"), "# user content\nkeep me\n").unwrap();
         cmd_setup_codex(&root).unwrap();
         cmd_setup_codex(&root).unwrap();
+        // Update reminder checker installs alongside the capsule.
+        let hook = root.join(".codex").join("scc-check-update.sh");
+        assert!(hook.exists(), "codex checker script installed");
+        let body = std::fs::read_to_string(&hook).unwrap();
+        assert!(body.contains("systemMessage"), "checker emits systemMessage JSON");
+        assert!(body.contains("start_new_session"), "checker refresh detaches");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&hook).unwrap().permissions().mode() & 0o111,
+                0o111,
+                "checker script executable"
+            );
+        }
         let text = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
         assert!(text.contains("keep me"), "user content preserved");
         assert!(text.contains("SCC-SECTION"), "{text}");

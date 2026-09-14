@@ -106,7 +106,7 @@ const refreshInBackground = (): void => {
 // already notified within RENOTIFY_AFTER_MS. Kicks a background refresh
 // when the cache is older than REFRESH_AFTER_MS. Pure cache I/O + string
 // compare on the call path — no subprocess, no network.
-// trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)
+// trace:v1 id=ops.scc.update-check work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 export const checkCachedUpdate = (installed: string): string | undefined => {
   const now = Date.now();
   const cache = readCache();

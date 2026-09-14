@@ -666,6 +666,8 @@ enum SetupSub {
     Hermes,
     /// Install the Oh My Pi (OMP) native integration (extension + MCP + skill + AGENTS)
     Omp,
+    /// Install the upstream Pi project-local extension (.pi/extensions/scc)
+    Pi,
 }
 
 // trace:exempt reason=internal-detail
@@ -797,6 +799,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             SetupSub::Opencode => scc_cli::compress::cmd_setup_opencode(&root),
             SetupSub::Hermes => scc_cli::plugin_hermes::cmd_setup_hermes(&root),
             SetupSub::Omp => scc_cli::plugin_omp::cmd_setup_omp(&root),
+            SetupSub::Pi => scc_cli::plugin_omp::cmd_setup_pi(&root),
         },
         Commands::Serve => commands::cmd_serve(&root),
         Commands::Mcp => commands::cmd_mcp(&root),

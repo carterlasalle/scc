@@ -12,6 +12,10 @@
 
 use std::path::Path;
 
+// SessionStart update reminder (stale-while-revalidate shell checker).
+// trace:exempt reason=internal-detail
+const CHECK_UPDATE_SH: &str = include_str!("../../../plugins/claude/hooks/scc/check-update.sh");
+
 const SESSION_START: &str = r#"#!/usr/bin/env bash
 # SCC SessionStart: inject system capsule + freshness warnings + checkpoint.
 # State location comes from SCC itself (honors SCC_STATE_DIR), so the
@@ -130,13 +134,17 @@ pub fn install(root: &Path) -> crate::Result<()> {
     let hook_dir = claude_dir.join("hooks/scc");
     std::fs::create_dir_all(&hook_dir)?;
 
-    let scripts: [(&str, &str, &str); 4] = [
+    let scripts: [(&str, &str, &str); 5] = [
         ("session_start.sh", "SessionStart", SESSION_START),
+        ("check_update.sh", "SessionStart", CHECK_UPDATE_SH),
         ("user_prompt_submit.sh", "UserPromptSubmit", USER_PROMPT_SUBMIT),
         ("post_tool_use.sh", "PostToolUse", POST_TOOL_USE),
         ("pre_compact.sh", "PreCompact", PRE_COMPACT),
     ];
-    let mut hooks: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    // One entry per script (a Map would collapse the two SessionStart
+    // scripts into one — each entry appends separately below).
+    // trace:exempt reason=internal-detail
+    let mut new_entries: Vec<(String, serde_json::Value)> = Vec::new();
     for (file, event, content) in scripts {
         let script_path = hook_dir.join(file);
         std::fs::write(&script_path, content)?;
@@ -150,7 +158,7 @@ pub fn install(root: &Path) -> crate::Result<()> {
             "matcher": if event == "PostToolUse" { "Edit|Write|MultiEdit|NotebookEdit" } else { "*" },
             "hooks": [{"type": "command", "command": command}]
         }]);
-        hooks.insert(event.to_string(), entry);
+        new_entries.push((event.to_string(), entry));
     }
 
     // merge with existing settings.json if present (P0 §12): SCC hooks are
@@ -169,7 +177,7 @@ pub fn install(root: &Path) -> crate::Result<()> {
         .cloned()
         .unwrap_or_default();
     let mut merged = existing_hooks;
-    for (event, entry) in hooks {
+    for (event, entry) in new_entries {
         let scc_entry = entry;
         match merged.get_mut(&event) {
             Some(serde_json::Value::Array(existing)) => {
@@ -204,6 +212,7 @@ mod tests {
     fn scripts_are_valid_bash() {
         for (_, _, content) in [
             ("", "", SESSION_START),
+            ("", "", CHECK_UPDATE_SH),
             ("", "", USER_PROMPT_SUBMIT),
             ("", "", POST_TOOL_USE),
             ("", "", PRE_COMPACT),
@@ -228,6 +237,16 @@ mod tests {
             );
         }
         assert!(SESSION_START.contains("context startup 2>/dev/null"));
+        // Update reminder: cache-only SessionStart hook emitting
+        // systemMessage JSON solely when an update is due.
+        assert!(
+            CHECK_UPDATE_SH.contains("systemMessage"),
+            "check_update.sh must emit systemMessage JSON"
+        );
+        assert!(
+            CHECK_UPDATE_SH.contains("start_new_session"),
+            "check_update.sh refresh must detach from the hook process"
+        );
         assert!(
             PRE_COMPACT.contains("SCC CONTEXT (re-injected after compaction)"),
             "rehydration header must name the fused capsule"
@@ -235,6 +254,7 @@ mod tests {
     }
 
     #[test]
+    // trace:exempt reason=unit-test
     fn install_writes_hooks() {
         let dir = tempfile::TempDir::new().unwrap();
         install(dir.path()).unwrap();
@@ -250,6 +270,7 @@ mod tests {
     }
 
     #[test]
+    // trace:exempt reason=unit-test
     fn install_preserves_existing_hooks() {
         // P0 §12: SCC installation must append to, never replace, existing
         // hooks for the same event (Serena/security/RTK coexistence).
@@ -280,7 +301,7 @@ mod tests {
         let hooks = settings["hooks"].as_object().unwrap();
 
         let ss = hooks["SessionStart"].as_array().unwrap();
-        assert_eq!(ss.len(), 2, "existing + SCC SessionStart: {ss:?}");
+        assert_eq!(ss.len(), 3, "existing + SCC SessionStart + SCC check_update: {ss:?}");
         let serena = ss
             .iter()
             .find(|e| e.to_string().contains("serena"))
@@ -291,6 +312,11 @@ mod tests {
             .find(|e| e.to_string().contains("session_start.sh"))
             .expect("SCC hook appended");
         assert!(scc_entry[0].get("hooks").is_some(), "matcher entry: {scc_entry:?}");
+        let upd_entry = ss
+            .iter()
+            .find(|e| e.to_string().contains("check_update.sh"))
+            .expect("SCC update reminder appended");
+        assert!(upd_entry[0].get("hooks").is_some(), "matcher entry: {upd_entry:?}");
 
         let ups = hooks["UserPromptSubmit"].as_array().unwrap();
         assert_eq!(ups.len(), 2, "existing + SCC UserPromptSubmit: {ups:?}");
@@ -299,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    // trace:exempt reason=unit-test
     fn post_tool_use_has_no_shell_timeout_dependency() {
         // P0 §14: integration must not rely on GNU `timeout`.
         assert!(!POST_TOOL_USE.contains("timeout 15"), "no shell timeout call");
