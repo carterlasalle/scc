@@ -130,7 +130,7 @@ The local daemon implements [`docs/openapi.yaml`](docs/openapi.yaml) on loopback
 | Codex | `scc setup codex` | AGENTS.md with capsule, usage rules, authority ordering |
 | OpenCode | `scc setup opencode` | AGENTS.md + `.opencode/opencode.json` wiring the SCC MCP server |
 | Hermes | `scc setup hermes` | Native plugin: ten tools + bundled `scc-system-context` skill |
-| Oh My Pi (OMP) | `scc setup omp` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
+| Oh My Pi (OMP) | `omp install scc` (npm) or `scc setup omp` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
 
 SDKs: TypeScript (`sdk/typescript`, `@scc/sdk`) and Python (`sdk/python`, `scc-sdk`) wrapping the CLI.
 
