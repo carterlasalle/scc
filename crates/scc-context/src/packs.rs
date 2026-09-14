@@ -364,10 +364,19 @@ pub(crate) fn entity_name(view: &TrustedGraphView, id: &str) -> String {
     view.name_of(id)
 }
 
+// trace:v1 id=impl.scc.packs.component-short work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 fn component_short(view: &TrustedGraphView, id: &str) -> String {
     let name = entity_name(view, id);
     let name = name.strip_prefix("component:").unwrap_or(&name);
-    name.to_string()
+    // Merged multi-root components render as 400-char '+' chains; cap the
+    // display (the entity id underneath is untouched).
+    const MAX_COMPONENT_DISPLAY: usize = 120;
+    if name.len() > MAX_COMPONENT_DISPLAY {
+        let roots = name.matches('+').count() + 1;
+        format!("{}… (+{} dirs)", &name[..100], roots.saturating_sub(1).max(1))
+    } else {
+        name.to_string()
+    }
 }
 
 // trace:exempt reason=internal-detail
@@ -724,6 +733,16 @@ pub fn task_with_rankers(
         if f.kind != scc_core::FlowKind::Architecture {
             score += 0.5;
         }
+        // signals-only state machines disclaim their own authority at
+        // render time — never lead with one when anything else qualifies
+        if f
+            .attributes
+            .get("signals_only")
+            .and_then(|v| v.as_bool())
+            == Some(true)
+        {
+            score -= 1.5;
+        }
         if mentions || score > 0.0 {
             affected_flows.push((f.id.clone(), score));
         }
@@ -865,7 +884,11 @@ pub fn task_with_rankers(
                 .and_then(|r| r.get("text"))
                 .and_then(|t| t.as_str())
                 .unwrap_or("");
-            comp_body.push_str(&format!("- {}: {}\n", c.name, resp));
+            comp_body.push_str(&format!(
+                "- {}: {}\n",
+                component_short(&ctx.view, cid),
+                resp
+            ));
         }
     }
     if comp_body.is_empty() {
@@ -956,8 +979,16 @@ pub fn task_with_rankers(
                     .unwrap_or_else(|| entity_name(&ctx.view, &r.subject))
             })
             .collect();
+        // Each WRITES rel contributes one entry, so the same component
+        // repeats per edge — dedupe across rels and cap (the owner list is
+        // a pointer, not an audit log).
+        let mut writers = writers;
+        writers.sort();
+        writers.dedup();
         let writers_disp = if writers.is_empty() {
             "?".to_string()
+        } else if writers.len() > 3 {
+            format!("{}, +{} more", writers[..3].join(", "), writers.len() - 3)
         } else {
             writers.join(", ")
         };
