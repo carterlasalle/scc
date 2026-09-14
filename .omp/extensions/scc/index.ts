@@ -32,12 +32,44 @@ import type {
   SessionStartEvent,
   ToolResultEvent,
 } from "@oh-my-pi/pi-coding-agent";
+import { checkCachedUpdate } from "./update-check";
 
 // Honor SCC_BIN (claimed by `scc setup omp`) — never hard-code "scc" as
 // the only lookup. A static path may also be written into .omp/mcp.json
 // at setup time when SCC_BIN is set in the installer environment.
 // trace:exempt reason=const-data
 const SCC_BIN = process.env.SCC_BIN || "scc";
+
+// Installed CLI version, memoized per process: `scc --version` costs a
+// subprocess spawn, so it runs at most once no matter how many sessions
+// start. Empty string (memoized failure) means "unknown, stay quiet".
+// trace:v1 id=ops.scc.update-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+let cachedInstalled: string | undefined;
+const installedVersion = async (
+  pi: ExtensionAPI,
+  cwd: string,
+): Promise<string | undefined> => {
+  if (cachedInstalled === undefined) {
+    const r = await scc(pi, ["--version"], cwd);
+    const m = /scc\s+(\S+)/.exec(r.code === 0 ? r.out : "");
+    cachedInstalled = m ? m[1] : "";
+  }
+  return cachedInstalled || undefined;
+};
+
+// Session-startup update reminder. Cache read + semver compare only — the
+// only async work is the memoized version lookup. Notification goes to the
+// human via ctx.ui.notify, never into model context.
+// trace:v1 id=ops.scc.update-notify work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+const maybeNotifyUpdate = async (
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+): Promise<void> => {
+  const v = await installedVersion(pi, ctx.cwd);
+  if (!v) return;
+  const msg = checkCachedUpdate(v);
+  if (msg) ctx.ui.notify(msg, "warning");
+};
 
 // Sessions/branches that already received the startup capsule this process.
 // Keyed by session id PLUS the active leaf/file when available: a Set of
@@ -335,8 +367,12 @@ export default function hook(pi: ExtensionAPI): void {
   // first real prompt) and do a lightweight state-path presence check.
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
     await resetHandler(_event, ctx);
+    await maybeNotifyUpdate(pi, ctx);
   });
-  onEvent(pi, "session_switch", resetHandler);
+  onEvent(pi, "session_switch", async (_event: unknown, ctx: ExtensionContext) => {
+    await resetHandler(_event, ctx);
+    await maybeNotifyUpdate(pi, ctx);
+  });
   onEvent(pi, "session_branch", resetHandler);
   onEvent(pi, "session_tree", resetHandler);
 
