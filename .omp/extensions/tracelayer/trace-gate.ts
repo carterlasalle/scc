@@ -109,10 +109,14 @@ export default function hook(pi: ExtensionAPI): void {
   // Request-path tripwire (pre/post mutation): 4s. Fresh-log receipt
   // 2026-09-10: p95 pre/post ≈ 2s, observed request abort ≈ 5.4s. A hook
   // that cannot answer in 4s is down; fail open loudly (obligations persist
-  // to Stop/CI) rather than hang the request into an abort. Completion
-  // (stop) keeps a 60s budget: ending a session may wait, edits may not.
+  // to Stop/CI) rather than hang the request into an abort.
+  // Completion (stop) keeps a 25s budget, deliberately under OMP's 30s
+  // handler kill (receipt 2026-09-13: a 60s stop surfaced only as
+  // "handler timed out after 30000ms" with no reason). Ending a session
+  // may wait, but the gate must report first — a slow stop still
+  // fail-closes, now with the honest reason instead of a raw kill.
   const GATE_TIMEOUT_MS = 4_000;
-  const STOP_TIMEOUT_MS = 60_000;
+  const STOP_TIMEOUT_MS = 25_000;
 
   // Telemetry: one JSONL record per firing (success, deny, crash, timeout)
   // into ~/.trace/var/timing.log — the same file `trace timing` reads.
