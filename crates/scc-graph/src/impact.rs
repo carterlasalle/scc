@@ -105,11 +105,12 @@ pub fn compute_impact(
         .map(|s| scc_core::symbol_id(&graph.repo_id, "?", s))
         .collect();
     // symbols may be given as plain names — resolve against the index
+    // (one full symbol sweep, not one per requested symbol).
     let mut resolved_sym_ids: HashSet<String> = HashSet::new();
+    let all_symbols = graph.entities_of_kind(kinds::SYMBOL);
     for s in symbols {
-        let matches: Vec<String> = graph
-            .entities_of_kind(kinds::SYMBOL)
-            .into_iter()
+        let matches: Vec<String> = all_symbols
+            .iter()
             .filter(|e| e.name == *s)
             .map(|e| e.id.clone())
             .collect();
@@ -129,7 +130,8 @@ pub fn compute_impact(
         }
     }
     // file symbol ids: all symbols whose file attribute is one of the files
-    for e in view.entities_of_kind(kinds::SYMBOL) {
+    // (reuse the sweep above — a second full scan doubles this cost).
+    for e in &all_symbols {
         if let Some(f) = e.attributes.get("file").and_then(|v| v.as_str()) {
             if file_ids.contains(&scc_core::entity_id(&graph.repo_id, kinds::FILE, f)) {
                 resolved_sym_ids.insert(e.id.clone());
@@ -225,20 +227,42 @@ pub fn compute_impact(
     }
     affected_syms.extend(resolved_sym_ids);
 
-    for flow in &view.flows() {
+    // Flow scan under a hard deadline: on huge graphs the naive
+    // steps×symbols substring matrix never finishes (django: 600s+). When
+    // the budget trips, keep the partial answer and say so — a bounded
+    // partial beats a timeout silence.
+    // trace:exempt reason=const-data
+    const FLOW_BUDGET_MS: u128 = 20_000;
+    let flow_start = std::time::Instant::now();
+    let mut seen_flows: HashSet<&str> = HashSet::new();
+    let mut scanned_flows = 0usize;
+    let mut flow_truncated = false;
+    let all_flows = view.flows();
+    for flow in &all_flows {
+        scanned_flows += 1;
+        if scanned_flows % 64 == 0 && flow_start.elapsed().as_millis() > FLOW_BUDGET_MS {
+            flow_truncated = true;
+            break;
+        }
         let steps_mention = flow.steps.iter().any(|s| {
             affected_comps.iter().any(|c| s.actor.contains(c))
                 || affected_syms.iter().any(|sid| s.operation.contains(sid))
                 || files.iter().any(|f| s.actor.contains(f))
         });
-        if steps_mention {
+        if steps_mention && seen_flows.insert(flow.id.as_str()) {
             imp.flows.push(flow.id.clone());
         }
     }
+    if flow_truncated {
+        imp.notes.push(format!(
+            "impact truncated: scanned {scanned_flows}/{} flows in 20s budget; results partial",
+            all_flows.len()
+        ));
+    }
     // entrypoint attribute on flows
-    for flow in &view.flows() {
+    for flow in &all_flows {
         if let Some(ep) = flow.attributes.get("entrypoint").and_then(|v| v.as_str()) {
-            if affected_syms.contains(ep) && !imp.flows.contains(&flow.id) {
+            if affected_syms.contains(ep) && seen_flows.insert(flow.id.as_str()) {
                 imp.flows.push(flow.id.clone());
             }
         }
