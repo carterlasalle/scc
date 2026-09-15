@@ -40,6 +40,18 @@ import { checkCachedUpdate } from "./update-check";
 // trace:exempt reason=const-data
 const SCC_BIN = process.env.SCC_BIN || "scc";
 
+// Subprocess budgets: every pi.exec call site passes one of these. The
+// harness kills handlers at 30s WITHOUT killing their children, so an
+// unbounded spawn is a pileup + corruption risk, not just slowness.
+// trace:exempt reason=const-data
+const FAST_MS = 5000;
+// trace:exempt reason=const-data
+const SNAPSHOT_MS = 5000;
+// trace:exempt reason=const-data
+const INDEX_MS = 20000;
+// trace:exempt reason=const-data
+const CONTEXT_MS = 20000;
+
 // Installed CLI version, memoized per process: `scc --version` costs a
 // subprocess spawn, so it runs at most once no matter how many sessions
 // start. Empty string (memoized failure) means "unknown, stay quiet".
@@ -50,7 +62,7 @@ const installedVersion = async (
   cwd: string,
 ): Promise<string | undefined> => {
   if (cachedInstalled === undefined) {
-    const r = await scc(pi, ["--version"], cwd);
+    const r = await scc(pi, ["--version"], cwd, FAST_MS);
     const m = /scc\s+(\S+)/.exec(r.code === 0 ? r.out : "");
     cachedInstalled = m ? m[1] : "";
   }
@@ -105,9 +117,11 @@ const scc = async (
   pi: ExtensionAPI,
   args: string[],
   cwd: string,
+  timeoutMs = FAST_MS,
 ): Promise<{ code: number; out: string; err: string }> => {
   try {
-    const res = await pi.exec(SCC_BIN, args, { cwd });
+    const res = await pi.exec(SCC_BIN, args, { cwd, timeout: timeoutMs });
+    if (res.killed) return { code: -1, out: "", err: "scc killed on timeout" };
     return {
       code: res.code,
       out: String(res.stdout ?? ""),
@@ -124,9 +138,11 @@ const execBin = async (
   bin: string,
   args: string[],
   cwd: string,
+  timeoutMs = FAST_MS,
 ): Promise<{ code: number; out: string }> => {
   try {
-    const res = await pi.exec(bin, args, { cwd });
+    const res = await pi.exec(bin, args, { cwd, timeout: timeoutMs });
+    if (res.killed) return { code: -1, out: "" };
     return { code: res.code, out: String(res.stdout ?? "") };
   } catch {
     return { code: -1, out: "" };
@@ -314,6 +330,11 @@ const fileFingerprintDiff = (
 };
 
 // Index failure is NEVER treated as success: retry once, then report.
+// A second concurrent index run is refused outright: stacked `scc index`
+// processes contend on the store lock and, killed mid-write, corrupt it.
+// The skipped paths re-cover on the next mutation (freshness is eventual).
+// trace:exempt reason=internal-helper
+let indexInFlight = false;
 // trace:exempt reason=internal-helper
 const indexPaths = async (
   pi: ExtensionAPI,
@@ -323,10 +344,17 @@ const indexPaths = async (
 ): Promise<{ ok: boolean; err: string }> => {
   const unique = [...new Set(paths.filter(Boolean))];
   if (!unique.length && !full) return { ok: true, err: "" };
+  if (indexInFlight) return { ok: true, err: "" };
+  indexInFlight = true;
   const args = unique.length && !full ? ["index", "--paths", ...unique, "--quiet"] : ["index", "--quiet"];
-  let r = await scc(pi, args, cwd);
-  if (r.code !== 0) {
-    r = await scc(pi, args, cwd);
+  let r;
+  try {
+    r = await scc(pi, args, cwd, INDEX_MS);
+    if (r.code !== 0) {
+      r = await scc(pi, args, cwd, INDEX_MS);
+    }
+  } finally {
+    indexInFlight = false;
   }
   if (r.code !== 0) {
     const err = `scc index --paths failed (exit ${r.code}): ${r.err || r.out || "no output"}`;
@@ -346,10 +374,10 @@ const loadStartupAndCheckpoint = async (
   cwd: string,
 ): Promise<{ lines: string[]; startupOk: boolean }> => {
   const lines: string[] = [];
-  const startup = await scc(pi, ["context", "startup"], cwd);
+  const startup = await scc(pi, ["context", "startup"], cwd, CONTEXT_MS);
   const startupOk = startup.code === 0 && Boolean(startup.out.trim());
   if (startupOk) lines.push(startup.out.trim());
-  const checkpoint = await scc(pi, ["checkpoint", "load", "--inject"], cwd);
+  const checkpoint = await scc(pi, ["checkpoint", "load", "--inject"], cwd, CONTEXT_MS);
   if (checkpoint.code === 0 && checkpoint.out.trim()) lines.push(checkpoint.out.trim());
   return { lines, startupOk };
 };
@@ -358,7 +386,7 @@ const loadStartupAndCheckpoint = async (
 export default function hook(pi: ExtensionAPI): void {
   const resetHandler = async (_event: unknown, ctx: ExtensionContext) => {
     resetInjection(ctx);
-    await scc(pi, ["state-path"], ctx.cwd);
+    await scc(pi, ["state-path"], ctx.cwd, FAST_MS);
   };
 
   // session_start: precompute/state only. This is a notification — it
@@ -390,7 +418,7 @@ export default function hook(pi: ExtensionAPI): void {
     // entry scan; re-injecting ~7k tokens would pure-duplicate it).
     const key = injectionKey(ctx);
     if (!startupInjected.has(key) && !sessionHasStartup(ctx)) {
-      const startup = await scc(pi, ["context", "startup"], ctx.cwd);
+      const startup = await scc(pi, ["context", "startup"], ctx.cwd, CONTEXT_MS);
       if (startup.code === 0 && startup.out.trim()) {
         content += startup.out.trim() + "\n\n";
         startupInjected.add(key);
@@ -404,7 +432,7 @@ export default function hook(pi: ExtensionAPI): void {
       // `--hook` prints nothing, the direct call prints the pack). This
       // extension IS the injection decision-maker; the 1500-token focus
       // budget matches hook mode's cap.
-      const task = await scc(pi, ["context", "task", prompt, "--budget", "1500"], ctx.cwd);
+      const task = await scc(pi, ["context", "task", prompt, "--budget", "1500"], ctx.cwd, CONTEXT_MS);
       if (task.code === 0 && task.out.trim()) {
         content += task.out.trim();
       }
@@ -452,6 +480,7 @@ export default function hook(pi: ExtensionAPI): void {
             "git",
             ["diff", "--name-only", "-z", before.head, after.head],
             ctx.cwd,
+            SNAPSHOT_MS,
           );
           if (revDiff.code === 0) {
             for (const p of revDiff.out.split("\0")) {
@@ -479,7 +508,7 @@ export default function hook(pi: ExtensionAPI): void {
   // state can be restored into the compaction result. Registered via
   // onEvent because older published typings omit this event name.
   onEvent(pi, "session_before_compact", async (_event: unknown, ctx: ExtensionContext) => {
-    await scc(pi, ["checkpoint", "save"], ctx.cwd);
+    await scc(pi, ["checkpoint", "save"], ctx.cwd, FAST_MS);
   });
 
   // session.compacting: the compaction-result seam. Inject startup +

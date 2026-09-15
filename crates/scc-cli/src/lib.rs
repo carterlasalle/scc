@@ -107,6 +107,23 @@ pub fn open_store(root: &Path) -> Result<Store> {
     Ok(Store::open(&db_path(root), root)?)
 }
 
+// trace:v1 id=impl.crates-scc-cli-src-lib.open-store-recovering work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn open_store_recovering(root: &Path) -> Result<(Store, Option<std::path::PathBuf>)> {
+    let dir = state_dir(root);
+    std::fs::create_dir_all(&dir)?;
+    Ok(Store::open_recovering(&db_path(root), root)?)
+}
+
+// trace:exempt reason=internal-detail
+pub fn report_quarantine(quarantined: &Option<std::path::PathBuf>) {
+    if let Some(q) = quarantined {
+        eprintln!(
+            "warning: existing index was corrupt (malformed database); quarantined to {} and rebuilding from scratch.",
+            q.display()
+        );
+    }
+}
+
 pub fn recompile(store: &Store) -> Result<scc_graph::RecompileReport> {
     Ok(scc_graph::recompile(store)?)
 }
@@ -205,7 +222,9 @@ impl Compiler<'_> {
 
 // trace:exempt reason=internal-detail
 pub fn index_and_recompile(root: &Path, config: &Config) -> Result<scc_indexer::IndexReport> {
-    let indexer = scc_indexer::Indexer::new(open_store(root)?, config.clone());
+    let (store, quarantined) = open_store_recovering(root)?;
+    report_quarantine(&quarantined);
+    let indexer = scc_indexer::Indexer::new(store, config.clone());
     let report = indexer.index()?;
     let store = open_store(root)?;
     // Wave 4 §24 lazy semantic enrichment: when auto_resolve is on, run the

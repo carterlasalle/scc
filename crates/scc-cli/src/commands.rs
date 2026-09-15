@@ -55,7 +55,8 @@ pub fn cmd_index(root: &Path, quiet: bool) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-index-paths work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_index_paths(root: &Path, paths: &[String], quiet: bool) -> crate::Result<()> {
     let config = load_config(root)?;
-    let store = open_store(root)?;
+    let (store, quarantined) = crate::open_store_recovering(root)?;
+    crate::report_quarantine(&quarantined);
     let indexer = scc_indexer::Indexer::new(crate::open_store(root)?, config.clone());
     let report = indexer.refresh_paths(paths)?;
     drop(indexer);

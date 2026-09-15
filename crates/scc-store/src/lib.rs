@@ -501,6 +501,56 @@ impl Store {
     /// rooted at `root`. `root` must exist. A truncated or garbage existing
     /// file is refused rather than migrated into a fake empty index.
     // trace:exempt reason=internal-detail
+    /// Open, quarantining a corrupt database aside and starting fresh.
+    /// ONLY for the index write path: a malformed file is renamed to
+    /// `<name>.corrupt-<epoch>` (evidence preserved, WAL sidecars moved
+    /// with it) and indexing rebuilds from the working tree. Readers keep
+    /// using [`Store::open`] and fail loudly — a freshly rebuilt index is
+    /// temporarily incomplete and must never be silently presented as
+    /// truth on a read path. Returns the quarantine path when recovery ran.
+    // trace:v1 id=impl.scc.store.open-recovering work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    pub fn open_recovering(path: &Path, root: &Path) -> Result<(Store, Option<PathBuf>)> {
+        match Self::open(path, root) {
+            Ok(store) => Ok((store, None)),
+            Err(e) if Self::is_corruption(&e) => {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let quarantine = path.with_extension(format!("db.corrupt-{stamp}"));
+                let _ = std::fs::rename(path, &quarantine);
+                for suffix in ["-wal", "-shm", "-journal"] {
+                    let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
+                    if sidecar.is_file() {
+                        let dest = PathBuf::from(format!("{}{suffix}", quarantine.display()));
+                        let _ = std::fs::rename(&sidecar, &dest);
+                    }
+                }
+                let store = Self::open(path, root)?;
+                Ok((store, Some(quarantine)))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// True for corruption (as opposed to e.g. missing files or permission
+    /// errors): the explicit Corrupt refusal plus SQLite's own malformed /
+    /// not-a-database errors, which surface lazily on first query despite a
+    /// valid-looking header.
+    // trace:exempt reason=internal-detail
+    fn is_corruption(e: &StoreError) -> bool {
+        match e {
+            StoreError::Corrupt(_) => true,
+            StoreError::Sqlite(inner) => {
+                let m = inner.to_string();
+                m.contains("malformed")
+                    || m.contains("not a database")
+                    || m.contains("database disk image")
+            }
+            _ => false,
+        }
+    }
+
         // trace:v1 id=impl.scc.store.stable-identity work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     pub fn open(path: &Path, root: &Path) -> Result<Store> {
         let existed_nonempty = path.is_file()
@@ -2625,6 +2675,32 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
         (store, dir)
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.store.recovering-open-quarantines-malformed verifies=REQ-SI-503JSBGP exercises=impl.scc.store.open-recovering
+    fn recovering_open_quarantines_malformed_db() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let db = dir.path().join("scc.db");
+        // garbage with a valid SQLite header prefix still fails lazily:
+        // write a valid header followed by garbage pages.
+        let mut bytes = b"SQLite format 3\0".to_vec();
+        bytes.resize(4096, 0xFF);
+        std::fs::write(&db, &bytes).unwrap();
+        let (store, quarantined) = Store::open_recovering(&db, &root).unwrap();
+        let q = quarantined.expect("corrupt db must be quarantined");
+        assert!(q.is_file(), "quarantine evidence preserved");
+        // fresh store is fully usable
+        let v: i64 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(v >= 0);
+        // non-corrupt opens never quarantine
+        let (_, q2) = Store::open_recovering(&db, &root).unwrap();
+        assert!(q2.is_none(), "healthy db must not quarantine");
     }
 
     #[test]
