@@ -43,3 +43,4 @@ coverage.lcov
 coverage.xml
 htmlcov/
 junit.xml
+.scc/

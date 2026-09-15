@@ -93,6 +93,13 @@ pub fn compute_impact(
         .iter()
         .map(|f| scc_core::entity_id(&graph.repo_id, kinds::FILE, f))
         .collect();
+    // Ghost inputs must never produce a confident report: partition the
+    // requested files into indexed vs unknown. Unknown targets are reported
+    // in notes (partial) or refuse the whole query (all unknown).
+    let (resolved_files, unresolved_files): (Vec<&String>, Vec<&String>) =
+        files.iter().partition(|f| {
+            view.entity(&scc_core::entity_id(&graph.repo_id, kinds::FILE, f)).is_some()
+        });
     let sym_ids: HashSet<String> = symbols
         .iter()
         .map(|s| scc_core::symbol_id(&graph.repo_id, "?", s))
@@ -130,6 +137,22 @@ pub fn compute_impact(
         }
     }
 
+    if !files.is_empty() && resolved_files.is_empty() && resolved_sym_ids.is_empty() {
+        let mut unknown: Vec<String> = unresolved_files.iter().map(|s| s.to_string()).collect();
+        unknown.extend(symbols.iter().filter(|s| {
+            !resolved_sym_ids.iter().any(|r| r == *s || r.ends_with(&format!("/{s}")))
+        }).cloned());
+        unknown.sort();
+        unknown.dedup();
+        return Err(crate::GraphError::Impact(format!(
+            "unknown target(s) {} — not in the index; refusing to fabricate",
+            unknown.join(", ")
+        )));
+    }
+    for f in &unresolved_files {
+        imp.notes.push(format!("unknown target '{f}': not in index, excluded from analysis"));
+    }
+
     // affected components: components containing affected files or symbols
     let mut affected_comps: BTreeSet<String> = BTreeSet::new();
     let comps = store.components()?;
@@ -156,7 +179,7 @@ pub fn compute_impact(
                     .collect()
             })
             .unwrap_or_default();
-        for f in files {
+        for f in &resolved_files {
             let seg = component_for_path(f, &component_candidates(&comps));
             if seg == c.name {
                 affected_comps.insert(c.id.clone());
@@ -412,6 +435,21 @@ mod tests {
         assert!(imp.components.is_empty());
         assert_eq!(imp.risk, "low");
         assert!(imp.forgotten_partners.is_empty());
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.impact.ghost-target-refused verifies=REQ-SI-503JSBGP exercises=impl.scc.impact
+    fn ghost_target_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let g = crate::RealityGraph::load(&store).unwrap();
+        let v = TrustedGraphView::new(&g, &store, &[], crate::TrustPolicy::default());
+        let err = compute_impact(&v, &store, &["src/handle.rs".into()], &[])
+            .expect_err("nonexistent path must not produce a report");
+        assert!(err.to_string().contains("refusing to fabricate"), "{err}");
+        assert!(err.to_string().contains("src/handle.rs"), "{err}");
     }
 
     #[test]

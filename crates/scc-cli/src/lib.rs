@@ -107,6 +107,56 @@ pub fn open_store(root: &Path) -> Result<Store> {
     Ok(Store::open(&db_path(root), root)?)
 }
 
+/// Ensure `.scc/` is gitignored so the index cache never pollutes the
+/// repo's own git status or gets committed. Idempotent: appends the line
+/// once, creates `.gitignore` when absent, never touches other lines.
+// trace:v1 id=impl.crates-scc-cli-src-lib.ensure-scc-ignored work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn ensure_scc_ignored(root: &Path) {
+    let gi = root.join(".gitignore");
+    let content = std::fs::read_to_string(&gi).unwrap_or_default();
+    if content.lines().any(|l| l.trim() == ".scc/" || l.trim() == ".scc") {
+        return;
+    }
+    let mut out = content;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(".scc/\n");
+    let _ = std::fs::write(&gi, out);
+}
+
+/// True when an indexing failure is store corruption surfacing anywhere in
+/// the error chain (open, mid-index read, recompile) — not just at open.
+/// Corruption can hide behind a valid header and detonate on first touch of
+/// a bad page, so the write path retries from quarantine on any of these.
+// trace:exempt reason=internal-detail
+pub fn is_store_corruption(e: &CliError) -> bool {
+    match e {
+        CliError::Store(s) => Store::is_corruption(s),
+        CliError::Index(scc_indexer::IndexError::Store(s)) => Store::is_corruption(s),
+        CliError::Graph(scc_graph::GraphError::Store(s)) => Store::is_corruption(s),
+        _ => false,
+    }
+}
+
+/// Run an index write; on store corruption anywhere in the attempt,
+/// quarantine the database and retry exactly once from scratch.
+// trace:v1 id=impl.crates-scc-cli-src-lib.resilient-index work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn resilient_index<T>(
+    root: &Path,
+    mut attempt: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    match attempt() {
+        Ok(v) => Ok(v),
+        Err(e) if is_store_corruption(&e) => {
+            let q = Store::quarantine_db(&db_path(root))?;
+            report_quarantine(&Some(q));
+            attempt()
+        }
+        Err(e) => Err(e),
+    }
+}
+
 // trace:v1 id=impl.crates-scc-cli-src-lib.open-store-recovering work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn open_store_recovering(root: &Path) -> Result<(Store, Option<std::path::PathBuf>)> {
     let dir = state_dir(root);
@@ -222,8 +272,10 @@ impl Compiler<'_> {
 
 // trace:exempt reason=internal-detail
 pub fn index_and_recompile(root: &Path, config: &Config) -> Result<scc_indexer::IndexReport> {
-    let (store, quarantined) = open_store_recovering(root)?;
-    report_quarantine(&quarantined);
+    ensure_scc_ignored(root);
+    resilient_index(root, || {
+        let (store, quarantined) = open_store_recovering(root)?;
+        report_quarantine(&quarantined);
     let indexer = scc_indexer::Indexer::new(store, config.clone());
     let report = indexer.index()?;
     let store = open_store(root)?;
@@ -242,10 +294,11 @@ pub fn index_and_recompile(root: &Path, config: &Config) -> Result<scc_indexer::
     // include derived facts (components, boundaries, flows). Recording
     // before recompile leaves history one recompile behind — V2 content
     // dedup exposed this ordering bug.
-    let _ = store.record_current_revision_with_config(
-        &scc_indexer::semantic_config_hash(config),
-    )?;
-    Ok(report)
+        let _ = store.record_current_revision_with_config(
+            &scc_indexer::semantic_config_hash(config),
+        )?;
+        Ok(report)
+    })
 }
 
 /// Run semantic resolution on demand (`--resolve`), then recompile the

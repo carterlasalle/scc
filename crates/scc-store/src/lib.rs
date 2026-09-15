@@ -448,6 +448,7 @@ pub struct Store {
     /// Repository id (repo:// id component).
     pub repo_id: String,
     pub repo_name: String,
+    batch_depth: std::sync::atomic::AtomicUsize,
 }
 
 const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
@@ -496,6 +497,34 @@ fn probe_existing_schema(conn: &Connection) -> Result<()> {
 }
 
 // trace:exempt reason=internal-detail
+struct NestGuard<'c> {
+    conn: &'c Connection,
+    committed: bool,
+}
+
+// trace:exempt reason=internal-detail
+impl NestGuard<'_> {
+    // trace:exempt reason=internal-detail
+    fn commit(mut self) -> Result<()> {
+        self.committed = true;
+        self.conn.execute_batch("RELEASE scc_nest")?;
+        Ok(())
+    }
+}
+
+// trace:exempt reason=internal-detail
+impl Drop for NestGuard<'_> {
+    // trace:exempt reason=internal-detail
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = self
+                .conn
+                .execute_batch("ROLLBACK TO scc_nest; RELEASE scc_nest;");
+        }
+    }
+}
+
+// trace:exempt reason=internal-detail
 impl Store {
     /// Open (creating if needed) the SCC database at `path` for repository
     /// rooted at `root`. `root` must exist. A truncated or garbage existing
@@ -513,19 +542,7 @@ impl Store {
         match Self::open(path, root) {
             Ok(store) => Ok((store, None)),
             Err(e) if Self::is_corruption(&e) => {
-                let stamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let quarantine = path.with_extension(format!("db.corrupt-{stamp}"));
-                let _ = std::fs::rename(path, &quarantine);
-                for suffix in ["-wal", "-shm", "-journal"] {
-                    let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
-                    if sidecar.is_file() {
-                        let dest = PathBuf::from(format!("{}{suffix}", quarantine.display()));
-                        let _ = std::fs::rename(&sidecar, &dest);
-                    }
-                }
+                let quarantine = Self::quarantine_db(path)?;
                 let store = Self::open(path, root)?;
                 Ok((store, Some(quarantine)))
             }
@@ -533,12 +550,33 @@ impl Store {
         }
     }
 
+    /// Move a corrupt database (plus WAL sidecars) aside as
+    /// `<name>.db.corrupt-<epoch>`. Evidence preserved; the path is free
+    /// for a fresh rebuild.
+    // trace:exempt reason=internal-detail
+    pub fn quarantine_db(path: &Path) -> Result<PathBuf> {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let quarantine = path.with_extension(format!("db.corrupt-{stamp}"));
+        let _ = std::fs::rename(path, &quarantine);
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
+            if sidecar.is_file() {
+                let dest = PathBuf::from(format!("{}{suffix}", quarantine.display()));
+                let _ = std::fs::rename(&sidecar, &dest);
+            }
+        }
+        Ok(quarantine)
+    }
+
     /// True for corruption (as opposed to e.g. missing files or permission
     /// errors): the explicit Corrupt refusal plus SQLite's own malformed /
     /// not-a-database errors, which surface lazily on first query despite a
     /// valid-looking header.
     // trace:exempt reason=internal-detail
-    fn is_corruption(e: &StoreError) -> bool {
+    pub fn is_corruption(e: &StoreError) -> bool {
         match e {
             StoreError::Corrupt(_) => true,
             StoreError::Sqlite(inner) => {
@@ -549,6 +587,64 @@ impl Store {
             }
             _ => false,
         }
+    }
+
+    /// Begin a write batch: the outermost begin issues BEGIN IMMEDIATE,
+    /// nested begins are depth-counted no-ops. Pair with [`Store::batch_end`]
+    /// (commit at depth zero) or [`Store::batch_abort`] (full rollback).
+    /// Lets one commit cover a whole file's facts instead of one fsync per
+    /// row — the dominant index-time cost on fsync-bound disks.
+    // trace:exempt reason=internal-detail
+    pub fn batch_begin(&self) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        if self.batch_depth.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        }
+        Ok(())
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn batch_end(&self) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        if self.batch_depth.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.conn.execute_batch("COMMIT")?;
+        }
+        Ok(())
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn batch_abort(&self) {
+        use std::sync::atomic::Ordering;
+        if self.batch_depth.swap(0, Ordering::SeqCst) > 0 {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+    }
+
+    /// Run `f` inside a batch: commit on success, full rollback on error.
+    /// Per-file callers use this so a failed file leaves no partial facts.
+    // trace:v1 id=impl.scc.store.batch-writes work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+    pub fn batch_write<T, E>(&self, f: impl FnOnce() -> std::result::Result<T, E>) -> std::result::Result<T, E>
+    where
+        E: From<StoreError>,
+    {
+        self.batch_begin()?;
+        match f() {
+            Ok(v) => self.batch_end().map_err(E::from).map(|_| v),
+            Err(e) => {
+                self.batch_abort();
+                Err(e)
+            }
+        }
+    }
+
+    /// Nest-safe unit of work inside a batch: a savepoint when a batch is
+    /// open (plain statements join the batch directly), else a standalone
+    /// transaction exactly as before. Replaces every `unchecked_transaction`
+    /// so batched and unbatched callers share the code path.
+    // trace:exempt reason=internal-detail
+    fn nest(&self) -> Result<NestGuard<'_>> {
+        self.conn.execute_batch("SAVEPOINT scc_nest")?;
+        Ok(NestGuard { conn: &self.conn, committed: false })
     }
 
         // trace:v1 id=impl.scc.store.stable-identity work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
@@ -568,6 +664,10 @@ impl Store {
         }
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
+        // NORMAL is durable under WAL for app crashes (only OS/power loss
+        // can lose the tail) and removes the per-commit fsync stall that
+        // dominated index time. The index is rebuildable cache regardless.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         apply_migrations(&conn)?;
 
@@ -599,6 +699,7 @@ impl Store {
             root,
             repo_id,
             repo_name: name,
+            batch_depth: std::sync::atomic::AtomicUsize::new(0),
         };
         store.ensure_repository()?;
         if id_source == "persistent" {
@@ -928,11 +1029,11 @@ impl Store {
     /// derived occurrence count naturally reflects the survivors.
 // trace:exempt reason=internal-detail
     pub fn purge_path(&self, path: &str) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
+        let _sp = self.nest()?;
         // concepts this path's occurrences attach to — captured before any
         // deletion so their provenance can be recomputed afterwards
         let affected_concepts: Vec<String> = {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT DISTINCT r.object FROM relationships r
                  JOIN entities e ON e.id = r.subject
                  WHERE r.predicate = ?1 AND e.kind = ?2 AND e.sources LIKE ?3",
@@ -955,7 +1056,7 @@ impl Store {
         };
         // this path's occurrence entities (for edge + FTS cleanup)
         let occ_ids: Vec<String> = {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT id FROM entities WHERE kind = ?1 AND sources LIKE ?2",
             )?;
             let rows = stmt.query_map(
@@ -970,7 +1071,7 @@ impl Store {
         };
         // symbol entities: repo://{repo}/symbol/{path}/{name}
         let ev_ids: Vec<String> = {
-            let mut stmt = tx.prepare("SELECT id FROM evidence WHERE path = ?1")?;
+            let mut stmt = self.conn.prepare("SELECT id FROM evidence WHERE path = ?1")?;
             let rows = stmt.query_map(params![path], |r| r.get::<_, String>(0))?;
             let mut v = Vec::new();
             for r in rows {
@@ -980,7 +1081,7 @@ impl Store {
         };
         // collect the file's symbol names before deleting them
         let sym_names: Vec<String> = {
-            let mut stmt = tx.prepare("SELECT name FROM symbols WHERE file = ?1")?;
+            let mut stmt = self.conn.prepare("SELECT name FROM symbols WHERE file = ?1")?;
             let rows = stmt.query_map(params![path], |r| r.get::<_, String>(0))?;
             let mut v = Vec::new();
             for r in rows {
@@ -988,15 +1089,15 @@ impl Store {
             }
             v
         };
-        tx.execute("DELETE FROM symbols WHERE file = ?1", params![path])?;
-        tx.execute("DELETE FROM imports WHERE file = ?1", params![path])?;
-        tx.execute("DELETE FROM evidence WHERE path = ?1", params![path])?;
+        self.conn.execute("DELETE FROM symbols WHERE file = ?1", params![path])?;
+        self.conn.execute("DELETE FROM imports WHERE file = ?1", params![path])?;
+        self.conn.execute("DELETE FROM evidence WHERE path = ?1", params![path])?;
         // relationships pointing at this file's symbol entities (calls from
         // unchanged files into removed symbols must not dangle)
         let mut orphaned_evidence: Vec<String> = Vec::new();
         for name in sym_names {
             let sid = scc_core::symbol_id(&self.repo_id, path, &name);
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT id, evidence FROM relationships WHERE subject = ?1 OR object = ?1",
             )?;
             let rows = stmt.query_map(params![sid], |r| {
@@ -1011,14 +1112,14 @@ impl Store {
                 if let Ok(ev_ids) = serde_json::from_str::<Vec<String>>(&ev_json) {
                     orphaned_evidence.extend(ev_ids);
                 }
-                tx.execute("DELETE FROM relationships WHERE id = ?1", params![rid])?;
+                self.conn.execute("DELETE FROM relationships WHERE id = ?1", params![rid])?;
             }
         }
         // NOTE: evidence referenced only by deleted relationships is swept
         // later by `sweep_orphan_evidence` after the derived layer rebuilds
         // (component/flow edges may still reference it until then).
         let _ = orphaned_evidence;
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM entities WHERE id LIKE ?1",
             params![format!("%/symbol/{path}/%")],
         )?;
@@ -1027,7 +1128,7 @@ impl Store {
         // (kind, name) across files and handled below from their live
         // occurrences — a shared concept must never be deleted because one
         // of its files was purged.
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM entities WHERE sources LIKE ?1 AND kind NOT IN (?2, ?3)",
             params![
                 format!("%\"{path}\"%"),
@@ -1035,31 +1136,31 @@ impl Store {
                 scc_core::kinds::REACTIVE
             ],
         )?;
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM relationships WHERE source_path = ?1",
             params![path],
         )?;
         // relationships referencing removed evidence ids
         for ev in ev_ids {
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM relationships WHERE evidence LIKE ?1",
                 params![format!("%\"{ev}\"%")],
             )?;
         }
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM tests WHERE file = ?1",
             params![path],
         )?;
         // occurrence entities: delete their edges + FTS rows, then the
         // entities themselves
         for oid in &occ_ids {
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM relationships WHERE subject = ?1 OR object = ?1",
                 params![oid],
             )?;
-            tx.execute("DELETE FROM entities_fts WHERE id = ?1", params![oid])?;
+            self.conn.execute("DELETE FROM entities_fts WHERE id = ?1", params![oid])?;
         }
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM entities WHERE kind = ?1 AND sources LIKE ?2",
             params![scc_core::kinds::OCCURRENCE, format!("%\"{path}\"%")],
         )?;
@@ -1069,7 +1170,7 @@ impl Store {
         // its edges are gone.
         for concept in &affected_concepts {
             let remaining: Vec<String> = {
-                let mut stmt = tx.prepare(
+                let mut stmt = self.conn.prepare(
                     "SELECT DISTINCT json_extract(e.attributes, '$.path') FROM entities e
                      JOIN relationships r ON r.subject = e.id
                      WHERE r.predicate = ?1 AND r.object = ?2 AND e.kind = ?3
@@ -1091,20 +1192,20 @@ impl Store {
                 v
             };
             if remaining.is_empty() {
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM relationships WHERE subject = ?1 OR object = ?1",
                     params![concept],
                 )?;
-                tx.execute("DELETE FROM entities_fts WHERE id = ?1", params![concept])?;
-                tx.execute("DELETE FROM entities WHERE id = ?1", params![concept])?;
+                self.conn.execute("DELETE FROM entities_fts WHERE id = ?1", params![concept])?;
+                self.conn.execute("DELETE FROM entities WHERE id = ?1", params![concept])?;
             } else {
-                tx.execute(
+                self.conn.execute(
                     "UPDATE entities SET sources = ?1 WHERE id = ?2",
                     params![serde_json::to_string(&remaining)?, concept],
                 )?;
             }
         }
-        tx.commit()?;
+        _sp.commit()?;
         Ok(())
     }
 
@@ -1150,7 +1251,7 @@ impl Store {
     /// Remove all indexed facts (used by full reindex).
     // trace:exempt reason=internal-detail
     pub fn purge_all(&self) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
+        let _sp = self.nest()?;
         for table in [
             "symbols",
             "entities",
@@ -1163,11 +1264,11 @@ impl Store {
             "context_cache",
             "drift_findings",
         ] {
-            tx.execute(&format!("DELETE FROM {table}"), [])?;
+            self.conn.execute(&format!("DELETE FROM {table}"), [])?;
         }
-        tx.execute("DELETE FROM files", [])?;
-        tx.execute("DELETE FROM snapshots", [])?;
-        tx.commit()?;
+        self.conn.execute("DELETE FROM files", [])?;
+        self.conn.execute("DELETE FROM snapshots", [])?;
+        _sp.commit()?;
         Ok(())
     }
 
@@ -1255,15 +1356,15 @@ impl Store {
 
     // trace:exempt reason=internal-detail
     pub fn insert_imports(&self, file: &str, imports: &[(String, Vec<(String, String)>, u32, String)]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM imports WHERE file = ?1", params![file])?;
+        let _sp = self.nest()?;
+        self.conn.execute("DELETE FROM imports WHERE file = ?1", params![file])?;
         for (module, names, line, typ) in imports {
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO imports (file, module, names, line, type) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![file, module, serde_json::to_string(names)?, *line as i64, typ],
             )?;
         }
-        tx.commit()?;
+        _sp.commit()?;
         Ok(())
     }
 
@@ -1771,15 +1872,15 @@ impl Store {
 
     // trace:exempt reason=internal-detail
     pub fn replace_components(&self, components: &[Entity]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM components", [])?;
+        let _sp = self.nest()?;
+        self.conn.execute("DELETE FROM components", [])?;
         // INSERT OR REPLACE only covers ids still present. A clustering
         // topology change (merged `root+services` splitting back into
         // `root` + `services`) must drop the vanished derived entities or
         // System IR export keeps stale component nodes.
         let keep: HashSet<&str> = components.iter().map(|c| c.id.as_str()).collect();
         let stale: Vec<String> = {
-            let mut stmt = tx.prepare("SELECT id FROM entities WHERE kind = ?1")?;
+            let mut stmt = self.conn.prepare("SELECT id FROM entities WHERE kind = ?1")?;
             let rows = stmt.query_map(params![scc_core::kinds::COMPONENT], |r| {
                 r.get::<_, String>(0)
             })?;
@@ -1793,11 +1894,11 @@ impl Store {
             v
         };
         for id in &stale {
-            tx.execute("DELETE FROM entities WHERE id = ?1", params![id])?;
-            tx.execute("DELETE FROM entities_fts WHERE id = ?1", params![id])?;
+            self.conn.execute("DELETE FROM entities WHERE id = ?1", params![id])?;
+            self.conn.execute("DELETE FROM entities_fts WHERE id = ?1", params![id])?;
         }
         for c in components {
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO components (id, name, kind, responsibility, implementation, evidence, attributes)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
@@ -1810,16 +1911,16 @@ impl Store {
                     serde_json::to_string(&c.attributes)?,
                 ],
             )?;
-            tx.execute(
+            self.conn.execute(
                 "INSERT OR REPLACE INTO entities (id, kind, name, attributes, evidence, sources) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![c.id, c.kind, c.name, serde_json::to_string(&c.attributes)?, serde_json::to_string(&c.evidence)?, "[]"],
             )?;
-            tx.execute(
+            self.conn.execute(
                 "INSERT OR REPLACE INTO entities_fts (id, kind, name, attributes) VALUES (?1, ?2, ?3, ?4)",
                 params![c.id, c.kind, c.name, serde_json::to_string(&c.attributes)?],
             )?;
         }
-        tx.commit()?;
+        _sp.commit()?;
         Ok(())
     }
 
@@ -1867,17 +1968,17 @@ impl Store {
 
     // trace:exempt reason=internal-detail
     pub fn replace_flow_graphs(&self, graphs: &[scc_core::FlowGraph]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM flow_graphs", [])?;
+        let _sp = self.nest()?;
+        self.conn.execute("DELETE FROM flow_graphs", [])?;
         for g in graphs {
             let kind = scc_core::flow_kind_str(&g.kind);
             let trigger = g.trigger.clone().unwrap_or_default();
-            tx.execute(
+            self.conn.execute(
                 "INSERT OR REPLACE INTO flow_graphs (id, kind, name, trigger, graph) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![g.id, kind, g.name, trigger, serde_json::to_string(g)?],
             )?;
         }
-        tx.commit()?;
+        _sp.commit()?;
         Ok(())
     }
 
@@ -1899,10 +2000,10 @@ impl Store {
 
     // trace:exempt reason=internal-detail
     pub fn replace_flows(&self, flows: &[Flow]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM flows", [])?;
+        let _sp = self.nest()?;
+        self.conn.execute("DELETE FROM flows", [])?;
         for f in flows {
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO flows (id, kind, name, trigger, steps, attributes) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     f.id,
@@ -1914,7 +2015,7 @@ impl Store {
                 ],
             )?;
         }
-        tx.commit()?;
+        _sp.commit()?;
         Ok(())
     }
 
@@ -1979,10 +2080,10 @@ impl Store {
 
     // trace:exempt reason=internal-detail
     pub fn replace_invariants(&self, invariants: &[Invariant]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM invariants", [])?;
+        let _sp = self.nest()?;
+        self.conn.execute("DELETE FROM invariants", [])?;
         for inv in invariants {
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO invariants (id, statement, severity, scope, enforced_by, provenance, evidence)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
@@ -1996,7 +2097,7 @@ impl Store {
                 ],
             )?;
         }
-        tx.commit()?;
+        _sp.commit()?;
         Ok(())
     }
 
@@ -2195,15 +2296,15 @@ impl Store {
 
     // trace:exempt reason=internal-detail
     pub fn replace_intent_claims(&self, claims: &[(String, serde_json::Value)]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM intent_claims", [])?;
+        let _sp = self.nest()?;
+        self.conn.execute("DELETE FROM intent_claims", [])?;
         for (source, claim) in claims {
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO intent_claims (source, claim, created_at) VALUES (?1, ?2, ?3)",
                 params![source, serde_json::to_string(claim)?, scc_core::now_rfc3339()],
             )?;
         }
-        tx.commit()?;
+        _sp.commit()?;
         // declared intent changed — invalidate epoch-keyed packs
         self.bump_epoch(ModelEpochKind::Intent)?;
         Ok(())

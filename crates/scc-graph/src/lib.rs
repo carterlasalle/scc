@@ -39,11 +39,14 @@ use scc_store::Store;
 use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
+// trace:exempt reason=internal-detail
 pub enum GraphError {
     #[error("store: {0}")]
     Store(#[from] scc_store::StoreError),
     #[error("cochange: {0}")]
     Cochange(String),
+    #[error("impact: {0}")]
+    Impact(String),
 }
 
 pub type Result<T> = std::result::Result<T, GraphError>;

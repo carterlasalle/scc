@@ -324,20 +324,23 @@ impl Indexer {
             // Single-read invariant (§18): `content` is the extract loop's
             // canonical text; the hash above is the scan-time blake3 over
             // raw bytes. Never re-read here.
-            writer.write_source(path, &f.hash, ef, &resolved_imports, &resolved_calls, &index)?;
-            record_file_quality(&mut quality_map, path, f.language, &resolved_calls);
-            self.store
-                .upsert_file(path, &f.hash, f.language.as_str(), f.kind.as_str(), f.size)?;
-            configrefs::apply_config_refs(
-                &self.store,
-                path,
-                f.language.as_str(),
-                content,
-                cfg_hits.clone(),
-            )
-            .map_err(IndexError::ConfigRefs)?;
-            failures::apply_failures(&self.store, path, f.language.as_str(), fail_hits.clone())
-                .map_err(IndexError::Failures)?;
+            self.store.batch_write(|| {
+                writer.write_source(path, &f.hash, ef, &resolved_imports, &resolved_calls, &index)?;
+                record_file_quality(&mut quality_map, path, f.language, &resolved_calls);
+                self.store
+                    .upsert_file(path, &f.hash, f.language.as_str(), f.kind.as_str(), f.size)?;
+                configrefs::apply_config_refs(
+                    &self.store,
+                    path,
+                    f.language.as_str(),
+                    content,
+                    cfg_hits.clone(),
+                )
+                .map_err(IndexError::ConfigRefs)?;
+                failures::apply_failures(&self.store, path, f.language.as_str(), fail_hits.clone())
+                    .map_err(IndexError::Failures)?;
+                Ok::<(), IndexError>(())
+            })?;
             report.indexed += 1;
         }
         save_quality_files(&self.store, &quality_map)?;
@@ -674,20 +677,23 @@ impl Indexer {
             let writer = write::Writer::new(&self.store, &self.store.repo_id, revision);
             // Single-read invariant (§18): `content` is the extract loop's
             // canonical text; hash is the scan-time blake3 over raw bytes.
-            writer.write_source(path, &f.hash, ef, &resolved_imports, &resolved_calls, &index)?;
-            record_file_quality(&mut quality_map, path, f.language, &resolved_calls);
-            self.store
-                .upsert_file(path, &f.hash, f.language.as_str(), f.kind.as_str(), f.size)?;
-            configrefs::apply_config_refs(
-                &self.store,
-                path,
-                f.language.as_str(),
-                content,
-                cfg_hits.clone(),
-            )
-            .map_err(IndexError::ConfigRefs)?;
-            failures::apply_failures(&self.store, path, f.language.as_str(), fail_hits.clone())
-                .map_err(IndexError::Failures)?;
+            self.store.batch_write(|| {
+                writer.write_source(path, &f.hash, ef, &resolved_imports, &resolved_calls, &index)?;
+                record_file_quality(&mut quality_map, path, f.language, &resolved_calls);
+                self.store
+                    .upsert_file(path, &f.hash, f.language.as_str(), f.kind.as_str(), f.size)?;
+                configrefs::apply_config_refs(
+                    &self.store,
+                    path,
+                    f.language.as_str(),
+                    content,
+                    cfg_hits.clone(),
+                )
+                .map_err(IndexError::ConfigRefs)?;
+                failures::apply_failures(&self.store, path, f.language.as_str(), fail_hits.clone())
+                    .map_err(IndexError::Failures)?;
+                Ok::<(), IndexError>(())
+            })?;
             report.indexed += 1;
         }
         save_quality_files(&self.store, &quality_map)?;

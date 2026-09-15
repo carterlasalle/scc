@@ -349,6 +349,33 @@ pub fn scan_repo_with_stats(
         .parents(true)
         .follow_links(false)
         .require_git(false);
+    // Descent pruning for the configured ignore globs: gitignored dirs are
+    // already pruned by the WalkBuilder, but config-only globs (target/,
+    // node_modules/ on repos without a .gitignore, …) would otherwise be
+    // walked file-by-file and filtered after the fact. A dir whose entire
+    // subtree is ignored is never descended. `.scc` still descends: only
+    // `.scc/intent.yaml` is scannable and the per-file filter keeps it.
+    let filter_root = root.to_path_buf();
+    let filter_config = config.clone();
+    builder.filter_entry(move |e| {
+        let config = &filter_config;
+        if e.depth() == 0 {
+            return true;
+        }
+        let rel = match e.path().strip_prefix(&filter_root) {
+            Ok(r) => r,
+            Err(_) => return true,
+        };
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if rel_str.is_empty() || rel_str == ".scc" {
+            return true;
+        }
+        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            return !is_ignored(&rel_str, config)
+                && !is_ignored(&format!("{rel_str}/.scc-probe"), config);
+        }
+        true
+    });
 
     // One canonical root for the whole walk: canonicalization is a
     // syscall per file when left inside the loop below.

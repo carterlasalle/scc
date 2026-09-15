@@ -19,6 +19,7 @@ pub fn cmd_init(root: &Path) -> crate::Result<()> {
     }
     // create the DB so the workspace is ready
     let store = open_store(root)?;
+    crate::ensure_scc_ignored(root);
     println!(
         "initialized SCC workspace for repository '{}' at {}",
         store.repo_name,
