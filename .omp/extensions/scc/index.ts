@@ -107,7 +107,7 @@ const maybeNotifyUpdate = async (
 // /resume/compaction).
 const startupInjected = new Set<string>();
 
-type DirtySnap = { head: string; files: Map<string, string> };
+type DirtySnap = { head: string; files: Map<string, string>; capped?: boolean };
 
 // toolCallId -> fingerprint map captured on tool_call for opaque tools.
 // Only stored when event.toolCallId is present (no timestamp fallback).
@@ -329,6 +329,20 @@ const parsePorcelainZ = (out: string): string[] => {
 // so an already-dirty file that bash mutates further is still detected.
 // HEAD is recorded so a clean commit/checkout (empty dirty maps) still
 // refreshes SCC.
+// Dependency/build output dirs: never fingerprinted (thousands of files
+// SCC itself ignores) and never indexed — hashing them only burns spawns
+// and turns every `npm install` into a false full re-index.
+// trace:exempt reason=const-data
+const SKIP_DIRS = new Set([
+  "node_modules", ".venv", "venv", ".tox", "target", "dist", "build",
+  "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "vendor",
+  ".scc", ".hg", ".svn", ".git",
+]);
+// trace:exempt reason=const-data
+const MAX_HASH_FILES = 300;
+// trace:exempt reason=internal-detail
+const isIndexRelevant = (p: string): boolean =>
+  !p.split("/").some((seg) => SKIP_DIRS.has(seg));
 // trace:exempt reason=internal-helper
 const snapshotDirty = async (pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<DirtySnap> => {
   const map = new Map<string, string>();
@@ -342,7 +356,15 @@ const snapshotDirty = async (pi: ExtensionAPI, cwd: string, signal?: AbortSignal
       if (p) names.add(p);
     }
   }
-  for (const p of names) {
+  const relevant = [...names].filter(isIndexRelevant);
+  if (relevant.length > MAX_HASH_FILES) {
+    // Giant change (or a fresh node_modules): per-file hashing would need
+    // hundreds of spawns. Record nothing and let the caller fall back to a
+    // full refresh — one debounced `scc index` instead of N timeouts.
+    logEvent(cwd, "snapshot-cap-hit", { files: relevant.length });
+    return { head, files: map, capped: true };
+  }
+  for (const p of relevant) {
     const h = await execBin(pi, "git", ["hash-object", "--", p], cwd, SNAPSHOT_MS, signal);
     map.set(p, h.code === 0 && h.out.trim() ? h.out.trim() : "missing");
   }
@@ -534,6 +556,7 @@ export default function hook(pi: ExtensionAPI): void {
       const before = id ? dirtySnapshots.get(id) : undefined;
       if (id) dirtySnapshots.delete(id);
       const after = await snapshotDirty(pi, ctx.cwd, dl.signal);
+      if (after.capped || before?.capped) fullRefresh = true;
       if (before) {
         paths.push(...fileFingerprintDiff(before.files, after.files));
         if (before.head && after.head && before.head !== after.head) {
