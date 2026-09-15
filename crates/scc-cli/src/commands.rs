@@ -4,7 +4,7 @@ use crate::{checkpoint, compiler, config_path, load_config, open_store, recompil
 use scc_core::kinds;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-init work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_init(root: &Path) -> crate::Result<()> {
@@ -1487,6 +1487,101 @@ pub fn cmd_setup_claude(root: &Path) -> crate::Result<()> {
     crate::plugin::install(root)
 }
 
+// Setup targets for harness auto-detection. Hermes is deliberately absent:
+// it installs into a home directory outside the repo (different trust
+// domain), so it stays an explicit opt-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// trace:exempt reason=internal-detail
+pub enum SetupHarness {
+    Claude,
+    Codex,
+    Opencode,
+    Omp,
+    Pi,
+}
+
+// Pure detection: a harness counts as present when its binary is on PATH
+// or its home/config dir exists (or, for project-local OMP/Pi, the repo
+// already carries the harness dir). `path_dirs` is PATH split already so
+// tests never touch the process environment.
+// trace:exempt reason=internal-detail
+pub fn detect_harnesses(home: &Path, path_dirs: &[PathBuf], root: &Path) -> Vec<SetupHarness> {
+    let on_path = |bin: &str| {
+        path_dirs
+            .iter()
+            .any(|d| d.join(bin).is_file() || d.join(format!("{bin}.exe")).is_file())
+    };
+    let mut out = Vec::new();
+    if on_path("claude") || home.join(".claude").is_dir() {
+        out.push(SetupHarness::Claude);
+    }
+    if on_path("codex") || home.join(".codex").is_dir() {
+        out.push(SetupHarness::Codex);
+    }
+    if on_path("opencode") || home.join(".config").join("opencode").is_dir() {
+        out.push(SetupHarness::Opencode);
+    }
+    if on_path("omp") || root.join(".omp").is_dir() {
+        out.push(SetupHarness::Omp);
+    }
+    if on_path("pi") || root.join(".pi").is_dir() || home.join(".pi").is_dir() {
+        out.push(SetupHarness::Pi);
+    }
+    out
+}
+
+// trace:exempt reason=internal-detail
+fn install_harness(root: &Path, h: SetupHarness) -> crate::Result<()> {
+    match h {
+        SetupHarness::Claude => cmd_setup_claude(root),
+        SetupHarness::Codex => crate::compress::cmd_setup_codex(root),
+        SetupHarness::Opencode => crate::compress::cmd_setup_opencode(root),
+        SetupHarness::Omp => crate::plugin_omp::cmd_setup_omp(root),
+        SetupHarness::Pi => crate::plugin_omp::cmd_setup_pi(root),
+    }
+}
+
+/// `scc setup` (no subcommand): install for every detected harness and
+/// print one summary, including the manual steps setup cannot perform
+/// (Codex hooks live in user scope). `scc setup all` skips detection and
+/// installs for every harness unconditionally.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-setup-detected work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_setup_detected(root: &Path, all: bool) -> crate::Result<()> {
+    let targets: Vec<SetupHarness> = if all {
+        vec![
+            SetupHarness::Claude,
+            SetupHarness::Codex,
+            SetupHarness::Opencode,
+            SetupHarness::Omp,
+            SetupHarness::Pi,
+        ]
+    } else {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        detect_harnesses(&home, &path_dirs, root)
+    };
+    if targets.is_empty() {
+        println!("No supported harness detected (looked for claude/codex/opencode/omp/pi");
+        println!("binaries, ~/.claude, ~/.codex, ~/.config/opencode, ~/.pi, and .omp//.pi/ dirs).");
+        println!("Run `scc setup all` to install for every harness, or `scc setup <harness>`.");
+        return Ok(());
+    }
+    for h in &targets {
+        println!("=== {:?} ===", h);
+        install_harness(root, *h)?;
+        println!();
+    }
+    println!("Installed for: {}", targets.iter().map(|h| format!("{h:?}")).collect::<Vec<_>>().join(", "));
+    if targets.contains(&SetupHarness::Codex) {
+        println!("Remaining manual step: add the printed entry to ~/.codex/hooks.json (user scope).");
+    }
+    Ok(())
+}
+
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-ingest-runtime work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_ingest_runtime(root: &Path, body: &str) -> crate::Result<()> {
     let store = open_store(root)?;
@@ -1733,6 +1828,38 @@ pub fn cmd_runtime_reconcile(root: &Path, json: bool) -> crate::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    // trace:exempt reason=unit-test
+    fn detect_harnesses_finds_bins_dirs_and_project_dirs() {
+        let home = tempfile::TempDir::new().unwrap();
+        let bindir = home.path().join("bin");
+        std::fs::create_dir_all(&bindir).unwrap();
+        std::fs::write(bindir.join("codex"), "#!/bin/sh\n").unwrap();
+        std::fs::create_dir_all(home.path().join(".config").join("opencode")).unwrap();
+        let root = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join(".omp")).unwrap();
+        let found = detect_harnesses(
+            home.path(),
+            &[bindir],
+            root.path(),
+        );
+        assert!(found.contains(&SetupHarness::Codex), "codex via PATH: {found:?}");
+        assert!(found.contains(&SetupHarness::Opencode), "opencode via config dir: {found:?}");
+        assert!(found.contains(&SetupHarness::Omp), "omp via project dir: {found:?}");
+        assert!(!found.contains(&SetupHarness::Claude), "no claude present: {found:?}");
+        assert!(!found.contains(&SetupHarness::Pi), "no pi present: {found:?}");
+    }
+
+    #[test]
+    // trace:exempt reason=unit-test
+    fn detect_harnesses_empty_when_nothing_present() {
+        let home = tempfile::TempDir::new().unwrap();
+        let root = tempfile::TempDir::new().unwrap();
+        let found = detect_harnesses(home.path(), &[], root.path());
+        assert!(found.is_empty(), "{found:?}");
+    }
+
     use super::*;
 
     #[test]

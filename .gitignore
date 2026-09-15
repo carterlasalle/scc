@@ -1,6 +1,9 @@
 /target
 **/.scc/
 **/.claude/
+**/.codex/
+**/.opencode/
+.pi/extensions/
 **/AGENTS.md
 dist/
 sdk/typescript/node_modules/

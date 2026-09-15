@@ -13,7 +13,7 @@
 // @earendil-works/pi-coding-agent. The extension runtime never type-checks
 // this file.
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -455,4 +455,94 @@ export default function hook(pi: ExtensionAPI): void {
     console.error(`trace gate: ${reason}`);
     return { decision: "block", reason };
   });
+
+  // Tool update notifier: human-only warning when a newer tracelayer
+  // release exists. The startup path reads one tiny cache file (no
+  // subprocess, no network); detached refreshes keep it fresh out-of-band.
+  // GATE_TOOL_VERSION is stamped by `trace install` with the running
+  // tool's version. The raw template carries the placeholder and stays
+  // silent (direct `omp install ./adapters/oh-my-pi` loads without it).
+  const GATE_TOOL_VERSION: string = "0.8.4";
+  // trace:exempt reason=internal-detail
+  const semverGt = (a: string, b: string): boolean => {
+  // trace:exempt reason=internal-detail
+    const key = (v: string): number[] =>
+      v
+        .replace(/^v/, "")
+        .split(".")
+        .map((p) => parseInt(p.replace(/[^0-9].*$/, ""), 10) || 0);
+    const ka = key(a);
+    const kb = key(b);
+    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+      if ((ka[i] ?? 0) !== (kb[i] ?? 0)) return (ka[i] ?? 0) > (kb[i] ?? 0);
+    }
+    return false;
+  };
+  // trace:exempt reason=internal-detail
+  const fireAndForget = (args: string[]): void => {
+    try {
+      const child = spawn(TRACE_BIN[0], [...TRACE_BIN.slice(1), ...args], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    } catch {
+      // notifier transport is best-effort by design
+    }
+  };
+  // trace:v1 id=impl.update-check.omp-gate work=WORK-TL-J5F0753D satisfies=REQ-TL-QG50W9G0
+  const maybeNotifyUpdate = (ctx: unknown): void => {
+    try {
+      if (GATE_TOOL_VERSION.indexOf("__TRACELAYER_") === 0) return;
+      const raw = readFileSync(`${homedir()}/.trace/var/update-check.json`, "utf8");
+      // Own atomic-written cache; every field is typeof-checked below.
+      const cache = JSON.parse(String(raw)) as Record<string, unknown>;
+      const latest = cache["latest"];
+      if (typeof latest !== "string" || !latest) {
+        fireAndForget(["update-check", "--refresh-only"]);
+        return;
+      }
+      if (!semverGt(latest, GATE_TOOL_VERSION)) return;
+      if (
+        typeof cache["installedVersion"] === "string" &&
+        cache["installedVersion"] !== GATE_TOOL_VERSION
+      ) {
+        fireAndForget(["update-check", "--refresh-only"]);
+        return;
+      }
+      const lastV = cache["lastNotifiedVersion"];
+      const lastAt = cache["lastNotifiedAt"];
+      if (lastV === latest && typeof lastAt === "number" && Date.now() - lastAt < 24 * 3600 * 1000) return;
+      try {
+        const ui =
+          ctx !== null && typeof ctx === "object" && "ui" in ctx
+            ? (ctx.ui as { notify?: (msg: string, level?: string) => void })
+            : undefined;
+        ui?.notify?.(
+          `Update available: tracelayer ${GATE_TOOL_VERSION} → ${latest}. Run: uv tool install tracelayer --force`,
+          "warning",
+        );
+      } catch {
+        // notification surface unavailable; cache work below still applies
+      }
+      fireAndForget(["update-check", "--mark-notified", latest]);
+      const checkedAt = cache["checkedAt"];
+      if (typeof checkedAt !== "number" || Date.now() - checkedAt >= 6 * 3600 * 1000) {
+        fireAndForget(["update-check", "--refresh-only"]);
+      }
+    } catch {
+      // cache missing/corrupt/offline: stay silent, never break the gate
+    }
+  };
+  try {
+    pi.on("session_start", (_event: unknown, ctx: unknown) => {
+      try {
+        maybeNotifyUpdate(ctx);
+      } catch {
+        // notifier never breaks session start
+      }
+    });
+  } catch {
+    // runtimes without session_start keep gates only
+  }
 }

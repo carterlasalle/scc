@@ -198,10 +198,10 @@ enum Commands {
     /// Run graph invariant checks; exit nonzero on violation (CI)
     CheckInvariants,
 
-    /// Install the Claude Code plugin (hooks)
+    /// Install harness integrations (bare: auto-detect installed harnesses)
     Setup {
         #[command(subcommand)]
-        sub: SetupSub,
+        sub: Option<SetupSub>,
     },
 
     /// Start the local daemon (HTTP API + watcher)
@@ -668,6 +668,8 @@ enum SetupSub {
     Omp,
     /// Install the upstream Pi project-local extension (.pi/extensions/scc)
     Pi,
+    /// Install for every supported harness (no detection)
+    All,
 }
 
 // trace:exempt reason=internal-detail
@@ -794,12 +796,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => Err(e),
         },
         Commands::Setup { sub } => match sub {
-            SetupSub::Claude => commands::cmd_setup_claude(&root),
-            SetupSub::Codex => scc_cli::compress::cmd_setup_codex(&root),
-            SetupSub::Opencode => scc_cli::compress::cmd_setup_opencode(&root),
-            SetupSub::Hermes => scc_cli::plugin_hermes::cmd_setup_hermes(&root),
-            SetupSub::Omp => scc_cli::plugin_omp::cmd_setup_omp(&root),
-            SetupSub::Pi => scc_cli::plugin_omp::cmd_setup_pi(&root),
+            None => commands::cmd_setup_detected(&root, false),
+            Some(SetupSub::Claude) => commands::cmd_setup_claude(&root),
+            Some(SetupSub::Codex) => scc_cli::compress::cmd_setup_codex(&root),
+            Some(SetupSub::Opencode) => scc_cli::compress::cmd_setup_opencode(&root),
+            Some(SetupSub::Hermes) => scc_cli::plugin_hermes::cmd_setup_hermes(&root),
+            Some(SetupSub::Omp) => scc_cli::plugin_omp::cmd_setup_omp(&root),
+            Some(SetupSub::Pi) => scc_cli::plugin_omp::cmd_setup_pi(&root),
+            Some(SetupSub::All) => commands::cmd_setup_detected(&root, true),
         },
         Commands::Serve => commands::cmd_serve(&root),
         Commands::Mcp => commands::cmd_mcp(&root),
