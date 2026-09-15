@@ -51,6 +51,18 @@ const SNAPSHOT_MS = 5000;
 const INDEX_MS = 20000;
 // trace:exempt reason=const-data
 const CONTEXT_MS = 20000;
+// Hard ceiling per handler invocation: the harness kills handlers at 30s,
+// so every handler aborts its own spawns at 25s and returns. Individual
+// call budgets above keep single spawns small; this keeps their SUM small.
+// trace:exempt reason=const-data
+const HANDLER_MS = 25000;
+
+// trace:exempt reason=internal-helper
+const withDeadline = (ms = HANDLER_MS): { signal: AbortSignal; done: () => void } => {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  return { signal: ctl.signal, done: () => clearTimeout(t) };
+};
 
 // Installed CLI version, memoized per process: `scc --version` costs a
 // subprocess spawn, so it runs at most once no matter how many sessions
@@ -60,9 +72,10 @@ let cachedInstalled: string | undefined;
 const installedVersion = async (
   pi: ExtensionAPI,
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> => {
   if (cachedInstalled === undefined) {
-    const r = await scc(pi, ["--version"], cwd, FAST_MS);
+    const r = await scc(pi, ["--version"], cwd, FAST_MS, signal);
     const m = /scc\s+(\S+)/.exec(r.code === 0 ? r.out : "");
     cachedInstalled = m ? m[1] : "";
   }
@@ -76,8 +89,9 @@ const installedVersion = async (
 const maybeNotifyUpdate = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  signal?: AbortSignal,
 ): Promise<void> => {
-  const v = await installedVersion(pi, ctx.cwd);
+  const v = await installedVersion(pi, ctx.cwd, signal);
   if (!v) return;
   const msg = checkCachedUpdate(v);
   if (msg) {
@@ -121,11 +135,12 @@ const scc = async (
   args: string[],
   cwd: string,
   timeoutMs = FAST_MS,
+  signal?: AbortSignal,
 ): Promise<{ code: number; out: string; err: string }> => {
   const t0 = Date.now();
   const cmd = [SCC_BIN, ...args].join(" ");
   try {
-    const res = await pi.exec(SCC_BIN, args, { cwd, timeout: timeoutMs });
+    const res = await pi.exec(SCC_BIN, args, { cwd, timeout: timeoutMs, signal });
     if (res.killed) {
       logEvent(cwd, "spawn", { cmd: cmd.slice(0, 500), ms: Date.now() - t0, ok: false, err: "killed on timeout" });
       return { code: -1, out: "", err: "scc killed on timeout" };
@@ -155,10 +170,11 @@ const execBin = async (
   args: string[],
   cwd: string,
   timeoutMs = FAST_MS,
+  signal?: AbortSignal,
 ): Promise<{ code: number; out: string }> => {
   const t0 = Date.now();
   try {
-    const res = await pi.exec(bin, args, { cwd, timeout: timeoutMs });
+    const res = await pi.exec(bin, args, { cwd, timeout: timeoutMs, signal });
     const ok = !res.killed && res.code === 0;
     logEvent(cwd, "spawn", { cmd: [bin, ...args].join(" ").slice(0, 500), ms: Date.now() - t0, ok });
     if (res.killed) return { code: -1, out: "" };
@@ -314,20 +330,20 @@ const parsePorcelainZ = (out: string): string[] => {
 // HEAD is recorded so a clean commit/checkout (empty dirty maps) still
 // refreshes SCC.
 // trace:exempt reason=internal-helper
-const snapshotDirty = async (pi: ExtensionAPI, cwd: string): Promise<DirtySnap> => {
+const snapshotDirty = async (pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<DirtySnap> => {
   const map = new Map<string, string>();
-  const headRes = await execBin(pi, "git", ["rev-parse", "HEAD"], cwd);
+  const headRes = await execBin(pi, "git", ["rev-parse", "HEAD"], cwd, SNAPSHOT_MS, signal);
   const head = headRes.code === 0 ? headRes.out.trim() : "";
-  const status = await execBin(pi, "git", ["status", "--porcelain=v1", "-z", "-uall"], cwd);
+  const status = await execBin(pi, "git", ["status", "--porcelain=v1", "-z", "-uall"], cwd, SNAPSHOT_MS, signal);
   const names = new Set<string>(parsePorcelainZ(status.out));
-  const diff = await execBin(pi, "git", ["diff", "--name-only", "-z", "HEAD"], cwd);
+  const diff = await execBin(pi, "git", ["diff", "--name-only", "-z", "HEAD"], cwd, SNAPSHOT_MS, signal);
   if (diff.code === 0) {
     for (const p of diff.out.split("\0")) {
       if (p) names.add(p);
     }
   }
   for (const p of names) {
-    const h = await execBin(pi, "git", ["hash-object", "--", p], cwd);
+    const h = await execBin(pi, "git", ["hash-object", "--", p], cwd, SNAPSHOT_MS, signal);
     map.set(p, h.code === 0 && h.out.trim() ? h.out.trim() : "missing");
   }
   return { head, files: map };
@@ -360,6 +376,7 @@ const indexPaths = async (
   cwd: string,
   paths: string[],
   full = false,
+  signal?: AbortSignal,
 ): Promise<{ ok: boolean; err: string }> => {
   const unique = [...new Set(paths.filter(Boolean))];
   if (!unique.length && !full) return { ok: true, err: "" };
@@ -371,9 +388,9 @@ const indexPaths = async (
   const args = unique.length && !full ? ["index", "--paths", ...unique, "--quiet"] : ["index", "--quiet"];
   let r;
   try {
-    r = await scc(pi, args, cwd, INDEX_MS);
+    r = await scc(pi, args, cwd, INDEX_MS, signal);
     if (r.code !== 0) {
-      r = await scc(pi, args, cwd, INDEX_MS);
+      r = await scc(pi, args, cwd, INDEX_MS, signal);
     }
   } finally {
     indexInFlight = false;
@@ -394,9 +411,10 @@ const indexPaths = async (
 const loadStartupAndCheckpoint = async (
   pi: ExtensionAPI,
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<{ lines: string[]; startupOk: boolean }> => {
   const lines: string[] = [];
-  const startup = await scc(pi, ["context", "startup"], cwd, CONTEXT_MS);
+  const startup = await scc(pi, ["context", "startup"], cwd, CONTEXT_MS, signal);
   const startupOk = startup.code === 0 && Boolean(startup.out.trim());
   if (startupOk) lines.push(startup.out.trim());
   const checkpoint = await scc(pi, ["checkpoint", "load", "--inject"], cwd, CONTEXT_MS);
@@ -406,9 +424,9 @@ const loadStartupAndCheckpoint = async (
 
 // trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)
 export default function hook(pi: ExtensionAPI): void {
-  const resetHandler = async (_event: unknown, ctx: ExtensionContext) => {
+  const resetHandler = async (_event: unknown, ctx: ExtensionContext, signal?: AbortSignal) => {
     resetInjection(ctx);
-    await scc(pi, ["state-path"], ctx.cwd, FAST_MS);
+    await scc(pi, ["state-path"], ctx.cwd, FAST_MS, signal);
   };
 
   // session_start: precompute/state only. This is a notification — it
@@ -416,12 +434,22 @@ export default function hook(pi: ExtensionAPI): void {
   // session, resume, or newly loaded session re-injects startup on its
   // first real prompt) and do a lightweight state-path presence check.
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
-    await resetHandler(_event, ctx);
-    await maybeNotifyUpdate(pi, ctx);
+    const dl = withDeadline();
+    try {
+      await resetHandler(_event, ctx, dl.signal);
+      await maybeNotifyUpdate(pi, ctx, dl.signal);
+    } finally {
+      dl.done();
+    }
   });
   onEvent(pi, "session_switch", async (_event: unknown, ctx: ExtensionContext) => {
-    await resetHandler(_event, ctx);
-    await maybeNotifyUpdate(pi, ctx);
+    const dl = withDeadline();
+    try {
+      await resetHandler(_event, ctx, dl.signal);
+      await maybeNotifyUpdate(pi, ctx, dl.signal);
+    } finally {
+      dl.done();
+    }
   });
   onEvent(pi, "session_branch", resetHandler);
   onEvent(pi, "session_tree", resetHandler);
@@ -430,6 +458,8 @@ export default function hook(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event: BeforeAgentStartEvent, ctx: ExtensionContext) => {
     const prompt = event.prompt;
     if (isConversational(prompt)) return;
+    const dl = withDeadline();
+    try {
 
     let content = "";
     let injectedStartup = false;
@@ -440,7 +470,7 @@ export default function hook(pi: ExtensionAPI): void {
     // entry scan; re-injecting ~7k tokens would pure-duplicate it).
     const key = injectionKey(ctx);
     if (!startupInjected.has(key) && !sessionHasStartup(ctx)) {
-      const startup = await scc(pi, ["context", "startup"], ctx.cwd, CONTEXT_MS);
+      const startup = await scc(pi, ["context", "startup"], ctx.cwd, CONTEXT_MS, dl.signal);
       if (startup.code === 0 && startup.out.trim()) {
         content += startup.out.trim() + "\n\n";
         startupInjected.add(key);
@@ -454,7 +484,7 @@ export default function hook(pi: ExtensionAPI): void {
       // `--hook` prints nothing, the direct call prints the pack). This
       // extension IS the injection decision-maker; the 1500-token focus
       // budget matches hook mode's cap.
-      const task = await scc(pi, ["context", "task", prompt, "--budget", "1500"], ctx.cwd, CONTEXT_MS);
+      const task = await scc(pi, ["context", "task", prompt, "--budget", "1500"], ctx.cwd, CONTEXT_MS, dl.signal);
       if (task.code === 0 && task.out.trim()) {
         content += task.out.trim();
       }
@@ -468,6 +498,9 @@ export default function hook(pi: ExtensionAPI): void {
         details: { source: "scc", injectedAt: Date.now(), hasStartup: injectedStartup },
       },
     };
+    } finally {
+      dl.done();
+    }
   });
 
   // tool_call: snapshot dirty files before opaque mutations so the post
@@ -476,13 +509,20 @@ export default function hook(pi: ExtensionAPI): void {
     if (!isOpaqueMutation(event.toolName)) return;
     const id = event.toolCallId;
     if (!id) return;
-    dirtySnapshots.set(id, await snapshotDirty(pi, ctx.cwd));
+    const dl = withDeadline();
+    try {
+      dirtySnapshots.set(id, await snapshotDirty(pi, ctx.cwd, dl.signal));
+    } finally {
+      dl.done();
+    }
   });
 
   // tool_result: post-mutation incremental refresh. edit/write index the
   // touched path; opaque tools index the dirty-fingerprint diff. A failed
   // index is retried then surfaced to the model — never silently ignored.
   pi.on("tool_result", async (event: ToolResultEvent, ctx: ExtensionContext) => {
+    const dl = withDeadline();
+    try {
     const paths: string[] = [];
     if (isFileMutation(event.toolName)) {
       const path = editedPath(event.input as Record<string, unknown>);
@@ -493,7 +533,7 @@ export default function hook(pi: ExtensionAPI): void {
       const id = event.toolCallId;
       const before = id ? dirtySnapshots.get(id) : undefined;
       if (id) dirtySnapshots.delete(id);
-      const after = await snapshotDirty(pi, ctx.cwd);
+      const after = await snapshotDirty(pi, ctx.cwd, dl.signal);
       if (before) {
         paths.push(...fileFingerprintDiff(before.files, after.files));
         if (before.head && after.head && before.head !== after.head) {
@@ -503,6 +543,7 @@ export default function hook(pi: ExtensionAPI): void {
             ["diff", "--name-only", "-z", before.head, after.head],
             ctx.cwd,
             SNAPSHOT_MS,
+            dl.signal,
           );
           if (revDiff.code === 0) {
             for (const p of revDiff.out.split("\0")) {
@@ -516,7 +557,7 @@ export default function hook(pi: ExtensionAPI): void {
       }
     }
     if (!paths.length && !fullRefresh) return;
-    const result = await indexPaths(pi, ctx.cwd, paths, fullRefresh);
+    const result = await indexPaths(pi, ctx.cwd, paths, fullRefresh, dl.signal);
     if (result.ok) return;
     const content = Array.isArray(event.content) ? [...event.content] : [];
     content.push({
@@ -524,20 +565,30 @@ export default function hook(pi: ExtensionAPI): void {
       text: `\n\n<SCC>\n${result.err}\nPost-edit index did not succeed; subsequent task context may be stale. Re-run \`scc index --paths\`.\n</SCC>`,
     });
     return { content };
+    } finally {
+      dl.done();
+    }
   });
 
   // session_before_compact: persist a checkpoint so architecture + task
   // state can be restored into the compaction result. Registered via
   // onEvent because older published typings omit this event name.
   onEvent(pi, "session_before_compact", async (_event: unknown, ctx: ExtensionContext) => {
-    await scc(pi, ["checkpoint", "save"], ctx.cwd, FAST_MS);
+    const dl = withDeadline();
+    try {
+      await scc(pi, ["checkpoint", "save"], ctx.cwd, FAST_MS, dl.signal);
+    } finally {
+      dl.done();
+    }
   });
 
   // session.compacting: the compaction-result seam. Inject startup +
   // checkpoint NOW so architecture/task state survive immediately — do
   // not wait for the next user prompt. Returns { context: string[] }.
   onEvent(pi, "session.compacting", async (_event: unknown, ctx: ExtensionContext) => {
-    const { lines, startupOk } = await loadStartupAndCheckpoint(pi, ctx.cwd);
+    const dl = withDeadline();
+    try {
+    const { lines, startupOk } = await loadStartupAndCheckpoint(pi, ctx.cwd, dl.signal);
     compactingRehydrated = lines.length > 0;
     const key = injectionKey(ctx);
     if (startupOk) {
@@ -549,6 +600,9 @@ export default function hook(pi: ExtensionAPI): void {
       return { context: lines };
     }
     return {};
+    } finally {
+      dl.done();
+    }
   });
 
   // session_compact: post-compaction notification. If session.compacting
