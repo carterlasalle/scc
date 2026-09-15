@@ -32,7 +32,7 @@ import type {
   SessionStartEvent,
   ToolResultEvent,
 } from "@oh-my-pi/pi-coding-agent";
-import { checkCachedUpdate } from "./update-check";
+import { checkCachedUpdate, logEvent } from "./update-check";
 
 // Honor SCC_BIN (claimed by `scc setup omp`) — never hard-code "scc" as
 // the only lookup. A static path may also be written into .omp/mcp.json
@@ -80,7 +80,10 @@ const maybeNotifyUpdate = async (
   const v = await installedVersion(pi, ctx.cwd);
   if (!v) return;
   const msg = checkCachedUpdate(v);
-  if (msg) ctx.ui.notify(msg, "warning");
+  if (msg) {
+    logEvent(ctx.cwd, "update-notify", { msg: msg.slice(0, 200) });
+    ctx.ui.notify(msg, "warning");
+  }
 };
 
 // Sessions/branches that already received the startup capsule this process.
@@ -119,15 +122,28 @@ const scc = async (
   cwd: string,
   timeoutMs = FAST_MS,
 ): Promise<{ code: number; out: string; err: string }> => {
+  const t0 = Date.now();
+  const cmd = [SCC_BIN, ...args].join(" ");
   try {
     const res = await pi.exec(SCC_BIN, args, { cwd, timeout: timeoutMs });
-    if (res.killed) return { code: -1, out: "", err: "scc killed on timeout" };
+    if (res.killed) {
+      logEvent(cwd, "spawn", { cmd: cmd.slice(0, 500), ms: Date.now() - t0, ok: false, err: "killed on timeout" });
+      return { code: -1, out: "", err: "scc killed on timeout" };
+    }
+    logEvent(cwd, "spawn", {
+      cmd: cmd.slice(0, 500),
+      ms: Date.now() - t0,
+      ok: res.code === 0,
+      code: res.code,
+      err: res.code === 0 ? undefined : String(res.stderr ?? "").slice(0, 500),
+    });
     return {
       code: res.code,
       out: String(res.stdout ?? ""),
       err: String(res.stderr ?? ""),
     };
   } catch (e) {
+    logEvent(cwd, "spawn", { cmd: cmd.slice(0, 500), ms: Date.now() - t0, ok: false, err: String(e instanceof Error ? e.message : e).slice(0, 500) });
     return { code: -1, out: "", err: e instanceof Error ? e.message : String(e) };
   }
 };
@@ -140,8 +156,11 @@ const execBin = async (
   cwd: string,
   timeoutMs = FAST_MS,
 ): Promise<{ code: number; out: string }> => {
+  const t0 = Date.now();
   try {
     const res = await pi.exec(bin, args, { cwd, timeout: timeoutMs });
+    const ok = !res.killed && res.code === 0;
+    logEvent(cwd, "spawn", { cmd: [bin, ...args].join(" ").slice(0, 500), ms: Date.now() - t0, ok });
     if (res.killed) return { code: -1, out: "" };
     return { code: res.code, out: String(res.stdout ?? "") };
   } catch {
@@ -344,7 +363,10 @@ const indexPaths = async (
 ): Promise<{ ok: boolean; err: string }> => {
   const unique = [...new Set(paths.filter(Boolean))];
   if (!unique.length && !full) return { ok: true, err: "" };
-  if (indexInFlight) return { ok: true, err: "" };
+  if (indexInFlight) {
+    logEvent(cwd, "index-skip-busy", { paths: unique.length });
+    return { ok: true, err: "" };
+  }
   indexInFlight = true;
   const args = unique.length && !full ? ["index", "--paths", ...unique, "--quiet"] : ["index", "--quiet"];
   let r;

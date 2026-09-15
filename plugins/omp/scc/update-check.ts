@@ -6,7 +6,7 @@
 // refresh, never on the startup path. Failures are silent by design — a
 // missed update reminder must never break or slow a session.
 import { get } from "node:https";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -125,4 +125,28 @@ export const checkCachedUpdate = (installed: string): string | undefined => {
   writeCache({ ...cache, lastNotifiedVersion: cache.latest, lastNotifiedAt: now });
   const clean = (v: string): string => v.replace(/^[v=\s]+/, "");
   return `SCC ${clean(installed)} is outdated — ${clean(cache.latest)} available. Update the CLI and re-run \`scc setup omp\` to refresh the extension.`;
+};
+
+// Extension event log: every spawn (command, duration, outcome), every
+// busy-skip, every update notice — one JSONL line each, with the repo dir
+// on every line so per-repo failures and timings are greppable from the
+// single file. Best-effort and silent: logging must never break a session.
+// Rotated by truncation (last 2000 lines) past 1MB.
+// trace:v1 id=ops.scc.extension-log work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+export const logEvent = (repo: string, event: string, detail: Record<string, unknown>): void => {
+  try {
+    const file = join(homedir(), ".cache", "scc", "extension.log");
+    mkdirSync(join(homedir(), ".cache", "scc"), { recursive: true });
+    appendFileSync(file, JSON.stringify({ ts: Date.now(), repo, event, ...detail }) + "\n");
+    try {
+      if (statSync(file).size > 1000000) {
+        const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+        writeFileSync(file, lines.slice(-2000).join("\n") + "\n");
+      }
+    } catch {
+      // rotation is cosmetic
+    }
+  } catch {
+    // a read-only HOME must not break sessions
+  }
 };
