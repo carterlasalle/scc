@@ -66,8 +66,10 @@ fn atlas_renders_typed_contracts_surfaces_and_coverage() {
     }
     // honest, deterministic numbers on the fixture: 3 python files parsed,
     // no stale files, all calls target external modules (0% resolved to
-    // local symbols), 7 external/dynamic receivers
-    assert!(atlas.contains("parsed_source_files: 100% (3/3)"), "{atlas}");
+    // local symbols), 7 external/dynamic receivers. The 4th discovered file
+    // is the `.gitignore` that `index` itself creates (self-ignore): it is
+    // discovered but not source-parsed, hence 3/4.
+    assert!(atlas.contains("parsed_source_files: 75% (3/4)"), "{atlas}");
     assert!(atlas.contains("call_targets_resolved: 0% (0/7"), "{atlas}");
     assert!(atlas.contains("dynamic_receivers_unresolved: 7"), "{atlas}");
     assert!(atlas.contains("stale_evidence: 0 (model FRESH)"), "{atlas}");
