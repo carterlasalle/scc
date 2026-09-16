@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "scc-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "clap",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "scc-context"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "blake3",
  "scc-core",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "scc-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "serde",
@@ -1591,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "scc-graph"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "blake3",
  "scc-core",
@@ -1604,7 +1604,7 @@ dependencies = [
 
 [[package]]
 name = "scc-indexer"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "blake3",
  "globset",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "scc-store"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "blake3",
  "chrono",

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.2] — 2026-09-16
+
+Bake-off gap closure: index throughput, impact trust, and self-hosting hygiene.
+
+- **Index writes 20x faster.** One transaction per file (savepoint-nested
+  store internals) plus `synchronous=NORMAL` under WAL; scanner prunes
+  config-ignored descents. Cold full-repo index: 609 files in ~12s.
+- **Mid-flight corruption self-heals.** Quarantine-and-rebuild now triggers
+  on any write failure, not just open; mid-flight retry added.
+- **Ghost impact targets refuse.** `scc impact` on unknown files errors
+  instead of fabricating RISK:MEDIUM; cochange-backed queries on unindexed
+  repos still answer forgotten partners.
+- **Impact budget.** 20s hard deadline with scored partial answers and
+  truncation notes; flow dedup fixed (quadratic `contains`).
+- **Self-ignore keeps intent committable.** `.scc/*` plus
+  `!.scc/intent.yaml`, migrating bare `.scc/` lines that silently hid
+  declared components and flows from the walker.
+
 ## [0.1.0] — 2026-08-31
 
 First public release of the System Context Compiler (SCC).
