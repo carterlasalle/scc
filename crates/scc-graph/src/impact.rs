@@ -139,7 +139,15 @@ pub fn compute_impact(
         }
     }
 
-    if !files.is_empty() && resolved_files.is_empty() && resolved_sym_ids.is_empty() {
+    // Cochange history is a legitimate signal on paths without file entities
+    // (an unindexed repo still has git history): only refuse when there is
+    // genuinely nothing to analyze — no resolved graph targets AND no
+    // cochange pair touching a requested file. Otherwise proceed with a note.
+    let pairs = crate::cochange::cached_cochange_pairs(store).unwrap_or_default();
+    let has_cochange = files.iter().any(|f| {
+        pairs.iter().any(|p| p.a == **f || p.b == **f)
+    });
+    if !files.is_empty() && resolved_files.is_empty() && resolved_sym_ids.is_empty() && !has_cochange {
         let mut unknown: Vec<String> = unresolved_files.iter().map(|s| s.to_string()).collect();
         unknown.extend(symbols.iter().filter(|s| {
             !resolved_sym_ids.iter().any(|r| r == *s || r.ends_with(&format!("/{s}")))
