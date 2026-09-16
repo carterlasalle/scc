@@ -240,7 +240,7 @@ pub fn compute_impact(
     let all_flows = view.flows();
     for flow in &all_flows {
         scanned_flows += 1;
-        if scanned_flows % 64 == 0 && flow_start.elapsed().as_millis() > FLOW_BUDGET_MS {
+        if scanned_flows.is_multiple_of(64) && flow_start.elapsed().as_millis() > FLOW_BUDGET_MS {
             flow_truncated = true;
             break;
         }
