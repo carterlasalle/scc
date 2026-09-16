@@ -1833,6 +1833,26 @@ mod tests {
 
     #[test]
     // trace:exempt reason=unit-test
+    fn ensure_scc_ignored_keeps_intent_committable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        crate::ensure_scc_ignored(root);
+        let gi = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(gi.contains(".scc/*"), "{gi}");
+        assert!(gi.contains("!.scc/intent.yaml"), "{gi}");
+        crate::ensure_scc_ignored(root);
+        let gi2 = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(gi, gi2, "idempotent");
+        std::fs::write(root.join(".gitignore"), "target/\n.scc/\n").unwrap();
+        crate::ensure_scc_ignored(root);
+        let gi3 = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(gi3.contains("target/"), "{gi3}");
+        assert!(!gi3.lines().any(|l| l.trim() == ".scc/"), "{gi3}");
+        assert!(gi3.contains("!.scc/intent.yaml"), "{gi3}");
+    }
+
+    #[test]
+    // trace:exempt reason=unit-test
     fn detect_harnesses_finds_bins_dirs_and_project_dirs() {
         let home = tempfile::TempDir::new().unwrap();
         let bindir = home.path().join("bin");

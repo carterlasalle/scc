@@ -108,21 +108,39 @@ pub fn open_store(root: &Path) -> Result<Store> {
 }
 
 /// Ensure `.scc/` is gitignored so the index cache never pollutes the
-/// repo's own git status or gets committed. Idempotent: appends the line
-/// once, creates `.gitignore` when absent, never touches other lines.
+/// repo's own git status or gets committed — except `.scc/intent.yaml`,
+/// which is committable repository intent, not cache. A bare `.scc/`
+/// pattern would make git (and our own gitignore-respecting walker) prune
+/// the whole directory including intent, silently dropping declared
+/// components and flows. Idempotent, never touches other lines.
 // trace:v1 id=impl.crates-scc-cli-src-lib.ensure-scc-ignored work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn ensure_scc_ignored(root: &Path) {
+    // A bare `.scc/` line excludes the directory itself, which git does
+    // not let negations re-enter — migrate it to the pair so intent.yaml
+    // stays committable while the cache stays out.
+    const WANT: [&str; 2] = [".scc/*", "!.scc/intent.yaml"];
     let gi = root.join(".gitignore");
     let content = std::fs::read_to_string(&gi).unwrap_or_default();
-    if content.lines().any(|l| l.trim() == ".scc/" || l.trim() == ".scc") {
-        return;
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    let mut changed = false;
+    lines.retain(|l| {
+        let bare = l.trim() == ".scc/" || l.trim() == ".scc";
+        if bare {
+            changed = true;
+        }
+        !bare
+    });
+    for line in WANT {
+        if !lines.iter().any(|l| l.trim() == line) {
+            lines.push(line.to_string());
+            changed = true;
+        }
     }
-    let mut out = content;
-    if !out.is_empty() && !out.ends_with('\n') {
+    if changed {
+        let mut out = lines.join("\n");
         out.push('\n');
+        let _ = std::fs::write(&gi, out);
     }
-    out.push_str(".scc/\n");
-    let _ = std::fs::write(&gi, out);
 }
 
 /// True when an indexing failure is store corruption surfacing anywhere in
