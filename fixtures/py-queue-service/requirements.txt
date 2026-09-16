@@ -1,2 +1,2 @@
-kafka-python==2.0.2
+kafka-python==2.3.2
 tenacity==8.2.3
