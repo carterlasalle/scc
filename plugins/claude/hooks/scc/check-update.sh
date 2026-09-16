@@ -16,7 +16,7 @@ python3 - <<'PYEOF2' 2>/dev/null || exit 0
 import json, os, subprocess, sys, time
 CACHE = os.environ["SCC_UPDATE_CACHE"]
 INSTALLED = os.environ["SCC_UPDATE_INSTALLED"]
-REPO = "carterlasalle/system_ir"
+REPO = "carterlasalle/scc"
 REFRESH_AFTER_MS = 12 * 3600 * 1000
 RENOTIFY_AFTER_MS = 24 * 3600 * 1000
 REFRESH_SRC = (

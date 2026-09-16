@@ -18,8 +18,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/carterlasalle/system_ir"
-Repository = "https://github.com/carterlasalle/system_ir"
+Homepage = "https://github.com/carterlasalle/scc"
+Repository = "https://github.com/carterlasalle/scc"
 
 [tool.setuptools]
 py-modules = ["scc_sdk"]

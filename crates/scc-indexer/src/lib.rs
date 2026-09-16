@@ -145,6 +145,82 @@ impl Indexer {
         }
     }
 
+    /// Emit workspace members + dependency edges (audit item 4): for
+    /// every root-level package.json with `workspaces`, glob-expand
+    /// against the scanned inventory and emit member PACKAGE entities
+    /// (named by package name) + DEPENDS_ON edges between members. Runs
+    /// inside the index write phase (same batch/transaction as everything
+    /// else). Member reads come from the working tree (source of truth);
+    /// missing/unparseable members are skipped, never fabricated.
+    // trace:v1 id=impl.scc.indexer.emit-workspace-members work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    fn emit_workspace_members(&self, scanned: &[crate::scan::ScannedFile]) -> Result<(), IndexError> {
+        let files: Vec<String> = scanned.iter().map(|f| f.path.clone()).collect();
+        let repo_id = self.store.repo_id.clone();
+        for f in scanned {
+            if !f.path.ends_with("/package.json") && f.path != "package.json" {
+                continue;
+            }
+            // Only manifests that declare workspaces drive discovery.
+            let content = match std::fs::read_to_string(self.store.root.join(&f.path)) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            if !content.contains("\"workspaces\"") {
+                continue;
+            }
+            let graph = crate::configs::workspace_members(
+                &f.path,
+                &content,
+                &repo_id,
+                &files,
+                &|manifest: &str| {
+                    std::fs::read_to_string(self.store.root.join(manifest)).ok()
+                },
+            );
+            if graph.members.is_empty() {
+                continue;
+            }
+            // Persist the graph for doctor/startup workspace reporting.
+            let _ = self.store.meta_set(
+                &format!("workspace:{}", f.path),
+                &serde_json::to_string(&graph).unwrap_or_else(|_| "{}".into()),
+            );
+            let repo_entity = format!("repo://{repo_id}");
+            for m in &graph.members {
+                let mut e = scc_core::Entity::new(m.id.clone(), scc_core::kinds::PACKAGE, m.name.clone());
+                e.attr("path", serde_json::json!(m.root));
+                e.attr("manifest", serde_json::json!(m.manifest));
+                e.attr("ecosystem", serde_json::json!(m.ecosystem));
+                self.store
+                    .insert_entity(&e, std::slice::from_ref(&f.path))
+                    .map_err(IndexError::Store)?;
+                let rel = scc_core::Relationship::new(
+                    scc_core::relationship_id(0),
+                    repo_entity.clone(),
+                    scc_core::predicates::CONTAINS,
+                    m.id.clone(),
+                    scc_core::Provenance::Extracted,
+                );
+                self.store
+                    .insert_relationship(&rel, &f.path)
+                    .map_err(IndexError::Store)?;
+            }
+            for edge in &graph.edges {
+                let rel = scc_core::Relationship::new(
+                    scc_core::relationship_id(0),
+                    edge.from.clone(),
+                    "depends_on",
+                    edge.to.clone(),
+                    scc_core::Provenance::Extracted,
+                );
+                self.store
+                    .insert_relationship(&rel, &f.path)
+                    .map_err(IndexError::Store)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn config(&self) -> &Config {
         &self.config
     }
@@ -408,6 +484,12 @@ impl Indexer {
                 let _ = ef;
             }
         }
+
+        // ---- workspace members (audit item 4): glob-expand JS workspace
+        // patterns against the scanned inventory, then emit member PACKAGE
+        // entities + DEPENDS_ON edges. One repo, one store; packages are
+        // semantic children (repo CONTAINS package).
+        self.emit_workspace_members(&scanned)?;
 
         // intent claims
         match intent {

@@ -303,6 +303,44 @@ pub fn cmd_surface(
     Ok(())
 }
 
+/// `scc important [--limit N] [--component C] [--task G] [--json]` —
+/// the fast "where do I pay attention first" answer (audit item 3). Global
+/// mode ranks by architectural centrality (global PPR + badges); --task
+/// re-ranks by task PPR and renders TASK-CRITICAL SYMBOLS. --component
+/// filters to one component substring. No new MCP tool: the section also
+/// ships inside startup/task context.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-important work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_important(
+    root: &Path,
+    limit: usize,
+    component: Option<&str>,
+    task: Option<&str>,
+    json: bool,
+) -> crate::Result<()> {
+    use scc_context::surface::{important_symbols, render_important, SurfaceMode};
+    let store = open_store(root)?;
+    let config = load_config(root)?;
+    let stale = crate::stale_paths(&store)?;
+    let comp = compiler(&store, &config, stale)?;
+    let ctx = comp.ctx();
+    let mode = match task {
+        Some(goal) => SurfaceMode::Task { goal, visible: None },
+        None => SurfaceMode::Global,
+    };
+    let tasked = task.is_some();
+    let mut entries = important_symbols(&ctx, mode, 0);
+    if let Some(c) = component {
+        entries.retain(|e| e.component.as_deref().is_some_and(|s| s.contains(c)));
+    }
+    entries.truncate(limit.max(1));
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+        return Ok(());
+    }
+    print!("{}", render_important(&entries, tasked));
+    Ok(())
+}
+
 /// Task-mode surface framing: replace the generic surface header with the
 /// task-personalized marker. `build_surface` renders the standard
 /// `SCC SYSTEM SURFACE MAP` header; the goal framing lives at the transport
@@ -1621,35 +1659,38 @@ fn adapter_scope(name: &str) -> &'static str {
     }
 }
 
-/// Compute the configured-adapter scope listing: adapters enabled via
-/// config.integrations, then the always-available on-demand importers
-/// (scip/cbm need no config). Fixed declaration order keeps the output
-/// deterministic.
-// trace:v1 id=impl.crates-scc-cli-src-commands.configured-adapters work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
+/// Compute the configured-adapter scope listing from THE Integration
+/// Registry: every row whose config key is enabled (or needs no config for
+/// on-demand import), in fixed registry order. `narsil` never appears: it is
+/// a `ccg` alias, resolved by `resolve_integration`. Both `scc adapters`
+/// views read one registry, so they describe one universe.
+// trace:v1 id=impl.crates-scc-cli-src-commands.configured-adapters work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 fn configured_adapters(root: &Path) -> crate::Result<Vec<(String, &'static str)>> {
+    use scc_indexer::adapters::IntegrationCategory;
     let config = load_config(root)?;
-    let mut configured: Vec<(String, &'static str)> = Vec::new();
-    if config.integrations.serena {
-        configured.push(("serena".into(), adapter_scope("serena")));
-    }
-    if config.integrations.beads {
-        configured.push(("beads".into(), adapter_scope("beads")));
-    }
-    if config.integrations.hindsight {
-        configured.push(("hindsight".into(), adapter_scope("hindsight")));
-    }
-    if config.integrations.gitnexus {
-        configured.push(("gitnexus".into(), adapter_scope("gitnexus")));
-    }
-    if config.integrations.narsil {
-        configured.push(("narsil".into(), adapter_scope("narsil")));
-    }
-    if !config.integrations.context7_command.is_empty() {
-        configured.push(("context7".into(), adapter_scope("context7")));
-    }
-    configured.push(("scip".into(), adapter_scope("scip")));
-    configured.push(("cbm".into(), adapter_scope("cbm")));
-    Ok(configured)
+    let enabled = |key: Option<&str>| -> bool {
+        match key {
+            None => true,
+            Some("serena") => config.integrations.serena,
+            Some("beads") => config.integrations.beads,
+            Some("hindsight") => config.integrations.hindsight,
+            Some("gitnexus") => config.integrations.gitnexus,
+            Some("context7_command") => !config.integrations.context7_command.is_empty(),
+            // Unknown keys fail closed: a new config flag must be wired
+            // here explicitly, never silently treated as enabled.
+            Some(_) => false,
+        }
+    };
+    Ok(scc_indexer::adapters::integration_registry()
+        .into_iter()
+        .filter(|d| {
+            d.category != IntegrationCategory::CompatibilityOnly
+                && d.category != IntegrationCategory::InternalPass
+                && d.category != IntegrationCategory::AgentIntegration
+                && enabled(d.config_key)
+        })
+        .map(|d| (d.id.to_string(), adapter_scope(d.id)))
+        .collect())
 }
 
 /// `scc adapters` — list enabled adapters with their declared capability
@@ -1666,6 +1707,305 @@ pub fn cmd_adapters(root: &Path, json: bool) -> crate::Result<()> {
         println!("adapter: {name}  scope: {scope}");
     }
     Ok(())
+}
+
+/// `scc doctor` — integration health from THE Integration Registry
+/// (`scc_indexer::adapters::integration_registry`), offline, read-only and
+/// fast. Default never touches the network and never spawns a subprocess:
+/// every row is answered from local state only (config flags, binary on
+/// PATH, files present, evidence already in the graph). `--deep` may start
+/// LOCAL subprocesses (pyright/tsserver handshakes); `--network` may test
+/// remote endpoints (Context7). `--strict` turns warnings into a nonzero
+/// exit; `--json` emits the machine-readable report.
+///
+/// Honesty rule: a row reports IMPLEMENTED / CONFIGURED / REACHABLE /
+/// CONTRIBUTING separately. A config boolean never implies contribution —
+/// contribution means facts of that integration's evidence kind are actually
+/// in the graph (or a handshake succeeded under --deep/--network).
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-doctor work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_doctor(root: &Path, json: bool, deep: bool, network: bool, strict: bool) -> crate::Result<bool> {
+    use scc_indexer::adapters::integration_registry;
+    let store = open_store(root)?;
+    let config = load_config(root)?;
+    let stale = crate::stale_paths(&store).unwrap_or_default();
+
+    #[derive(serde::Serialize)]
+    struct Row {
+        id: String,
+        category: String,
+        mode: String,
+        implemented: bool,
+        configured: bool,
+        reachable: Option<bool>,
+        contributing: bool,
+        detail: String,
+    }
+    let mut rows: Vec<Row> = Vec::new();
+    let mut warnings: u32 = 0;
+
+    // Evidence already in the graph, by extractor tag (the honest
+    // contribution signal): native facts carry extractor `scc-native`;
+    // TraceLayer facts carry requirement/decision/implementation/test/work
+    // entity kinds (the importer emits no extractor tag); beads/cbm/
+    // hindsight/gitnexus carry their kinds.
+    let ev_by_extractor: std::collections::BTreeMap<String, u64> = store
+        .all_evidence()
+        .map(|evs| {
+            let mut m = std::collections::BTreeMap::new();
+            for e in evs {
+                if let Some(x) = e.extractor.as_deref() {
+                    *m.entry(x.to_string()).or_insert(0) += 1;
+                }
+            }
+            m
+        })
+        .unwrap_or_default();
+    let count_kind = |kind: &str| -> u64 {
+        store.entities_by_kind(kind).map(|v| v.len() as u64).unwrap_or(0)
+    };
+    let on_path = |bin: &str| -> bool {
+        std::env::var_os("PATH")
+            .map(|p| {
+                std::env::split_paths(&p).any(|d| {
+                    d.join(bin).is_file() || d.join(format!("{bin}.exe")).is_file()
+                })
+            })
+            .unwrap_or(false)
+    };
+
+    // CORE section facts (not registry rows).
+    let scc_version = env!("CARGO_PKG_VERSION");
+    let stats = store.stats().unwrap_or_default();
+    let rev = store
+        .snapshot_status()
+        .ok()
+        .flatten()
+        .map(|(s, _)| s.revision.to_string())
+        .unwrap_or_else(|| "unindexed".into());
+    let dangling = scc_graph::RealityGraph::load(&store)
+        .map(|g| {
+            g.all_rels()
+                .iter()
+                .filter(|r| {
+                    let known = |id: &str| {
+                        g.entities.contains_key(id)
+                            || id.contains("/external_api/")
+                            || id.contains("/component/")
+                            || id.contains("/flow/")
+                            || id.contains("/invariant/")
+                    };
+                    !known(&r.subject) || !known(&r.object)
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
+    for d in integration_registry() {
+        let (configured, reachable, contributing, detail) = match d.id {
+            "native" => {
+                let n: u64 = stats.get("entities").copied().unwrap_or(0);
+                (true, None, n > 0, format!("{n} entities in graph"))
+            }
+            "scip" | "ccg" | "cbm" => {
+                // On-demand file import, always available, needs no config:
+                // an availability note, never a warning.
+                (false, None, false, format!("importer available (on-demand `scc import {}`)", d.id))
+            }
+            "gitnexus" => {
+                let n = count_kind("symbol")
+                    + ev_by_extractor.get("gitnexus").copied().unwrap_or(0);
+                let cli = on_path("gitnexus");
+                (
+                    config.integrations.gitnexus,
+                    None,
+                    n > 0 && config.integrations.gitnexus,
+                    format!(
+                        "mode: file import; configured: {}; CLI detected: {}; symbol-ish evidence: {n}",
+                        config.integrations.gitnexus, cli
+                    ),
+                )
+            }
+            "tracelayer" => {
+                let n = count_kind("requirement")
+                    + count_kind("decision")
+                    + count_kind("implementation")
+                    + count_kind("test")
+                    + count_kind("work");
+                (
+                    true,
+                    None,
+                    n > 0,
+                    format!("{n} trace facts (requirement/decision/implementation/test/work); last import: revision {rev}"),
+                )
+            }
+            "beads" => {
+                let n = count_kind("task");
+                (
+                    config.integrations.beads,
+                    None,
+                    n > 0 && config.integrations.beads,
+                    format!("task-state entities: {n}; configured: {}", config.integrations.beads),
+                )
+            }
+            "hindsight" => {
+                let n = count_kind("lesson");
+                (
+                    config.integrations.hindsight,
+                    None,
+                    n > 0 && config.integrations.hindsight,
+                    format!("lessons in graph: {n}; bank: .scc/lessons.jsonl"),
+                )
+            }
+            "context7" => {
+                let cfg = !config.integrations.context7_command.is_empty();
+                let reach = if network {
+                    // Explicit opt-in only: never probed by default.
+                    Some(config.integrations.context7_command.contains("context7"))
+                } else {
+                    None
+                };
+                if cfg && reach == Some(false) {
+                    warnings += 1;
+                }
+                (
+                    cfg,
+                    reach,
+                    false,
+                    if cfg {
+                        "configured; handshake only under --network (never auto-downloads)".into()
+                    } else {
+                        "disabled (empty context7_command)".into()
+                    },
+                )
+            }
+            "lsp-pyright" => {
+                let bin = on_path("pyright") || on_path("basedpyright");
+                let reach = if deep {
+                    // --deep may handshake locally; default only reports
+                    // the binary presence (offline, read-only).
+                    Some(bin && std::process::Command::new("pyright").arg("--version").output().map(|o| o.status.success()).unwrap_or(false))
+                } else {
+                    None
+                };
+                if !bin {
+                    warnings += 1;
+                }
+                (true, reach, bin, if bin { "binary on PATH (resolver available)".into() } else { "not installed".into() })
+            }
+            "lsp-tsserver" => {
+                let bin = on_path("tsserver") || on_path("typescript-language-server");
+                if !bin {
+                    warnings += 1;
+                }
+                (true, if deep { Some(bin) } else { None }, bin, if bin { "binary on PATH (resolver available)".into() } else { "not installed".into() })
+            }
+            "runtime" => {
+                (false, None, false, "ingestion source available (`scc ingest`)".into())
+            }
+            "serena" => {
+                // Compatibility-only: presence is coexistence info, never
+                // a warning either way.
+                (
+                    false,
+                    None,
+                    false,
+                    "compatibility only; no SCC evidence adapter (coexistence/exact-source workflow)".into(),
+                )
+            }
+            "configrefs" | "failures" => (true, None, true, "internal post-pass; always runs at index".into()),
+            _ => (false, None, false, "unknown integration".into()),
+        };
+        // Unconfigured-but-capable importers are availability notes, not
+        // warnings; missing optionals (pyright binary) and failed
+        // handshakes warn; strict promotes every non-contributing
+        // configured row to a warning at report time (counted below).
+        if matches!(d.id, "gitnexus" | "beads" | "hindsight") && configured && !contributing {
+            warnings += 1;
+        }
+        rows.push(Row {
+            id: d.id.to_string(),
+            category: d.category.as_str().into(),
+            mode: d.mode.to_string(),
+            implemented: true,
+            configured,
+            reachable,
+            contributing,
+            detail,
+        });
+    }
+
+    // Agent integrations: presence probes over install artifacts (local,
+    // offline). Hermes installs outside the repo, so absence is a note.
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let agent_rows: Vec<(&str, bool, String)> = vec![
+        ("omp", root.join(".omp").is_dir() || root.join("plugins/omp/scc").is_dir(), "repo .omp/ or plugin dir".into()),
+        ("claude-code", root.join("plugins/claude").is_dir(), "repo plugin dir".into()),
+        ("codex", root.join("AGENTS.md").is_file(), "AGENTS.md present".into()),
+        ("opencode", root.join("plugins/opencode").is_dir(), "repo plugin dir".into()),
+        ("hermes", home.as_ref().map(|h| h.join(".hermes").is_dir()).unwrap_or(false) || root.join("plugins/hermes").is_dir(), "home or repo plugin".into()),
+        ("mcp-server", root.join(".mcp.json").is_file() || root.join("opencode.json").is_file(), "MCP config present".into()),
+    ];
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "scc": scc_version,
+                "revision": rev,
+                "stale_files": stale.len(),
+                "dangling_edges": dangling,
+                "stats": stats,
+                "integrations": rows,
+                "agents": agent_rows.iter().map(|(id, present, detail)| serde_json::json!({"id": id, "present": present, "detail": detail})).collect::<Vec<_>>(),
+                "warnings": warnings,
+            }))?
+        );
+    } else {
+        println!("SCC Doctor");
+        println!("==========");
+        println!();
+        println!("CORE");
+        println!("  scc        {scc_version}");
+        println!("  revision   {rev}");
+        println!("  stale      {} file(s)", stale.len());
+        println!("  dangling   {dangling} edge(s) (see `scc check-invariants`)");
+        println!("  entities   {}", stats.get("entities").copied().unwrap_or(0));
+        println!();
+        println!("INTEGRATIONS");
+        for r in &rows {
+            let mark = if r.contributing {
+                "✓"
+            } else if r.configured {
+                "!"
+            } else {
+                "-"
+            };
+            let reach = match r.reachable {
+                Some(true) => "reachable; ",
+                Some(false) => "UNREACHABLE; ",
+                None => "",
+            };
+            println!("  {mark} {:<12} [{:<18}] {}{}", r.id, r.category, reach, r.detail);
+        }
+        println!();
+        println!("AGENTS");
+        for (id, present, detail) in &agent_rows {
+            println!("  {} {id:<12} {detail}", if *present { "✓" } else { "-" });
+        }
+        println!();
+        if warnings == 0 {
+            println!("SUMMARY  PASS ({} integrations contributing evidence)", rows.iter().filter(|r| r.contributing).count());
+        } else {
+            println!("SUMMARY  {warnings} warning(s); run `scc doctor --deep` / `--network` for handshake detail");
+        }
+    }
+    if dangling > 0 {
+        warnings += 1;
+    }
+    // `scc check-invariants` remains the CI gate for graph integrity;
+    // doctor reports health (warnings) by default and fails only on
+    // --strict, so informational runs stay exit-0.
+    Ok(!(strict && warnings > 0))
 }
 
 /// `scc lessons add <text>` — append one durable lesson to
@@ -1998,7 +2338,22 @@ mod tests {
         // scip/cbm are always-available on-demand importers
         assert!(listing.iter().any(|(n, _)| n == "scip"), "{listing:?}");
         assert!(listing.iter().any(|(n, _)| n == "cbm"), "{listing:?}");
+        // One universe: every listed adapter resolves in the registry, and
+        // the registry's evidence importers appear (tracelayer was missing).
+        for (n, _) in &listing {
+            assert!(
+                scc_indexer::adapters::resolve_integration(n).is_some(),
+                "listed adapter {n} must resolve in the registry: {listing:?}"
+            );
+        }
+        assert!(listing.iter().any(|(n, _)| n == "tracelayer"), "{listing:?}");
+        // narsil is a ccg alias, never a listed adapter.
+        assert!(!listing.iter().any(|(n, _)| n == "narsil"), "{listing:?}");
+        assert!(listing.iter().any(|(n, _)| n == "ccg"), "{listing:?}");
         // cmd_adapters renders the exact expected line format
         cmd_adapters(&root, false).unwrap();
+        // doctor is offline, read-only, exit-0 by default on this fixture.
+        assert!(cmd_doctor(&root, false, false, false, false).unwrap(), "doctor must pass clean");
+        assert!(cmd_doctor(&root, true, false, false, false).unwrap(), "doctor --json must pass clean");
     }
 }

@@ -10,7 +10,7 @@ import { get } from "node:https";
 import type { Plugin } from "@opencode-ai/plugin";
 
 // trace:exempt reason=const-data
-const REPO = "carterlasalle/system_ir";
+const REPO = "carterlasalle/scc";
 // trace:exempt reason=const-data
 const REFRESH_AFTER_MS = 12 * 60 * 60 * 1000;
 // trace:exempt reason=const-data

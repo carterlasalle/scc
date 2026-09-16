@@ -43,85 +43,300 @@ pub struct AdapterManifest {
     pub credentials: bool,
 }
 
-/// All adapters and their declared capabilities. Native extractors and the
-/// bundled importers are repo-read only; the LSP adapters spawn a local
-/// language server (no network, no credentials).
-// trace:v1 id=impl.scc.indexer.adapters.adapter-manifests work=WORK-trace-layer-adapter-for-system-ir satisfies=REQ-SCC-IR
-pub fn adapter_manifests() -> Vec<AdapterManifest> {
+/// One Integration Registry (audit item 2): every integration SCC knows
+/// about — native extractors, evidence importers, semantic resolvers,
+/// runtime sources, memory sources, external knowledge, agent integrations,
+/// and compatibility shims — lives in ONE registry with a category, a mode,
+/// capability flags, and an optional config key. `narsil` is an alias for
+/// the `ccg` provider, not a separate adapter. Serena is COMPATIBILITY-ONLY:
+/// no SCC evidence adapter exists; it reports coexistence, never evidence.
+/// TraceLayer/Beads/CBM/Hindsight/Context7 importers were real but missing
+/// from the old manifest list; both `scc adapters` views now read this one
+/// registry so they can never describe different universes again.
+// trace:v1 id=impl.scc.indexer.adapters.integration-registry work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum IntegrationCategory {
+    NativeExtractor,
+    EvidenceImporter,
+    SemanticResolver,
+    RuntimeSource,
+    MemorySource,
+    ExternalKnowledge,
+    AgentIntegration,
+    CompatibilityOnly,
+    InternalPass,
+}
+
+impl IntegrationCategory {
+    /// Stable lowercase label for CLI/JSON output.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IntegrationCategory::NativeExtractor => "native-extractor",
+            IntegrationCategory::EvidenceImporter => "evidence-importer",
+            IntegrationCategory::SemanticResolver => "semantic-resolver",
+            IntegrationCategory::RuntimeSource => "runtime-source",
+            IntegrationCategory::MemorySource => "memory-source",
+            IntegrationCategory::ExternalKnowledge => "external-knowledge",
+            IntegrationCategory::AgentIntegration => "agent-integration",
+            IntegrationCategory::CompatibilityOnly => "compatibility-only",
+            IntegrationCategory::InternalPass => "internal-pass",
+        }
+    }
+}
+
+/// One integration: what it is, how it contributes, what it may touch, and
+/// how it is enabled. `mode` is the contribution shape ("tree-sitter",
+/// "file-import", "lsp-subprocess", "mcp-network", "config-only",
+/// "internal"); `config_key` names the `.scc/config.yaml` integrations key
+/// (None = always available / needs no config); `aliases` lists legacy
+/// names that resolve to this descriptor (`narsil` -> `ccg`).
+#[derive(Debug, Clone, serde::Serialize)]
+// trace:v1 id=impl.scc.indexer.adapters.integration-descriptor work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct IntegrationDescriptor {
+    pub id: &'static str,
+    pub aliases: &'static [&'static str],
+    pub category: IntegrationCategory,
+    pub mode: &'static str,
+    pub description: &'static str,
+    pub filesystem: &'static str,
+    pub network: bool,
+    pub subprocess: bool,
+    pub credentials: bool,
+    pub config_key: Option<&'static str>,
+    pub evidence_kind: Option<&'static str>,
+}
+
+/// THE registry: every integration in fixed declaration order (deterministic
+/// output). Adding a new integration means adding ONE row here.
+// trace:v1 id=impl.scc.indexer.adapters.integration-registry-table work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn integration_registry() -> Vec<IntegrationDescriptor> {
     vec![
-        AdapterManifest {
-            name: "native",
+        IntegrationDescriptor {
+            id: "native",
+            aliases: &[],
+            category: IntegrationCategory::NativeExtractor,
+            mode: "tree-sitter",
             description: "built-in tree-sitter extractors (python/typescript/infra/config)",
             filesystem: "repo-read",
             network: false,
             subprocess: false,
             credentials: false,
+            config_key: None,
+            evidence_kind: None,
         },
-        AdapterManifest {
-            name: "scip",
+        IntegrationDescriptor {
+            id: "scip",
+            aliases: &[],
+            category: IntegrationCategory::EvidenceImporter,
+            mode: "file-import",
             description: "SCIP index importer",
             filesystem: "external-file",
             network: false,
             subprocess: false,
             credentials: false,
+            config_key: None,
+            evidence_kind: Some("symbol"),
         },
-        AdapterManifest {
-            name: "ccg",
-            description: "Narsil CCG importer",
+        IntegrationDescriptor {
+            id: "ccg",
+            aliases: &["narsil"],
+            category: IntegrationCategory::EvidenceImporter,
+            mode: "file-import",
+            description: "Narsil CCG importer (narsil is the provider name for the ccg format)",
             filesystem: "external-file",
             network: false,
             subprocess: false,
             credentials: false,
+            config_key: None,
+            evidence_kind: Some("symbol"),
         },
-        AdapterManifest {
-            name: "gitnexus",
-            description: "GitNexus evidence export importer",
+        IntegrationDescriptor {
+            id: "gitnexus",
+            aliases: &[],
+            category: IntegrationCategory::EvidenceImporter,
+            mode: "file-import",
+            description: "GitNexus evidence export importer (import-only: config enables nothing by itself; contribution = imported facts)",
             filesystem: "external-file",
             network: false,
             subprocess: false,
             credentials: false,
+            config_key: Some("gitnexus"),
+            evidence_kind: Some("symbol"),
         },
-        AdapterManifest {
-            name: "lsp-pyright",
+        IntegrationDescriptor {
+            id: "tracelayer",
+            aliases: &[],
+            category: IntegrationCategory::EvidenceImporter,
+            mode: "file-import",
+            description: "TraceLayer marker importer (requirements/work/implementations/tests/decisions)",
+            filesystem: "external-file",
+            network: false,
+            subprocess: false,
+            credentials: false,
+            config_key: None,
+            evidence_kind: Some("requirement"),
+        },
+        IntegrationDescriptor {
+            id: "beads",
+            aliases: &[],
+            category: IntegrationCategory::MemorySource,
+            mode: "file-import",
+            description: "Beads issue-tracker importer (task state, never system facts)",
+            filesystem: "external-file",
+            network: false,
+            subprocess: false,
+            credentials: false,
+            config_key: Some("beads"),
+            evidence_kind: Some("task"),
+        },
+        IntegrationDescriptor {
+            id: "cbm",
+            aliases: &[],
+            category: IntegrationCategory::EvidenceImporter,
+            mode: "file-import",
+            description: "CBM (component-behavior map) importer",
+            filesystem: "external-file",
+            network: false,
+            subprocess: false,
+            credentials: false,
+            config_key: None,
+            evidence_kind: Some("symbol"),
+        },
+        IntegrationDescriptor {
+            id: "hindsight",
+            aliases: &[],
+            category: IntegrationCategory::MemorySource,
+            mode: "file-import",
+            description: "Hindsight lesson-bank importer",
+            filesystem: "external-file",
+            network: false,
+            subprocess: false,
+            credentials: false,
+            config_key: Some("hindsight"),
+            evidence_kind: Some("lesson"),
+        },
+        IntegrationDescriptor {
+            id: "context7",
+            aliases: &[],
+            category: IntegrationCategory::ExternalKnowledge,
+            mode: "mcp-network",
+            description: "Context7 MCP docs client (network + npx subprocess)",
+            filesystem: "external-mcp",
+            network: true,
+            subprocess: true,
+            credentials: false,
+            config_key: Some("context7_command"),
+            evidence_kind: None,
+        },
+        IntegrationDescriptor {
+            id: "lsp-pyright",
+            aliases: &[],
+            category: IntegrationCategory::SemanticResolver,
+            mode: "lsp-subprocess",
             description: "LSP definition resolution via pyright",
             filesystem: "repo-read",
             network: false,
             subprocess: true,
             credentials: false,
+            config_key: None,
+            evidence_kind: None,
         },
-        AdapterManifest {
-            name: "lsp-tsserver",
+        IntegrationDescriptor {
+            id: "lsp-tsserver",
+            aliases: &[],
+            category: IntegrationCategory::SemanticResolver,
+            mode: "lsp-subprocess",
             description: "LSP definition resolution via typescript-language-server",
             filesystem: "repo-read",
             network: false,
             subprocess: true,
             credentials: false,
+            config_key: None,
+            evidence_kind: None,
         },
-        AdapterManifest {
-            name: "configrefs",
-            description: "config-reference post-pass",
-            filesystem: "repo-read",
-            network: false,
-            subprocess: false,
-            credentials: false,
-        },
-        AdapterManifest {
-            name: "failures",
-            description: "failure-pattern post-pass (except/circuit/dlq)",
-            filesystem: "repo-read",
-            network: false,
-            subprocess: false,
-            credentials: false,
-        },
-        AdapterManifest {
-            name: "runtime",
+        IntegrationDescriptor {
+            id: "runtime",
+            aliases: &[],
+            category: IntegrationCategory::RuntimeSource,
+            mode: "ingestion",
             description: "OpenTelemetry trace ingestion",
             filesystem: "repo-read",
             network: false,
             subprocess: false,
             credentials: false,
+            config_key: None,
+            evidence_kind: None,
+        },
+        IntegrationDescriptor {
+            id: "serena",
+            aliases: &[],
+            category: IntegrationCategory::CompatibilityOnly,
+            mode: "config-only",
+            description: "Serena coexistence (exact-source workflow); contributes NO SCC evidence",
+            filesystem: "none",
+            network: false,
+            subprocess: false,
+            credentials: false,
+            config_key: Some("serena"),
+            evidence_kind: None,
+        },
+        IntegrationDescriptor {
+            id: "configrefs",
+            aliases: &[],
+            category: IntegrationCategory::InternalPass,
+            mode: "internal",
+            description: "config-reference post-pass",
+            filesystem: "repo-read",
+            network: false,
+            subprocess: false,
+            credentials: false,
+            config_key: None,
+            evidence_kind: None,
+        },
+        IntegrationDescriptor {
+            id: "failures",
+            aliases: &[],
+            category: IntegrationCategory::InternalPass,
+            mode: "internal",
+            description: "failure-pattern post-pass (except/circuit/dlq)",
+            filesystem: "repo-read",
+            network: false,
+            subprocess: false,
+            credentials: false,
+            config_key: None,
+            evidence_kind: None,
         },
     ]
+}
+
+/// Resolve an id or alias ("narsil" -> "ccg") to its descriptor.
+pub fn resolve_integration(name: &str) -> Option<IntegrationDescriptor> {
+    integration_registry()
+        .into_iter()
+        .find(|d| d.id == name || d.aliases.contains(&name))
+}
+
+/// All adapters and their declared capabilities. Native extractors and the
+/// bundled importers are repo-read only; the LSP adapters spawn a local
+/// language server (no network, no credentials).
+// trace:v1 id=impl.scc.indexer.adapters.adapter-manifests work=WORK-trace-layer-adapter-for-system-ir satisfies=REQ-SCC-IR
+pub fn adapter_manifests() -> Vec<AdapterManifest> {
+    // Derived from THE registry: adding a row there automatically appears
+    // here (and in `scc adapters` / `scc doctor`). Compatibility-only
+    // entries (Serena) contribute no evidence and declare no sandbox
+    // surface, so they stay out of the capability manifests.
+    integration_registry()
+        .into_iter()
+        .filter(|d| d.category != IntegrationCategory::CompatibilityOnly)
+        .map(|d| AdapterManifest {
+            name: d.id,
+            description: d.description,
+            filesystem: d.filesystem,
+            network: d.network,
+            subprocess: d.subprocess,
+            credentials: d.credentials,
+        })
+        .collect()
 }
 
 /// Sandbox policy check (SCC-225): verify a manifest is within the allowed
@@ -136,7 +351,7 @@ pub fn sandbox_violations(m: &AdapterManifest) -> Vec<String> {
     if m.credentials {
         out.push("credential access not allowed in the default profile".into());
     }
-    if m.subprocess && !(m.name.starts_with("lsp-")) {
+    if m.subprocess && !(m.name.starts_with("lsp-") || m.name == "context7") {
         out.push("subprocess not allowed outside declared server adapters".into());
     }
     out
@@ -843,11 +1058,46 @@ mod manifest_tests {
 // trace:v1 id=impl.scc.indexer.adapters.all-manifests-are-within-default-profile work=WORK-trace-layer-adapter-for-system-ir satisfies=REQ-SCC-IR
     fn all_manifests_are_within_default_profile() {
         let manifests = adapter_manifests();
-        assert!(manifests.len() >= 8);
+        // One registry drives this: every non-compatibility integration
+        // appears (14 rows above minus serena).
+        assert_eq!(
+            manifests.len(),
+            integration_registry()
+                .iter()
+                .filter(|d| d.category != IntegrationCategory::CompatibilityOnly)
+                .count()
+        );
         for m in &manifests {
             let v = sandbox_violations(m);
-            assert!(v.is_empty(), "{} violates sandbox: {v:?}", m.name);
+            if m.name == "context7" {
+                // Opt-in external knowledge: network by explicit user
+                // command only, never on by default.
+                assert!(m.network, "context7 must declare its network use");
+                assert!(
+                    v.iter().any(|s| s.contains("network")),
+                    "context7 network must trip the default profile: {v:?}"
+                );
+            } else {
+                assert!(v.is_empty(), "{} violates sandbox: {v:?}", m.name);
+            }
         }
+    }
+
+    #[test]
+    // trace:v1 id=impl.scc.indexer.adapters.registry-alias-compat work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    fn registry_resolves_aliases_and_marks_compatibility() {
+        // narsil is the provider name for the ccg format, not an adapter.
+        let ccg = resolve_integration("narsil").expect("narsil must resolve");
+        assert_eq!(ccg.id, "ccg");
+        assert_eq!(resolve_integration("ccg").unwrap().id, "ccg");
+        // Serena contributes no evidence: compatibility, honestly labeled.
+        let serena = resolve_integration("serena").expect("serena must resolve");
+        assert_eq!(
+            serena.category,
+            IntegrationCategory::CompatibilityOnly
+        );
+        assert!(serena.evidence_kind.is_none());
+        assert!(resolve_integration("nope").is_none());
     }
 
     #[test]

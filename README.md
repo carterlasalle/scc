@@ -5,7 +5,7 @@
 
 **Compile repositories into evidence-backed system context for coding agents.**
 
-[![CI](https://github.com/carterlasalle/system_ir/actions/workflows/ci.yml/badge.svg)](https://github.com/carterlasalle/system_ir/actions/workflows/ci.yml)
+[![CI](https://github.com/carterlasalle/scc/actions/workflows/ci.yml/badge.svg)](https://github.com/carterlasalle/scc/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-WAL%20%2B%20FTS5-003B57?logo=sqlite&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-10%20tools-000000?logo=modelcontextprotocol&logoColor=white)

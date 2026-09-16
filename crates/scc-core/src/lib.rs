@@ -1577,6 +1577,17 @@ pub struct SurfaceEntry {
     pub callers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub callees: Vec<String>,
+    /// Exact distinct fan-in/fan-out (the displayed name lists stay capped
+    /// at 12; the counts are never truncated).
+    #[serde(default)]
+    pub caller_count: usize,
+    #[serde(default)]
+    pub callee_count: usize,
+    /// Derived importance explanation (badges + counts + architecture
+    /// signals). Populated by the surface pipeline; default-empty for
+    /// entries built before ranking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub importance: Option<ImportanceProfile>,
     pub provenance: Provenance,
     #[serde(default)]
     pub confidence: f32,
@@ -1586,6 +1597,30 @@ pub struct SurfaceEntry {
 
 /// A definition deliberately omitted by a token-budget cut — the artifact
 /// never silently implies completeness.
+/// Derived importance explanation for one surface symbol (audit item 3):
+/// topology (exact fan-in/fan-out, never truncated), architecture signals,
+/// and change impact — computed from data the pipeline ALREADY has. Badges
+/// are derived labels over those numbers, not extra scoring magic: the
+/// overall score stays `rank.total`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// trace:v1 id=impl.scc.core.importance-profile work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct ImportanceProfile {
+    pub overall: f64,
+    pub caller_count: usize,
+    pub callee_count: usize,
+    pub global_ppr: f64,
+    pub task_ppr: f64,
+    pub entrypoint: bool,
+    pub exported: bool,
+    pub flow_count: usize,
+    pub contract_count: usize,
+    pub state_read_count: usize,
+    pub state_write_count: usize,
+    pub dependent_count: usize,
+    pub change_risk: f64,
+    pub badges: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SurfaceOmission work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching

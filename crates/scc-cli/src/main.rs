@@ -225,11 +225,42 @@ enum Commands {
     /// Compute and store entity embeddings (optional semantic ranker)
     Embed,
 
+    /// Most important symbols (global centrality or task-critical)
+    Important {
+        /// Max entries (default 15)
+        #[arg(long, default_value_t = 15)]
+        limit: usize,
+        /// Filter to one component (substring)
+        #[arg(long)]
+        component: Option<String>,
+        /// Rank by task relevance instead of global centrality
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// List enabled adapters with their declared capability scope (security audit)
     Adapters {
         /// Dump the full capability manifests instead of the scope listing
         #[arg(long)]
         json: bool,
+    },
+
+    /// Integration health from the Integration Registry (offline by default)
+    Doctor {
+        /// Machine-readable report
+        #[arg(long)]
+        json: bool,
+        /// Start LOCAL subprocesses for handshake detail (pyright/tsserver)
+        #[arg(long)]
+        deep: bool,
+        /// Probe remote endpoints (Context7); never probed by default
+        #[arg(long)]
+        network: bool,
+        /// Nonzero exit on any warning
+        #[arg(long)]
+        strict: bool,
     },
 
     /// Manage the Hindsight lesson bank (.scc/lessons.jsonl)
@@ -809,7 +840,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Mcp => commands::cmd_mcp(&root),
         Commands::Ingest { body } => commands::cmd_ingest_runtime(&root, &body),
         Commands::Embed => scc_cli::embed_cli::cmd_embed(&root),
+        Commands::Important { limit, component, task, json } => {
+            commands::cmd_important(&root, limit, component.as_deref(), task.as_deref(), json)
+        }
         Commands::Adapters { json } => commands::cmd_adapters(&root, json),
+        Commands::Doctor { json, deep, network, strict } => match commands::cmd_doctor(&root, json, deep, network, strict) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(scc_cli::CliError::Other("scc doctor: issues found".into())),
+            Err(e) => Err(e),
+        },
         Commands::Lessons { sub } => match sub.unwrap_or(LessonsSub::List { limit: 20 }) {
             LessonsSub::Add { text } => commands::cmd_lessons_add(&root, &text),
             LessonsSub::List { limit } => commands::cmd_lessons_list(&root, limit),

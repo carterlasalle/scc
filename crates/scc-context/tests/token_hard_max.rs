@@ -223,8 +223,14 @@ fn startup_allocator_default_is_adaptive_and_flow_aware() {
     let ctx = compiler(&f);
 
     let none_budget = allocate_startup_budget(&ctx, None);
-    let explicit = allocate_startup_budget(&ctx, Some(ContextBudget::default().total));
-    assert_eq!(none_budget, explicit, "None must run the SAME adaptive split over the default total");
+    let configured = allocate_startup_budget(&ctx, Some(ctx.settings.startup_tokens));
+    assert_eq!(none_budget.total, ctx.settings.startup_tokens, "None must use the configured startup ceiling, not the hardcoded default");
+    assert_eq!(none_budget, configured, "None must run the SAME adaptive split over the configured total");
+    assert_ne!(
+        none_budget.total,
+        ContextBudget::default().total,
+        "regression: the configured ceiling (6000 in fixtures) must differ from the hardcoded default total (20000), or this test cannot tell them apart"
+    );
 
     // Flow-tier behavior is a pure function of the counts (RealityGraph
     // flows are produced by the indexer's flow compiler, not by raw FLOW
@@ -286,6 +292,7 @@ fn fused_startup_respects_final_hard_max() {
 
     let hard_max = budget.total.saturating_add((budget.total / 5).max(500));
     let actual = estimate_tokens(&startup.artifact.text);
+    eprintln!("IMP={} SURF={} ATLAS={} OM={:?}", startup.important.len(), startup.surface.len(), startup.atlas.len(), startup.omissions);
     assert!(
         actual <= hard_max,
         "fused startup artifact {} tokens exceeds hard_max {} (headers included)",

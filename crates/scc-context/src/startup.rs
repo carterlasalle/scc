@@ -33,6 +33,10 @@ pub struct StartupContext {
     /// built from the indexed file inventory under its own hard budget.
     pub skeleton: String,
     pub surface: String,
+    /// IMPORTANT SYMBOLS section (audit item 3): the fast "where do I pay
+    /// attention first" answer, rendered before the long Surface Map
+    /// detail. Computed from the same global rank the surface used.
+    pub important: String,
     pub surface_render: scc_core::SurfaceRenderResult,
     pub coverage: Vec<String>,
     pub omissions: Vec<String>,
@@ -88,8 +92,8 @@ pub struct GlobalRankCache {
 /// through this function and never derives an Atlas:Surface split itself.
 ///
 /// `target_tokens == None` does NOT bypass adaptation: it selects the
-/// configured default total (`ContextBudget::default().total`), which then
-/// goes through the SAME adaptive complexity split. An explicit target
+/// configured startup ceiling (`compiler.settings.startup_tokens`), which
+/// then goes through the SAME adaptive complexity split. An explicit target
 /// scales the total; repo complexity decides the split — in both cases via
 /// [`scc_core::ContextBudget::adaptive`]. Deterministic per (target,
 /// view): same inputs, same budget.
@@ -98,7 +102,7 @@ pub fn allocate_startup_budget(
     compiler: &ContextCompiler,
     target_tokens: Option<usize>,
 ) -> ContextBudget {
-    let total = target_tokens.unwrap_or_else(|| ContextBudget::default().total);
+    let total = target_tokens.unwrap_or(compiler.settings.startup_tokens);
     let view = &compiler.view;
     let entity_count = view.entities().count();
     let component_count = view.components().len();
@@ -290,7 +294,7 @@ pub fn build_startup(
             atlas_pack.hard_truncated,
             atlas_pack.exceeded_soft_budget,
         );
-        let fused = assemble_body(&atlas, &skeleton, &render.text, &coverage, &omissions_probe);
+        let fused = assemble_body(&atlas, &skeleton, &render.text, "", &coverage, &omissions_probe);
         if BLOCK_HEADER_OVERHEAD + estimate_tokens(&fused) <= startup_hard_max {
             break;
         }
@@ -303,7 +307,7 @@ pub fn build_startup(
             // than looping forever.
             break;
         }
-        let overhead = estimate_tokens(&assemble_body(&atlas, &skeleton, "", &coverage, &omissions_probe));
+        let overhead = estimate_tokens(&assemble_body(&atlas, &skeleton, "", "", &coverage, &omissions_probe));
         let room = startup_hard_max.saturating_sub(overhead);
         if room >= 64 {
             // Surface still has room: shrink it to the room the current
@@ -379,6 +383,7 @@ pub fn build_startup(
                 &atlas,
                 &skeleton,
                 &surface,
+                "",
                 &coverage,
                 &omissions_probe0,
             ))
@@ -423,7 +428,7 @@ pub fn build_startup(
                 "startup emergency compression: atlas essentials + skeleton only (surface omitted over hard max)".into(),
             );
             o };
-            let fused = assemble_body(&atlas, &probe.text, "", &coverage, &omissions_probe);
+            let fused = assemble_body(&atlas, &probe.text, "", "", &coverage, &omissions_probe);
             if BLOCK_HEADER_OVERHEAD + estimate_tokens(&fused) <= startup_hard_max
                 || skel_budget == 0
             {
@@ -434,6 +439,97 @@ pub fn build_startup(
             skel_budget /= 2;
         }
     }
+    }
+
+    // IMPORTANT FUNDED (audit item 3): the section joins the fused body,
+    // so it must fit the hard max like every other section. If the
+    // post-loop important text pushes the fused artifact over hard_max,
+    // shrink the surface once more by exactly that overrun and recompute
+    // the section from the new render (monotone: at most one extra pass).
+    // Section budget: ~8% of the hard max at ~40 tokens/symbol,
+    // floored to 1 symbol and capped at 15. Tiny totals list fewer
+    // symbols instead of either blowing the hard max or flooring to
+    // nothing. Receipt: 15 symbols render ~550 tokens; a 1024-total
+    // startup (hard max ~1500) funds ~120 section tokens ≈ 3 symbols.
+    let important_n = (startup_hard_max / 500).clamp(1, 15);
+    let mut important = if render.rendered_ids.is_empty() {
+        "## SYSTEM-CRITICAL SYMBOLS\n(surface omitted over hard max)\n".to_string()
+    } else {
+        let top = crate::surface::important_symbols(
+            compiler,
+            crate::surface::SurfaceMode::Global,
+            important_n,
+        );
+        crate::surface::render_important(&top, false)
+    };
+    {
+        let probe_om = omission_lines(
+            &render.omissions,
+            render.omitted_ids.len(),
+            &atlas_pack.dropped_sections,
+            atlas_pack.hard_truncated,
+            atlas_pack.exceeded_soft_budget,
+        );
+        let fused = assemble_body(&atlas, &skeleton, &render.text, &important, &coverage, &probe_om);
+        if BLOCK_HEADER_OVERHEAD + estimate_tokens(&fused) > startup_hard_max && !render.rendered_ids.is_empty() {
+            let over = BLOCK_HEADER_OVERHEAD + estimate_tokens(&fused) - startup_hard_max;
+            let room = render
+                .token_count
+                .saturating_sub(over)
+                .saturating_sub(estimate_tokens(&important));
+            if room >= 64 {
+                let policy = SurfacePolicy {
+                    quotas: true,
+                    mmr: true,
+                    coverage: true,
+                    hard_max: room,
+                };
+                render = build_surface_cached(
+                    compiler,
+                    SurfaceRequest {
+                        mode: SurfaceMode::Global,
+                        budget: room,
+                        explain: false,
+                        policy,
+                        semantic: None,
+                    },
+                    &mut rank_cache,
+                );
+                coverage = coverage_lines(
+                    compiler,
+                    render.rendered_ids.len(),
+                    render.rendered_ids.len() + render.omitted_ids.len(),
+                    render.token_count,
+                    room,
+                );
+                important = if render.rendered_ids.is_empty() {
+                    "## SYSTEM-CRITICAL SYMBOLS\n(surface omitted over hard max)\n".to_string()
+                } else {
+                    let top = crate::surface::important_symbols(
+                        compiler,
+                        crate::surface::SurfaceMode::Global,
+                        important_n,
+                    );
+                    crate::surface::render_important(&top, false)
+                };
+                // Final probe: the recomputed section + smaller surface
+                // may still exceed (tiny total, huge repo) — floor it.
+                let probe_om2 = omission_lines(
+                    &render.omissions,
+                    render.omitted_ids.len(),
+                    &atlas_pack.dropped_sections,
+                    atlas_pack.hard_truncated,
+                    atlas_pack.exceeded_soft_budget,
+                );
+                let fused2 = assemble_body(&atlas, &skeleton, &render.text, &important, &coverage, &probe_om2);
+                if BLOCK_HEADER_OVERHEAD + estimate_tokens(&fused2) > startup_hard_max {
+                    important = "## SYSTEM-CRITICAL SYMBOLS\n(omitted over hard max)\n".to_string();
+                }
+            }
+        } else {
+            // No room to fund the section: floor it to one line.
+            important = "## SYSTEM-CRITICAL SYMBOLS\n(omitted over hard max)\n".to_string();
+        }
     }
 
     // OMISSIONS (final render — after the corrective loop): the render
@@ -470,7 +566,7 @@ pub fn build_startup(
     // (atlas + surface + coverage + omissions, without the artifact metadata
     // comment). A content change that keeps the config identical now
     // changes the hash — the audit's name/content mismatch fix.
-    let body = assemble_body(&atlas, &skeleton, &surface, &coverage, &omissions);
+    let body = assemble_body(&atlas, &skeleton, &surface, &important, &coverage, &omissions);
     let mut ch = blake3::Hasher::new();
     ch.update(b"startup-content-v1");
     ch.update(epoch.as_bytes());
@@ -494,13 +590,14 @@ pub fn build_startup(
         content_hash,
         text: String::new(),
     };
-    artifact.text = assemble_block(&atlas, &skeleton, &surface, &coverage, &omissions, &artifact);
+    artifact.text = assemble_block(&atlas, &skeleton, &surface, &important, &coverage, &omissions, &artifact);
 
     StartupContext {
         atlas,
         atlas_budget_used,
         skeleton,
         surface,
+        important,
         surface_render: render,
         coverage,
         omissions,
@@ -576,13 +673,13 @@ fn symbol_id_of(entry_id: &str) -> String {
 /// `build_startup(..).artifact.text == render_startup(&startup)` always.
 // trace:exempt reason=internal-detail
 pub fn render_startup(s: &StartupContext) -> String {
-    assemble_block(&s.atlas, &s.skeleton, &s.surface, &s.coverage, &s.omissions, &s.artifact)
+    assemble_block(&s.atlas, &s.skeleton, &s.surface, &s.important, &s.coverage, &s.omissions, &s.artifact)
 }
 
 /// The startup body (all content sections, no artifact metadata comment) —
 /// the preimage of `content_hash`.
 // trace:exempt reason=internal-detail
-fn assemble_body(atlas: &str, skeleton: &str, surface: &str, coverage: &[String], omissions: &[String]) -> String {
+fn assemble_body(atlas: &str, skeleton: &str, surface: &str, important: &str, coverage: &[String], omissions: &[String]) -> String {
     let mut out = String::new();
     out.push_str("# SCC SYSTEM CONTEXT\n");
     out.push_str("## SYSTEM ATLAS\n");
@@ -591,6 +688,8 @@ fn assemble_body(atlas: &str, skeleton: &str, surface: &str, coverage: &[String]
     out.push_str(skeleton.trim_end());
     out.push_str("\n\n## SYSTEM SURFACE MAP\n");
     out.push_str(surface.trim_end());
+    out.push_str("\n\n");
+    out.push_str(important.trim_end());
     out.push_str("\n\n## MODEL COVERAGE\n");
     if coverage.is_empty() {
         out.push_str("(no warnings)\n");
@@ -613,6 +712,7 @@ fn assemble_block(
     atlas: &str,
     skeleton: &str,
     surface: &str,
+    important: &str,
     coverage: &[String],
     omissions: &[String],
     artifact: &ContextArtifact,
@@ -623,7 +723,7 @@ fn assemble_block(
         "<!-- artifact sha256:{} content_hash:{} epoch:{} renderer:{} -->\n\n",
         artifact.sha256, artifact.content_hash, artifact.epoch, artifact.renderer_version
     ));
-    out.push_str(&assemble_body(atlas, skeleton, surface, coverage, omissions));
+    out.push_str(&assemble_body(atlas, skeleton, surface, important, coverage, omissions));
     out
 }
 
@@ -794,9 +894,17 @@ pub fn task_delta_with_ids(
             semantic,
         },
     );
+    // TASK-CRITICAL SYMBOLS (audit item 3): top-8 task-ranked entries
+    // with badges + exact counts, ahead of the delta detail.
+    let critical = crate::surface::important_symbols(
+        compiler,
+        SurfaceMode::Task { goal, visible: Some(visible) },
+        8,
+    );
     let mut out = String::new();
     out.push_str("# SCC TASK DELTA\n");
     out.push_str(&format!("TASK-FOCUS: {goal}\n"));
+    out.push_str(crate::surface::render_important(&critical, true).as_str());
     out.push_str("Relevant APIs not already visible:\n");
     let body = render
         .text
@@ -882,6 +990,7 @@ mod tests {
             atlas_budget_used: 6000,
             skeleton: "SKELETON-BODY".into(),
             surface: "SURFACE-BODY".into(),
+            important: "IMPORTANT-BODY".into(),
             surface_render: scc_core::SurfaceRenderResult {
                 text: "SURFACE-BODY".into(),
                 rendered_ids: vec![],
@@ -911,6 +1020,7 @@ mod tests {
         assert!(out.contains("ATLAS-BODY"));
         assert!(out.contains("SURFACE-BODY"));
         assert!(out.contains("SKELETON-BODY"));
+        assert!(out.contains("## SYSTEM-CRITICAL SYMBOLS") || out.contains("IMPORTANT-BODY"));
         let (ia, ik, is) = (
             out.find("## SYSTEM ATLAS").unwrap(),
             out.find("## REPOSITORY SKELETON").unwrap(),

@@ -166,6 +166,32 @@ fn startup_rank_cache_persists_and_is_reused_across_runs() {
 }
 
 #[test]
+// trace:v1 id=test.scc.important-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+fn important_lists_badged_symbols_with_exact_counts() {
+    // `scc important` ranks the fixture's called-twice helper above the
+    // uncalled one, keeps the exact caller count (not the 12-name cap),
+    // and derives CORE-worthy badges from architecture, not frequency.
+    let repo = common::copy_fixture("cli-service");
+    let dir = common::workdir(repo.path());
+    common::run_ok(&dir, &["index", "--quiet"]);
+    let out = common::run_ok(&dir, &["important", "--limit", "5"]);
+    assert!(out.contains("## SYSTEM-CRITICAL SYMBOLS"), "{out}");
+    let js = common::run_ok(&dir, &["important", "--limit", "5", "--json"]);
+    let entries: serde_json::Value = serde_json::from_str(&js).expect("json");
+    let arr = entries.as_array().expect("array");
+    assert!(!arr.is_empty(), "must rank symbols");
+    let first = &arr[0];
+    assert!(first.get("caller_count").and_then(|v| v.as_u64()).is_some(), "exact count kept");
+    assert!(first.get("importance").and_then(|v| v.get("badges")).and_then(|v| v.as_array()).is_some(), "badges derived");
+    // task mode re-ranks and retitles.
+    let tout = common::run_ok(&dir, &["important", "--task", "serve http", "--limit", "3"]);
+    assert!(tout.contains("## TASK-CRITICAL SYMBOLS"), "{tout}");
+    // startup embeds the section.
+    let startup = common::run_ok(&dir, &["context", "startup"]);
+    assert!(startup.contains("## SYSTEM-CRITICAL SYMBOLS"), "{startup}");
+}
+
+#[test]
 // trace:exempt reason=unit-test
 // trace:v1 id=test.scc.surface-startup.ledger-same-render verifies=REQ-global-rank-cached-per-model-epoch exercises=impl.scc.context.startup
 fn startup_ledger_records_the_same_render_it_printed() {
@@ -182,8 +208,8 @@ fn startup_ledger_records_the_same_render_it_printed() {
     with_cli_compiler(&dir, |store, comp| {
         let ctx = comp.ctx();
 
-        // Part B contract: no --budget selects the DEFAULT TOTAL and still
-        // runs THE one adaptive allocator — the CLI path exactly.
+        // Part B contract: no --budget selects the CONFIGURED STARTUP
+        // ceiling and still runs THE one adaptive allocator — the CLI path exactly.
         let budget = scc_context::startup::allocate_startup_budget(&ctx, None);
         let sc = scc_context::startup::build_startup(
             &ctx,

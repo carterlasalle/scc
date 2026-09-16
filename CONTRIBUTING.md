@@ -7,7 +7,7 @@ and benchmarks.
 ## Getting started
 
 ```bash
-git clone https://github.com/carterlasalle/system_ir.git
+git clone https://github.com/carterlasalle/scc.git
 cd system_ir
 cargo build --workspace
 cargo test --workspace

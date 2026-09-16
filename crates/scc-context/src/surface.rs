@@ -1140,10 +1140,13 @@ fn build_surface_staged_inner(
     }
     // The compiled map carries the per-entry SurfaceRank so every consumer
     // (render, MCP JSON, tests) sees the decomposition; the selected
-    // clones inherit it into the render.
+    // clones inherit it into the render. Importance profiles ride along:
+    // derived badges + exact counts over data already on the entry — no
+    // new scoring, no rank change.
     for e in &mut map.entries {
         if let Some(r) = ranks.get(&e.id) {
             e.rank = r.clone();
+            e.importance = Some(importance_profile(e, r));
         }
     }
     ranked.sort_by(|a, b| {
@@ -1183,6 +1186,154 @@ pub fn select_and_render_global(
     )
 }
 
+/// Top-N important symbols (audit item 3): the ranked map's entries
+/// sorted by the mode's score (task_ppr for Task, global-weighted total
+/// for Global), each carrying its derived [`scc_core::ImportanceProfile`].
+/// READ-ONLY ranking view: no rescoring, no budget, no render — callers
+/// (startup sections, `scc important`) decide presentation. `limit`
+/// caps the returned entries (0 = all).
+// trace:v1 id=impl.scc.surface.important-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn important_symbols(
+    compiler: &ContextCompiler,
+    mode: SurfaceMode<'_>,
+    limit: usize,
+) -> Vec<SurfaceEntry> {
+    let mut map = compile_surface_map(compiler);
+    // Rank exactly like the production pipeline: task seeds when tasked,
+    // global PPR otherwise. Scores attach to entries via the shared tail.
+    let request = SurfaceRequest {
+        mode,
+        budget: usize::MAX,
+        explain: false,
+        policy: SurfacePolicy {
+            quotas: false,
+            mmr: false,
+            coverage: false,
+            hard_max: usize::MAX,
+        },
+        semantic: None,
+    };
+    let stages = SurfacePipelineStages {
+        lexical: true,
+        global_ppr: true,
+        task_ppr: true,
+        mmr: false,
+        quotas: false,
+        optimizer: true,
+    };
+    let _ = build_surface_staged(compiler, request, &stages);
+    // build_surface_staged does not return the ranked map; re-rank here
+    // over the same signals the pipeline used (global/task projection +
+    // final_importance blend) — deterministic, same order as selection.
+    let ranker = crate::pagerank::SystemRanker::new(&compiler.view);
+    let gv = ranker.global_vector();
+    let global_of: BTreeMap<String, f64> =
+        ranker.project_to_symbols(&gv).into_iter().collect();
+    let task_of: BTreeMap<String, f64> = match &mode {
+        SurfaceMode::Task { goal, .. } => {
+            let cands =
+                crate::rank::collect_lexical_candidates(compiler.store, &compiler.view, goal, &[], 16);
+            let seeds: Vec<TaskSeed> = cands
+                .iter()
+                .map(|c| TaskSeed {
+                    kind: c.kind.clone(),
+                    id: c.id.clone(),
+                    weight: c.score,
+                })
+                .collect();
+            if seeds.is_empty() {
+                BTreeMap::new()
+            } else {
+                ranker
+                    .project_to_symbols(&ranker.task_vector(&seeds))
+                    .into_iter()
+                    .collect()
+            }
+        }
+        SurfaceMode::Global => BTreeMap::new(),
+    };
+    let tasked = !task_of.is_empty();
+    for e in &mut map.entries {
+        let task_ppr = task_of.get(&e.symbol_id).copied().unwrap_or(0.0);
+        let global_ppr = global_of.get(&e.symbol_id).copied().unwrap_or(0.0);
+        let score = if tasked { task_ppr } else { global_ppr };
+        let r = SurfaceRank {
+            task_ppr,
+            global_ppr,
+            lexical: 0.0,
+            semantic: 0.0,
+            confidence: e.confidence as f64,
+            criticality: 0.0,
+            change_risk: 0.0,
+            novelty: 1.0,
+            total: score,
+            reasons: Vec::new(),
+        };
+        e.rank = r.clone();
+        e.importance = Some(importance_profile(e, &r));
+    }
+    map.entries
+        .sort_by(|a, b| {
+            b.rank
+                .total
+                .partial_cmp(&a.rank.total)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+    if limit > 0 {
+        map.entries.truncate(limit);
+    }
+    map.entries
+}
+
+/// Render the IMPORTANT SYMBOLS section (audit item 3): numbered entries
+/// with badges, exact fan-in/fan-out, flow/contract counts, and the
+/// overall score — the fast "where do I pay attention first" answer
+/// before the long Surface Map detail.
+// trace:v1 id=impl.scc.surface.render-important work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn render_important(entries: &[SurfaceEntry], task_mode: bool) -> String {
+    let mut out = String::new();
+    out.push_str(if task_mode {
+        "## TASK-CRITICAL SYMBOLS
+"
+    } else {
+        "## SYSTEM-CRITICAL SYMBOLS
+"
+    });
+    if entries.is_empty() {
+        out.push_str("(no ranked symbols)
+");
+        return out;
+    }
+    for (i, e) in entries.iter().enumerate() {
+        let imp = e.importance.as_ref();
+        let badges = imp
+            .map(|p| {
+                if p.badges.is_empty() {
+                    String::new()
+                } else {
+                    format!("   {}", p.badges.join(" \u{00B7} "))
+                }
+            })
+            .unwrap_or_default();
+        let name = &e.qualified_name;
+        out.push_str(&format!("{}. {name}{}
+", i + 1, badges));
+        out.push_str(&format!("   {}:{}-{}
+", e.path, e.range.start_line, e.range.end_line));
+        let cc = imp.map(|p| p.caller_count).unwrap_or(e.caller_count);
+        let ce = imp.map(|p| p.callee_count).unwrap_or(e.callee_count);
+        out.push_str(&format!(
+            "   Called by {cc} symbols \u{00B7} calls {ce} \u{00B7} flows {} \u{00B7} contracts {} \u{00B7} importance {:.2}
+",
+            e.flows.len(),
+            e.contracts.len(),
+            e.rank.total
+        ));
+    }
+    out
+}
+
 /// The FULL production task surface pipeline (historical entry point —
 /// kept as a thin wrapper over [`build_surface`] so the traced contract
 /// and legacy callers stay stable): task PPR + novelty suppression
@@ -1215,6 +1366,73 @@ pub fn select_and_render_task(
 
 #[allow(clippy::too_many_arguments)]
 // trace:exempt reason=internal-detail
+/// Derived importance explanation for one ranked entry (audit item 3):
+/// exact fan-in/fan-out, PPR centrality, architecture signals, and change
+/// impact collapse into labels. READ-ONLY over the entry + rank: the
+/// overall score is `rank.total` verbatim; badges explain, never rescore.
+// trace:v1 id=impl.scc.surface.importance-profile work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+fn importance_profile(e: &SurfaceEntry, r: &SurfaceRank) -> scc_core::ImportanceProfile {
+    let mut badges: Vec<String> = Vec::new();
+    let entrypoint = !e.invocation_surfaces.is_empty();
+    // Blast radius: exact dependents ≈ distinct callers (the file-level
+    // importer BFS measures the same closure at query time; here the
+    // static fan-in is the honest proxy).
+    let dependent_count = e.caller_count;
+    if entrypoint {
+        badges.push("ENTRYPOINT".into());
+    }
+    if e.exported {
+        badges.push("PUBLIC API".into());
+    }
+    if !e.state_authorities.is_empty() {
+        badges.push("STATE OWNER".into());
+    }
+    if !e.contracts.is_empty() {
+        badges.push("CONTRACT BOUNDARY".into());
+    }
+    if !e.flows.is_empty() {
+        badges.push("FLOW CRITICAL".into());
+    }
+    if e.caller_count >= 50 {
+        badges.push("HIGH FAN-IN".into());
+    }
+    if e.callee_count >= 10 {
+        badges.push("HUB".into());
+    }
+    if r.global_ppr >= 0.01 {
+        badges.push("HIGH IMPACT".into());
+    }
+    if r.change_risk >= 0.5 {
+        badges.push("CHANGE HOTSPOT".into());
+    }
+    // CORE = architectural importance, not raw frequency: an entrypoint /
+    // exported / state-owning / contract/flow symbol with real centrality.
+    // A 400-caller utility with none of those stays HOT UTILITY territory.
+    if r.global_ppr >= 0.005
+        && (entrypoint || e.exported || !e.state_authorities.is_empty() || !e.contracts.is_empty() || !e.flows.is_empty())
+    {
+        badges.insert(0, "CORE".into());
+    }
+    scc_core::ImportanceProfile {
+        overall: r.total,
+        caller_count: e.caller_count,
+        callee_count: e.callee_count,
+        global_ppr: r.global_ppr,
+        task_ppr: r.task_ppr,
+        entrypoint,
+        exported: e.exported,
+        flow_count: e.flows.len(),
+        contract_count: e.contracts.len(),
+        state_read_count: 0,
+        state_write_count: e.state_authorities.len(),
+        dependent_count,
+        change_risk: r.change_risk,
+        badges,
+    }
+}
+
+
+// trace:v1 id=impl.scc.surface.build-entry work=WORK-SCC-014 satisfies=REQ-SCC-IR
 fn build_entry(
     compiler: &ContextCompiler,
     e: &scc_core::Entity,
@@ -1399,20 +1617,25 @@ fn build_entry(
     }
     inv.sort();
 
-    // callers / callees
-    let mut callers: Vec<String> = Vec::new();
+    // callers / callees: exact counts are first-class (audit item 3);
+    // the displayed name lists stay capped at 12, the counts never are.
+    let mut all_callers: Vec<String> = Vec::new();
     for r in sorted_rels(view.in_pred(&e.id, predicates::CALLS)) {
-        callers.push(view.name_of(&r.subject));
+        all_callers.push(view.name_of(&r.subject));
     }
-    callers.sort();
-    callers.dedup();
+    all_callers.sort();
+    all_callers.dedup();
+    let caller_count = all_callers.len();
+    let mut callers = all_callers;
     callers.truncate(12);
-    let mut callees: Vec<String> = Vec::new();
+    let mut all_callees: Vec<String> = Vec::new();
     for r in sorted_rels(view.out_pred(&e.id, predicates::CALLS)) {
-        callees.push(view.name_of(&r.object));
+        all_callees.push(view.name_of(&r.object));
     }
-    callees.sort();
-    callees.dedup();
+    all_callees.sort();
+    all_callees.dedup();
+    let callee_count = all_callees.len();
+    let mut callees = all_callees;
     callees.truncate(12);
 
     // provenance
@@ -1459,6 +1682,9 @@ fn build_entry(
         invocation_surfaces: inv,
         callers,
         callees,
+        caller_count,
+        callee_count,
+        importance: None,
         provenance,
         confidence,
         rank: SurfaceRank::default(),
@@ -2010,6 +2236,23 @@ fn render_entry_opt(e: &SurfaceEntry, level: u8, rank: Option<&SurfaceRank>) -> 
             }
             out.push('\n');
             out.push_str(&format!("  {label}:\n    {}\n", vals.join(", ")));
+        }
+        // Exact fan-in/fan-out: the name lists above stay capped at 12;
+        // the counts never are (audit item 3).
+        if e.caller_count > e.callers.len() || e.callee_count > e.callees.len() {
+            out.push('\n');
+            if e.caller_count > e.callers.len() {
+                out.push_str(&format!("  Called by {} symbols (showing {})\n", e.caller_count, e.callers.len()));
+            }
+            if e.callee_count > e.callees.len() {
+                out.push_str(&format!("  Calls {} symbols (showing {})\n", e.callee_count, e.callees.len()));
+            }
+        }
+        if let Some(imp) = &e.importance {
+            if !imp.badges.is_empty() {
+                out.push('\n');
+                out.push_str(&format!("  Badges: {}\n", imp.badges.join(" \u{00B7} ")));
+            }
         }
     }
     if let Some(rank) = rank {

@@ -8,7 +8,7 @@ coding agents — the full threat model and mitigations are specified in
 ## Reporting a vulnerability
 
 Please report security issues privately to the maintainer (open a
-[private advisory](https://github.com/carterlasalle/system_ir/security/advisories/new)
+[private advisory](https://github.com/carterlasalle/scc/security/advisories/new)
 or email the maintainer directly). Do not open a public issue for
 unpatched vulnerabilities.
 

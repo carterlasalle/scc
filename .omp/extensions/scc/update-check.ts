@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 // trace:exempt reason=const-data
-const REPO = "carterlasalle/system_ir";
+const REPO = "carterlasalle/scc";
 // trace:exempt reason=const-data
 const CACHE_FILE = join(homedir(), ".cache", "scc", "update.json");
 // trace:exempt reason=const-data
