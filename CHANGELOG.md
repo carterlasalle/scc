@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.3] — 2026-09-16
+
+Root fixes for the bake-off gaps — no bandaids, no weakened contracts.
+
+- **Impact answers file truth first.** Per-file importer BFS (depth-graded,
+  provenance-tagged) over stored `imports` edges is the primary signal,
+  rendered as AFFECTED FILES; components/flows interpret the closure.
+- **Flow matching by exact step identity.** The quadratic substring matrix
+  (and its 20s time budget) is gone — linear, terminates by construction.
+- **One commit per index phase under FULL fsync.** Speed from batching
+  commits, not from weakening durability; per-file atomicity via savepoints.
+- **Generic mega-component cap.** Undeclared clusters over 64 files split
+  recursively by directory; intent/service/package evidence always protects.
+- **Lexical fallback on empty FTS search.** Same tables, no new index.
+
 ## [0.2.2] — 2026-09-16
 
 Bake-off gap closure: index throughput, impact trust, and self-hosting hygiene.

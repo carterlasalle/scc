@@ -462,7 +462,7 @@ export default function hook(pi: ExtensionAPI): void {
   // GATE_TOOL_VERSION is stamped by `trace install` with the running
   // tool's version. The raw template carries the placeholder and stays
   // silent (direct `omp install ./adapters/oh-my-pi` loads without it).
-  const GATE_TOOL_VERSION: string = "0.8.4";
+  const GATE_TOOL_VERSION: string = "0.9.0";
   // trace:exempt reason=internal-detail
   const semverGt = (a: string, b: string): boolean => {
   // trace:exempt reason=internal-detail

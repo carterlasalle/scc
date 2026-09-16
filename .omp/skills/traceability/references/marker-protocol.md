@@ -109,6 +109,7 @@ surfaces them. This is intended behavior, not an exclusion bug.
 | `external` | provenance | An external system record (Jira, Linear, Notion, ...). |
 | `fact` | knowledge | A canonical fact with one authoritative source. |
 | `finding` | knowledge | A discovered fact about the current system. |
+| `gap` | knowledge | A known incomplete behavior that must not disappear. |
 | `goal` | intent | Top-level business or product goal. |
 | `implementation` | realization | Source code realizing a requirement/decision. |
 | `learning` | knowledge | A reusable lesson from implementation or debugging. |
@@ -117,15 +118,18 @@ surfaces them. This is intended behavior, not an exclusion bug.
 | `plan` | decision/planning | A plan or plan step; first-class ID (PLAN-X/P3). |
 | `plan_step` | decision/planning | A single step within a plan. |
 | `prd` | intent | Product requirements document. |
+| `project` | decision/planning | A long-lived initiative aggregating related work. |
 | `prompt` | realization | Prompt or configuration encoding a product invariant. |
 | `pull_request` | provenance | A pull/merge request. |
 | `question` | decision/planning | A material open question blocking work. |
+| `request` | intent | A durable user-request record grounding derived work. |
 | `requirement` | intent | A formal, stable, testable requirement. |
 | `rfc` | decision/planning | A request-for-comments design proposal. |
 | `runbook` | verification/documentation | Operational runbook procedure. |
 | `spec` | intent | A specification document. |
 | `task` | decision/planning | A durable engineering task with lifecycle state. |
 | `test` | verification/documentation | A verification test. |
+| `topic` | knowledge | A durable knowledge hub for an engineering area. |
 | `value` | knowledge | A canonical value with tracked dependents. |
 | `work` | decision/planning | A work item (issue, ticket, task) that produced artifacts. |
 

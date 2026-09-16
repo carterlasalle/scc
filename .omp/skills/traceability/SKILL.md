@@ -113,6 +113,28 @@ Three kinds of truth stay separate:
 A passing test that never executed the implementation is `UNPROVEN`, not
 green.
 
+TraceLayer's durable knowledge lives in the repository's engineering
+documents. The graph is an index over those documents, source code, and
+observed evidence. Before implementation, reuse or author the durable
+request/work/spec/requirements/plan appropriate to the task. Do not create
+IDs merely to satisfy TraceLayer; create useful engineering records that
+future agents and humans can read.
+
+- REQUEST = what was asked (grounds everything derived from it);
+- PROJECT = the larger initiative work belongs to;
+- WORK = the bounded unit of execution (`docs/work-items/`);
+- SPEC = the complete behavioral/design contract;
+- REQ = an independently verifiable obligation with a document anchor;
+- PLAN = how this work will be implemented (tasks live in the plan);
+- QUESTION = material unresolved ambiguity (never silently dropped);
+- DECISION/ADR = resolution and rationale;
+- FINDING = something learned; BEST PRACTICE = matured reusable guidance;
+- GAP = known incomplete behavior (`docs/known-gaps/`, never fake completion);
+- TOPIC = a durable knowledge hub for an engineering area.
+
+Legacy `.trace/work.toml` entries without a work-item document warn (TL080);
+materialize them with `trace work materialize <WORK-ID>`.
+
 ## Ambient operation (zero-ceremony)
 <!-- trace:v1 id=doc.ambient.section -->
 
