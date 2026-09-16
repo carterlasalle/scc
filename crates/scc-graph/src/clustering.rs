@@ -51,7 +51,7 @@ use crate::{RealityGraph, Result};
 use scc_core::{kinds, predicates, Archetype};
 use scc_store::Store;
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use crate::components::{
     boundary_rank, component_for_path, BOUNDARY_CODE_REGION, BOUNDARY_PACKAGE, BOUNDARY_ROOT,
@@ -95,6 +95,17 @@ pub const COCHANGE_CAP: i32 = 5;
 /// average linkage over ALL cross pairs is at least this fraction of the
 /// max edge, unless the edge is absolute-strong (≥ [`SERVICE_THRESHOLD`]).
 pub const COHESION_FRACTION: f64 = 0.4;
+
+/// Post-merge size cap: a cluster WITHOUT declared intent (no authoritative
+/// boundary evidence) covering more than this many files is split by
+/// top-level directory. Mega-clusters glue unrelated subsystems into one
+/// component (django's 39-dir soup, uutils' 7-dir chain) — their impact
+/// answers name everything and therefore nothing. The cap is generic (file
+/// count, not repo names) and intent always wins: declared architecture is
+/// never re-split. Receipt: django's intent-less mega-component held 39
+/// dirs; vitest's 10-dir chain; uutils' 7-dir chain — all unactionable.
+// trace:exempt reason=const-data
+pub const MAX_UNDECLARED_FILES: usize = 64;
 
 /// One clustered component: the merge result over a set of atomic regions.
 #[derive(Debug, Clone)]
@@ -343,6 +354,7 @@ pub fn build_regions(
 /// Cluster the atomic regions into components (and record the pass-2
 /// service weights). See the module docs for the signal list.
 // trace:v1 id=impl.scc.clustering.merge work=WORK-SCC-005 satisfies=REQ-SCC-IR
+// trace:v1 id=impl.scc.clustering.sizecap work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cluster_components(
     graph: &RealityGraph,
     store: &Store,
@@ -788,6 +800,112 @@ pub fn cluster_components(
         }
     }
 
+    // ---- post-merge size cap (generic, intent-preserving): clusters with
+    // no declared intent, no service/deployment/package boundary, covering
+    // more than MAX_UNDECLARED_FILES files are split by top-level directory.
+    // Greedy merge only grows; without this, one high-weight chain glues a
+    // monorepo into a component whose impact answers name everything and
+    // therefore nothing (django 39-dir soup). Splits are named
+    // `<cluster>/<topdir>`, deterministic. Service-boundary clusters (the
+    // microservices-demo moat) never split: deployment/package evidence
+    // always protects them.
+    {
+        let mut split_comps: Vec<ClusterComponent> = Vec::new();
+        let mut split_files: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for c in &comps {
+            let files = files_in_component.get(&c.name).cloned().unwrap_or_default();
+            let protected = c.member_regions.iter().any(|&m| {
+                regions[m].intent.is_some()
+                    || regions[m].boundary_kind == crate::components::BOUNDARY_DECLARED
+                    || regions[m].boundary_kind == crate::components::BOUNDARY_DEPLOYMENT
+                    || regions[m].boundary_kind == crate::components::BOUNDARY_PACKAGE
+            });
+            if protected || files.len() <= MAX_UNDECLARED_FILES {
+                split_comps.push(c.clone());
+                split_files.insert(c.name.clone(), files);
+                continue;
+            }
+            // Recursive deepening: group member regions by path segment at
+            // increasing depth until every piece fits the cap or no further
+            // subdivision exists. One level is not enough — django/ alone
+            // holds ~1700 files, so top-dir splitting just renames the soup.
+            // Pieces keep their OWN natural cluster names (longest common
+            // prefix of their members) — inheriting the parent's 39-dir
+            // chain made every piece truncate identically in display.
+            // FIFO queue keeps emission deterministic.
+            let mut queue: VecDeque<(Vec<usize>, usize, Vec<String>)> =
+                VecDeque::new();
+            queue.push_back((c.member_regions.clone(), 0, Vec::new()));
+            let mut emitted_any = false;
+            while let Some((members, depth, trail)) = queue.pop_front() {
+                let mut sfiles: Vec<String> = Vec::new();
+                for &m in &members {
+                    if let Some(fs) = files_in_region.get(&regions[m].name) {
+                        sfiles.extend(fs.iter().cloned());
+                    }
+                }
+                sfiles.sort();
+                sfiles.dedup();
+                if sfiles.len() <= MAX_UNDECLARED_FILES {
+                    let mut sub = build_cluster(&regions, &members);
+                    sub.name = dedup_cluster_name(&split_files, &sub.name, &trail);
+                    split_files.insert(sub.name.clone(), sfiles);
+                    split_comps.push(sub);
+                    emitted_any = true;
+                    continue;
+                }
+                let mut by_seg: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+                for &m in &members {
+                    let seg = regions[m]
+                        .name
+                        .split('/')
+                        .nth(depth)
+                        .unwrap_or("root")
+                        .to_string();
+                    by_seg.entry(seg).or_default().push(m);
+                }
+                if by_seg.len() < 2 {
+                    // Cannot subdivide further: keep as-is even over cap.
+                    let mut sub = build_cluster(&regions, &members);
+                    sub.name = dedup_cluster_name(&split_files, &sub.name, &trail);
+                    split_files.insert(sub.name.clone(), sfiles);
+                    split_comps.push(sub);
+                    emitted_any = true;
+                    continue;
+                }
+                for (seg, sub_members) in &by_seg {
+                    let mut t = trail.clone();
+                    t.push(seg.clone());
+                    queue.push_back((sub_members.clone(), depth + 1, t));
+                }
+            }
+            if !emitted_any {
+                split_comps.push(c.clone());
+                split_files.insert(c.name.clone(), files);
+            }
+            continue;
+        }
+        split_comps.sort_by(|a, b| a.name.cmp(&b.name));
+        comps = split_comps;
+        files_in_component = split_files;
+        // Remap symbols through the split: a symbol's region belongs to
+        // exactly one post-split piece (region membership is disjoint).
+        let region_owner: std::collections::HashMap<usize, String> = comps
+            .iter()
+            .flat_map(|c| c.member_regions.iter().map(|&m| (m, c.name.clone())))
+            .collect();
+        for (sym, comp) in symbol_component.iter_mut() {
+            if comps.iter().any(|c| &c.name == comp) {
+                continue;
+            }
+            if let Some(&ri) = symbol_region.get(sym) {
+                if let Some(owner) = region_owner.get(&ri) {
+                    *comp = owner.clone();
+                }
+            }
+        }
+    }
+
     // ---- parent per component (deployment unit of the cluster dirs) ----
     let mut parent_per_comp: BTreeMap<String, String> = BTreeMap::new();
     for c in &comps {
@@ -885,6 +1003,31 @@ fn build_cluster(regions: &[ComponentCandidate], members: &[usize]) -> ClusterCo
         files: Vec::new(),
         member_regions,
     }
+}
+
+/// Disambiguate a post-split cluster name against already-emitted pieces:
+/// natural name wins when free, else the subdivision trail, else a counter.
+/// All inputs sorted/deterministic, so the result is stable run-to-run.
+// trace:exempt reason=internal-detail
+fn dedup_cluster_name(
+    taken: &BTreeMap<String, Vec<String>>,
+    base: &str,
+    trail: &[String],
+) -> String {
+    if !taken.contains_key(base) {
+        return base.to_string();
+    }
+    if !trail.is_empty() {
+        let t = format!("{}/{}", base, trail.join("/"));
+        if !taken.contains_key(&t) {
+            return t;
+        }
+    }
+    let mut n = 2;
+    while taken.contains_key(&format!("{base}~{n}")) {
+        n += 1;
+    }
+    format!("{base}~{n}")
 }
 
 /// Deterministic cluster name: the longest common directory prefix of the

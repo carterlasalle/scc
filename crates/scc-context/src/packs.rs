@@ -1634,6 +1634,26 @@ pub fn impact(
 
     let mut sections: Vec<Section> = Vec::new();
 
+    if !imp.importers.is_empty() {
+        let mut body = String::new();
+        for i in &imp.importers {
+            body.push_str(&format!(
+                "{} (depth {}, {})\n",
+                i.file,
+                i.depth,
+                match i.provenance {
+                    scc_core::Provenance::Resolved => "resolved",
+                    scc_core::Provenance::Extracted => "extracted",
+                    scc_core::Provenance::Observed => "observed",
+                    scc_core::Provenance::Declared => "declared",
+                    scc_core::Provenance::Inferred => "inferred",
+                    scc_core::Provenance::Stale => "stale",
+                }
+            ));
+        }
+        sections.push(Section::new("AFFECTED FILES", body, 10));
+    }
+
     sections.push(Section::new(
         "AFFECTED COMPONENTS",
         if imp.components.is_empty() {

@@ -9,7 +9,7 @@ use crate::{trust::TrustedGraphView, Result};
 use scc_core::kinds;
 use scc_core::Severity;
 use scc_store::Store;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 // trace:exempt reason=internal-detail
@@ -26,6 +26,11 @@ pub struct Impact {
     pub risk: String,            // low | medium | high
     #[serde(default)]
     pub notes: Vec<String>,
+    /// Per-file importer closure: (importing file, depth, provenance).
+    /// The primary impact signal — components/flows interpret it, and the
+    /// pack renders it first so a glued component never hides file truth.
+    #[serde(default)]
+    pub importers: Vec<Importer>,
     /// Historical co-change partners not in the current file set.
     /// Never merged into `components` / `flows` / `contracts` / `data`.
     #[serde(default)]
@@ -34,6 +39,16 @@ pub struct Impact {
 
 /// A file that historically changes with an affected file but is not in
 /// the current impact file set. Reason is always `cochange` here.
+/// A file importing (transitively) an impact target, with BFS depth and
+/// the provenance of the edge that discovered it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+// trace:exempt reason=internal-detail
+pub struct Importer {
+    pub file: String,
+    pub depth: u32,
+    pub provenance: scc_core::Provenance,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 // trace:exempt reason=internal-detail
 pub struct ForgottenPartner {
@@ -80,6 +95,8 @@ pub fn forgotten_cochange_partners(
 }
 
 // trace:v1 id=impl.scc.impact work=WORK-SCC-013 satisfies=REQ-forgotten-impact-partners,REQ-SCC-IR
+// trace:v1 id=impl.scc.impact.importers work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:v1 id=impl.scc.impact.flowexact work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn compute_impact(
     view: &TrustedGraphView,
     store: &Store,
@@ -129,12 +146,19 @@ pub fn compute_impact(
             resolved_sym_ids.insert(id.clone());
         }
     }
-    // file symbol ids: all symbols whose file attribute is one of the files
-    // (reuse the sweep above — a second full scan doubles this cost).
-    for e in &all_symbols {
-        if let Some(f) = e.attributes.get("file").and_then(|v| v.as_str()) {
-            if file_ids.contains(&scc_core::entity_id(&graph.repo_id, kinds::FILE, f)) {
-                resolved_sym_ids.insert(e.id.clone());
+    // File-scoped symbols: index symbols by file ONCE, then take only the
+    // requested files' symbols. The old code swept all symbols per query;
+    // scoping keeps this linear in the request, not the repo.
+    {
+        let mut by_file: HashSet<String> = HashSet::new();
+        for f in &resolved_files {
+            by_file.insert((*f).clone());
+        }
+        for e in &all_symbols {
+            if let Some(f) = e.attributes.get("file").and_then(|v| v.as_str()) {
+                if by_file.contains(f) {
+                    resolved_sym_ids.insert(e.id.clone());
+                }
             }
         }
     }
@@ -162,6 +186,62 @@ pub fn compute_impact(
     for f in &unresolved_files {
         imp.notes.push(format!("unknown target '{f}': not in index, excluded from analysis"));
     }
+
+    // Per-file importer closure (the PRIMARY impact signal): BFS over
+    // `imports` edges reversed (importer -> imported), seeded from the
+    // resolved files. Components/flows below are interpretations of this
+    // closure, not the closure itself — so a glued mega-component can make
+    // them soupy without corrupting the file answer. Bounded: visited-set
+    // dedup makes each file expand once; depth caps the fan-out. Provenance
+    // travels with the edge; the shallowest depth wins on re-visit.
+    let mut importer_depth: BTreeMap<String, u32> = BTreeMap::new();
+    let mut importer_prov: BTreeMap<String, scc_core::Provenance> = BTreeMap::new();
+    {
+        // trace:exempt reason=const-data
+        const IMPORTER_MAX_DEPTH: u32 = 8;
+        let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+        for f in &resolved_files {
+            importer_depth.insert((*f).clone(), 0);
+            queue.push_back(((*f).clone(), 0));
+        }
+        while let Some((path, depth)) = queue.pop_front() {
+            if depth >= IMPORTER_MAX_DEPTH {
+                continue;
+            }
+            let target_id = scc_core::entity_id(&graph.repo_id, kinds::FILE, &path);
+            for r in view.in_pred(&target_id, scc_core::predicates::IMPORTS) {
+                let importer = match view.entity(&r.subject) {
+                    Some(e) if e.kind == kinds::FILE => e.name.clone(),
+                    _ => continue,
+                };
+                if files.iter().any(|f| f == &importer) {
+                    continue;
+                }
+                match importer_depth.get(&importer) {
+                    Some(&d) if d <= depth + 1 => {}
+                    _ => {
+                        importer_depth.insert(importer.clone(), depth + 1);
+                        importer_prov.insert(importer.clone(), r.provenance);
+                        queue.push_back((importer, depth + 1));
+                    }
+                }
+            }
+        }
+    }
+
+    for (file, depth) in &importer_depth {
+        if *depth == 0 {
+            continue;
+        }
+        imp.importers.push(Importer {
+            file: file.clone(),
+            depth: *depth,
+            provenance: importer_prov.get(file).copied().unwrap_or(scc_core::Provenance::Extracted),
+        });
+    }
+    imp.importers.sort_by(|a, b| {
+        a.depth.cmp(&b.depth).then_with(|| a.file.cmp(&b.file))
+    });
 
     // affected components: components containing affected files or symbols
     let mut affected_comps: BTreeSet<String> = BTreeSet::new();
@@ -195,19 +275,19 @@ pub fn compute_impact(
                 affected_comps.insert(c.id.clone());
             }
         }
-        for s in &symbols_list {
-            let resolved: HashSet<&str> = resolved_sym_ids.iter().map(|x| x.as_str()).collect();
-            if resolved.is_empty() {
-                continue;
-            }
-            let sym_names: HashSet<String> = graph
-                .entities_of_kind(kinds::SYMBOL)
-                .into_iter()
-                .filter(|e| resolved.contains(e.id.as_str()))
+        if !resolved_sym_ids.is_empty() {
+            // resolved name-set built once per component scan (not once per
+            // symbol): the inner entities_of_kind sweep was O(comps × syms).
+            let sym_names: HashSet<String> = all_symbols
+                .iter()
+                .filter(|e| resolved_sym_ids.contains(&e.id))
                 .map(|e| e.name.clone())
                 .collect();
-            if sym_names.contains(s) {
-                affected_comps.insert(c.id.clone());
+            for s in &symbols_list {
+                if sym_names.contains(s) {
+                    affected_comps.insert(c.id.clone());
+                    break;
+                }
             }
         }
         let _ = paths;
@@ -233,39 +313,39 @@ pub fn compute_impact(
             }
         }
     }
-    affected_syms.extend(resolved_sym_ids);
+    affected_syms.extend(resolved_sym_ids.iter().cloned());
 
-    // Flow scan under a hard deadline: on huge graphs the naive
-    // steps×symbols substring matrix never finishes (django: 600s+). When
-    // the budget trips, keep the partial answer and say so — a bounded
-    // partial beats a timeout silence.
-    // trace:exempt reason=const-data
-    const FLOW_BUDGET_MS: u128 = 20_000;
-    let flow_start = std::time::Instant::now();
+    // Flow matching by exact step identity — never substring. Steps carry
+    // (actor, operation) over component/symbol ids; the old code ran a
+    // steps×(components+symbols+files) `contains` matrix, which is both
+    // quadratic AND wrong (component "api" matches every actor containing
+    // those letters; django never finished). Exact id membership is linear
+    // in total steps and terminates by construction — no time budget needed.
     let mut seen_flows: HashSet<&str> = HashSet::new();
-    let mut scanned_flows = 0usize;
-    let mut flow_truncated = false;
     let all_flows = view.flows();
+    // affected files' ids + resolved symbol ids: the exact step vocabulary.
+    // (owned Strings — file_ids/affected_comps outlive this block.)
+    let mut step_vocab: HashSet<&str> = HashSet::new();
+    for id in &file_ids {
+        step_vocab.insert(id.as_str());
+    }
+    for sid in &resolved_sym_ids {
+        step_vocab.insert(sid.as_str());
+    }
+    for cid in &affected_comps {
+        step_vocab.insert(cid.as_str());
+    }
+    // requested file names too (steps sometimes name the path, not the id).
+    for f in files {
+        step_vocab.insert(f.as_str());
+    }
     for flow in &all_flows {
-        scanned_flows += 1;
-        if scanned_flows.is_multiple_of(64) && flow_start.elapsed().as_millis() > FLOW_BUDGET_MS {
-            flow_truncated = true;
-            break;
-        }
         let steps_mention = flow.steps.iter().any(|s| {
-            affected_comps.iter().any(|c| s.actor.contains(c))
-                || affected_syms.iter().any(|sid| s.operation.contains(sid))
-                || files.iter().any(|f| s.actor.contains(f))
+            step_vocab.contains(s.actor.as_str()) || step_vocab.contains(s.operation.as_str())
         });
         if steps_mention && seen_flows.insert(flow.id.as_str()) {
             imp.flows.push(flow.id.clone());
         }
-    }
-    if flow_truncated {
-        imp.notes.push(format!(
-            "impact truncated: scanned {scanned_flows}/{} flows in 20s budget; results partial",
-            all_flows.len()
-        ));
     }
     // entrypoint attribute on flows
     for flow in &all_flows {

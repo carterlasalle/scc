@@ -1313,14 +1313,29 @@ pub fn cmd_export(root: &Path, format: &str) -> crate::Result<()> {
 }
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-query work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
+// trace:v1 id=impl.cli.query.fallback work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_query(root: &Path, query: &str, limit: usize) -> crate::Result<()> {
     let store = open_store(root)?;
+    let entities = store.search_entities(query, limit)?;
+    let symbols = store.search_symbols(query, limit)?;
+    // Lexical fallback: FTS tokenizes on punctuation, so a query like
+    // "tree.go" or "addRoute" can miss while the name sits verbatim in the
+    // table. Empty semantic results fall back to substring LIKE — same
+    // tables, no new index, no architecture.
+    let (entities, symbols) = if entities.is_empty() && symbols.is_empty() {
+        (
+            store.search_entities_like(query, limit)?,
+            store.search_symbols_like(query, limit)?,
+        )
+    } else {
+        (entities, symbols)
+    };
     println!("— entities —");
-    for e in store.search_entities(query, limit)? {
+    for e in &entities {
         println!("{} [{}]", e.name, e.kind);
     }
     println!("— symbols —");
-    for (name, sig, kind, file) in store.search_symbols(query, limit)? {
+    for (name, sig, kind, file) in &symbols {
         println!("{name} ({kind}) {file} {sig}");
     }
     Ok(())

@@ -664,10 +664,12 @@ impl Store {
         }
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
-        // NORMAL is durable under WAL for app crashes (only OS/power loss
-        // can lose the tail) and removes the per-commit fsync stall that
-        // dominated index time. The index is rebuildable cache regardless.
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // FULL durability: the store is the product (agent context reads it
+        // directly), not a rebuildable cache — an OS crash or power loss
+        // must never leave a half-written index behind. Speed comes from
+        // batching writes into one transaction per phase (see `batch_*`),
+        // not from weakening the fsync contract.
+        conn.pragma_update(None, "synchronous", "FULL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         apply_migrations(&conn)?;
 

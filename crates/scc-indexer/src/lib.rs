@@ -302,7 +302,13 @@ impl Indexer {
         }
         let mut intent: Option<configs::Intent> = None;
         // Quality map: loaded once, patched per file, saved once below.
+        // One commit for the whole write phase: the outer batch makes the
+        // per-file batch_write calls below savepoint-nested (one fsync
+        // total), with per-file rollback intact via nest(). FULL fsync
+        // durability is preserved — batching removes commits, not fsyncs.
         let mut quality_map = load_quality_files(&self.store);
+        self.store.batch_begin()?;
+        let phase: Result<(), IndexError> = (|| {
         for (path, (f, ef, content, cfg_hits, fail_hits)) in &extracted {
             let file = SourceFile::new(path.clone(), String::new()); // content re-read below
             let _ = file;
@@ -342,6 +348,12 @@ impl Indexer {
                 Ok::<(), IndexError>(())
             })?;
             report.indexed += 1;
+        }
+        Ok(())
+        })();
+        match phase {
+            Ok(()) => self.store.batch_end()?,
+            Err(e) => { self.store.batch_abort(); return Err(e); }
         }
         save_quality_files(&self.store, &quality_map)?;
         // tested_by edges derived from changed files must be relinked
@@ -659,7 +671,10 @@ impl Indexer {
 
         // Quality map: loaded once, patched per file, saved once below —
         // never deserialize/re-serialize the metadata blob per file.
+        // One commit for the whole write phase (same as index() above).
         let mut quality_map = load_quality_files(&self.store);
+        self.store.batch_begin()?;
+        let phase: Result<(), IndexError> = (|| {
         for (path, (f, ef, content, cfg_hits, fail_hits)) in &extracted {
             let mut resolved_imports: Vec<ResolvedImport> = Vec::new();
             let mut resolved_calls = Vec::new();
@@ -695,6 +710,12 @@ impl Indexer {
                 Ok::<(), IndexError>(())
             })?;
             report.indexed += 1;
+        }
+        Ok(())
+        })();
+        match phase {
+            Ok(()) => self.store.batch_end()?,
+            Err(e) => { self.store.batch_abort(); return Err(e); }
         }
         save_quality_files(&self.store, &quality_map)?;
 
