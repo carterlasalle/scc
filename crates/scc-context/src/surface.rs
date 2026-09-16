@@ -1433,6 +1433,7 @@ fn importance_profile(e: &SurfaceEntry, r: &SurfaceRank) -> scc_core::Importance
 
 
 // trace:v1 id=impl.scc.surface.build-entry work=WORK-SCC-014 satisfies=REQ-SCC-IR
+#[allow(clippy::too_many_arguments)]
 fn build_entry(
     compiler: &ContextCompiler,
     e: &scc_core::Entity,
