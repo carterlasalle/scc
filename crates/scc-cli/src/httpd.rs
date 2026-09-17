@@ -84,8 +84,12 @@ fn handle_request(
         body = String::from_utf8_lossy(&buf).to_string();
     }
 
-    let (status, payload) = route(&root, &method.to_string(), &url, &body, addr)?;
-    let response = tiny_http::Response::from_string(payload).with_status_code(status);
+    let (status, ctype, payload) = route(&root, &method.to_string(), &url, &body, addr)?;
+    let response = tiny_http::Response::from_string(payload)
+        .with_status_code(status)
+        .with_header(
+            tiny_http::Header::from_bytes(&b"Content-Type"[..], ctype.as_bytes()).unwrap(),
+        );
     let _ = request.respond(response);
     Ok(())
 }
@@ -98,13 +102,18 @@ fn route(
     url: &str,
     body: &str,
     addr: &str,
-) -> crate::Result<(u16, String)> {
+) -> crate::Result<(u16, String, String)> {
     let path = url.split('?').next().unwrap_or(url);
-    let json_err = |code: u16, msg: String| -> crate::Result<(u16, String)> {
+    let json_err = |code: u16, msg: String| -> crate::Result<(u16, String, String)> {
         Ok((
             code,
+            "application/json".to_string(),
             serde_json::to_string(&serde_json::json!({"error": msg}))?,
         ))
+    };
+    // Viewer HTML rides the same daemon; JSON stays on /v1/*.
+    let html_ok = |body: String| -> crate::Result<(u16, String, String)> {
+        Ok((200, "text/html; charset=utf-8".to_string(), body))
     };
 
     match (method, path) {
@@ -116,7 +125,7 @@ fn route(
             let config = crate::load_config(root)?;
             let stale = crate::stale_paths(&store)?;
             let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, serde_json::to_string(&comp.ctx().system_overview())?))
+            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().system_overview())?))
         }
         ("POST", "/v1/context/task") => {
             let req: serde_json::Value = match serde_json::from_str(body) {
@@ -139,7 +148,7 @@ fn route(
             // Serialization is the only difference (structured JSON here).
             let artifact =
                 crate::commands::build_task_context(root, goal, &files, &symbols, budget, false)?;
-            Ok((200, serde_json::to_string(&artifact)?))
+            Ok((200, "application/json".to_string(), serde_json::to_string(&artifact)?))
         }
         ("POST", "/v1/context/startup") => {
             let req: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::json!({}));
@@ -170,6 +179,7 @@ fn route(
             ledger_store.save(&led);
             Ok((
                 200,
+                "application/json".to_string(),
                 serde_json::to_string(&serde_json::json!({
                     "text": scc_context::startup::render_startup(&startup),
                     "budget": budget,
@@ -185,7 +195,7 @@ fn route(
             let config = crate::load_config(root)?;
             let stale = crate::stale_paths(&store)?;
             let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, serde_json::to_string(&comp.ctx().system_atlas(None))?))
+            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().system_atlas(None))?))
         }
         ("GET", p) if p.starts_with("/v1/components/") => {
             let id = p.trim_start_matches("/v1/components/");
@@ -196,7 +206,7 @@ fn route(
             let config = crate::load_config(root)?;
             let stale = crate::stale_paths(&store)?;
             let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, serde_json::to_string(&comp.ctx().component_context(id))?))
+            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().component_context(id))?))
         }
         ("GET", p) if p.starts_with("/v1/flows/") => {
             let id = p.trim_start_matches("/v1/flows/");
@@ -207,7 +217,7 @@ fn route(
             let config = crate::load_config(root)?;
             let stale = crate::stale_paths(&store)?;
             let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, serde_json::to_string(&comp.ctx().flow_context(id))?))
+            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().flow_context(id))?))
         }
         ("POST", "/v1/impact") => {
             let req: serde_json::Value = match serde_json::from_str(body) {
@@ -226,6 +236,7 @@ fn route(
             let diff = req.get("diff").and_then(|d| d.as_str()).map(|s| s.to_string());
             Ok((
                 200,
+                "application/json".to_string(),
                 serde_json::to_string(&comp.ctx().impact_context(
                     &files,
                     &symbols,
@@ -241,7 +252,7 @@ fn route(
             let config = crate::load_config(root)?;
             let stale = crate::stale_paths(&store)?;
             let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, serde_json::to_string(&comp.ctx().verify_context())?))
+            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().verify_context())?))
         }
         ("POST", "/v1/index") => {
             crate::commands::cmd_index(root, true)?;
@@ -249,6 +260,7 @@ fn route(
             let status = store.snapshot_status()?;
             Ok((
                 202,
+                "application/json".to_string(),
                 serde_json::to_string(&serde_json::json!({
                     "status": "ok",
                     "revision": status.map(|(s, _)| s.revision).unwrap_or_default(),
@@ -260,6 +272,7 @@ fn route(
             match store.snapshot_status()? {
                 Some((snap, files)) => Ok((
                     200,
+                    "application/json".to_string(),
                     serde_json::to_string(&serde_json::json!({
                         "indexed": true,
                         "revision": snap.revision,
@@ -270,6 +283,7 @@ fn route(
                 )),
                 None => Ok((
                     200,
+                    "application/json".to_string(),
                     serde_json::to_string(&serde_json::json!({"indexed": false}))?,
                 )),
             }
@@ -277,9 +291,29 @@ fn route(
         ("POST", "/v1/runtime/traces") => {
             let store = crate::open_store(root)?;
             ingest_runtime(&store, body)?;
-            Ok((202, serde_json::to_string(&serde_json::json!({"status": "accepted"}))?))
+            Ok((202, "application/json".to_string(), serde_json::to_string(&serde_json::json!({"status": "accepted"}))?))
         }
-        ("GET", "/healthz") => Ok((200, "ok".into())),
+        ("GET", "/healthz") => Ok((200, "text/plain".to_string(), "ok".into())),
+        ("GET", "/") | ("GET", "/components") | ("GET", "/flows") | ("GET", "/diagram")
+        | ("GET", "/search") => {
+            let store = crate::open_store(root)?;
+            if store.snapshot_status()?.is_none() {
+                return json_err(409, "not indexed".into());
+            }
+            let (vstatus, body) = crate::viewer::serve_viewer(&store, url);
+            if vstatus == 200 {
+                return html_ok(body);
+            }
+            Ok((vstatus, "text/html; charset=utf-8".to_string(), body))
+        }
+        ("GET", p) if crate::viewer::is_viewer_path(p) => {
+            let store = crate::open_store(root)?;
+            if store.snapshot_status()?.is_none() {
+                return json_err(409, "not indexed".into());
+            }
+            let (vstatus, body) = crate::viewer::serve_viewer(&store, url);
+            Ok((vstatus, "text/html; charset=utf-8".to_string(), body))
+        }
         _ => {
             let _ = addr;
             json_err(404, format!("no route for {method} {path}"))

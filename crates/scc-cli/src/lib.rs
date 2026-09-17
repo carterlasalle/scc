@@ -17,6 +17,7 @@ pub mod mcp;
 pub mod plugin;
 pub mod plugin_hermes;
 pub mod plugin_omp;
+pub mod viewer;
 pub mod resolve;
 
 use scc_context::ContextCompiler;

@@ -157,6 +157,42 @@ enum Commands {
     /// List components
     Components,
 
+    /// Architecture diagram from the L1 layer (SCC-native gitdiagram)
+    Diagram {
+        /// mermaid | svg
+        #[arg(long, default_value = "mermaid")]
+        format: String,
+        /// Write to FILE instead of stdout
+        #[arg(long)]
+        out: Option<String>,
+    },
+
+    /// Local web viewer over the live index (loopback only)
+    View {
+        /// Port (default: ephemeral)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Print the URL without opening a browser
+        #[arg(long)]
+        no_open: bool,
+    },
+
+    /// Snapcompact-style bitmap export of the repo map (default OFF)
+    Snap {
+        /// Write the map text to FILE (stdout when absent)
+        #[arg(long)]
+        out: Option<String>,
+        /// Max map-text chars (default 40000)
+        #[arg(long, default_value_t = 40000)]
+        max_chars: usize,
+        /// Render PNG via the pinned Pillow recipe to FILE
+        #[arg(long)]
+        png: Option<String>,
+        /// Accepted for recipe parity (monochrome unless recipe edited)
+        #[arg(long)]
+        color: bool,
+    },
+
     /// List flows
     Flows,
 
@@ -804,6 +840,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Export { format } => commands::cmd_export(&root, &format),
         Commands::Query { query, limit } => commands::cmd_query(&root, &query, limit),
         Commands::Components => commands::cmd_list_components(&root),
+        Commands::Diagram { format, out } => {
+            commands::cmd_diagram(&root, &format, out.as_deref())
+        }
+        Commands::View { port, no_open } => commands::cmd_view(&root, port, no_open),
+        Commands::Snap { out, max_chars, png, color } => {
+            commands::cmd_snap(&root, out.as_deref(), max_chars, png.as_deref(), color)
+        }
         Commands::Flows => commands::cmd_list_flows(&root),
         Commands::Cochange { min_commits } => commands::cmd_cochange(&root, min_commits),
         Commands::Checkpoint { sub } => match sub {

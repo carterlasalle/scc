@@ -321,3 +321,6 @@ status = "active"
 origin.source = "new_feature"
 origin.intent = "Repair the agent-facing product path so it is truthful, bounded, fast, and useful on real repositories; correct benchmark science from existing data only; complete high-value identity, history, and snapshot capabilities. No paid model quota is spent."
 origin.session = "default"
+
+[work."WORK-SCC-VIEWER"]
+title = "Web viewer, SCC-native diagram, and Snapcompact bitmap export"

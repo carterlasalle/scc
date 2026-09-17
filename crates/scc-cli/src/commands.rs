@@ -2183,6 +2183,166 @@ pub fn cmd_runtime_reconcile(root: &Path, json: bool) -> crate::Result<()> {
     Ok(())
 }
 
+/// `scc diagram` — SCC-native architecture diagram (SPEC-SCC-VIEWER §1).
+/// L1 nodes plus capped architectural edges plus flow subgraphs, as Mermaid
+/// (default) or dependency-free SVG. Deterministic: same index, same bytes.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-diagram work=WORK-SCC-VIEWER satisfies=SPEC-SCC-VIEWER
+pub fn cmd_diagram(root: &Path, format: &str, out: Option<&str>) -> crate::Result<()> {
+    let store = open_store(root)?;
+    if store.snapshot_status()?.is_none() {
+        return Err(crate::CliError::Other("not indexed yet — run `scc index`".into()));
+    }
+    let model = crate::viewer::build_diagram_model(&store)?;
+    let text = match format {
+        "mermaid" => crate::viewer::render_mermaid(&model),
+        "svg" => crate::viewer::render_svg(&model),
+        other => {
+            return Err(crate::CliError::Other(format!(
+                "unknown diagram format '{other}' (use mermaid|svg)"
+            )))
+        }
+    };
+    if let Some(path) = out {
+        std::fs::write(path, &text)?;
+        println!(
+            "diagram: {} nodes, {} edges, {} flows -> {path}",
+            model.nodes.len(),
+            model.edges.len(),
+            model.flows.len()
+        );
+    } else {
+        print!("{text}");
+    }
+    Ok(())
+}
+
+/// `scc snap` — Snapcompact-style bitmap export (SPEC-SCC-VIEWER §3).
+/// Default OFF: requires `--out` text plus `--png` (or config
+/// `context.snap_enabled`) to render; otherwise prints the map text and the
+/// pinned Pillow recipe so the operator sees exactly what would ship.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-snap work=WORK-SCC-VIEWER satisfies=SPEC-SCC-VIEWER
+pub fn cmd_snap(
+    root: &Path,
+    out: Option<&str>,
+    max_chars: usize,
+    png: Option<&str>,
+    color: bool,
+) -> crate::Result<()> {
+    let store = open_store(root)?;
+    if store.snapshot_status()?.is_none() {
+        return Err(crate::CliError::Other("not indexed yet — run `scc index`".into()));
+    }
+    let config = load_config(root)?;
+    let map = crate::viewer::map_text(&store, max_chars)?;
+    let rows = map.lines().count();
+    let (text_tokens, image_tokens) = crate::viewer::token_estimate(map.len(), rows);
+    let render = png.is_some() || config.context.snap_enabled;
+    if let Some(path) = out {
+        std::fs::write(path, &map)?;
+    } else {
+        print!("{map}");
+        if !map.ends_with('\n') {
+            println!();
+        }
+    }
+    if color {
+        eprintln!("note: --color is accepted for recipe parity; the pinned recipe renders monochrome unless edited");
+    }
+    println!("snap: {rows} rows, {} chars — text ~{text_tokens} tokens vs PNG ~{image_tokens} image tokens", map.len());
+    if render {
+        let dest = png.unwrap_or("scc-snap.png");
+        render_snap_png(&map, dest)?;
+        println!("snap png -> {dest}");
+    } else {
+        println!("render OFF by default (set context.snap_enabled=true or pass --png <file>); recipe:");
+        println!("{}", crate::viewer::snap_recipe());
+    }
+    Ok(())
+}
+
+/// Render the map text to PNG via the pinned Pillow recipe. Shells out to
+/// `python3` only when rendering was explicitly requested; falls back to
+/// printing the recipe path when Pillow is missing.
+// trace:v1 id=impl.crates-scc-cli-src-commands.render-snap-png work=WORK-SCC-VIEWER satisfies=SPEC-SCC-VIEWER
+fn render_snap_png(map: &str, dest: &str) -> crate::Result<()> {
+    let dir = tempfile::TempDir::new()?;
+    let map_path = dir.path().join("map.txt");
+    let recipe_path = dir.path().join("snap.py");
+    std::fs::write(&map_path, map)?;
+    std::fs::write(&recipe_path, crate::viewer::snap_recipe())?;
+    let out = std::process::Command::new("python3")
+        .arg(&recipe_path)
+        .arg(&map_path)
+        .arg(dest)
+        .output()
+        .map_err(|e| crate::CliError::Other(format!("snap: cannot run python3 ({e}); recipe printed above")))?;
+    if !out.status.success() {
+        return Err(crate::CliError::Other(format!(
+            "snap: Pillow render failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
+/// `scc view` — local web viewer (SPEC-SCC-VIEWER §2). Serves the loopback
+/// viewer routes on an ephemeral port (or `--port`), then opens the
+/// browser unless `--no-open`.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-view work=WORK-SCC-VIEWER satisfies=SPEC-SCC-VIEWER
+pub fn cmd_view(root: &Path, port: Option<u16>, no_open: bool) -> crate::Result<()> {
+    let store = open_store(root)?;
+    if store.snapshot_status()?.is_none() {
+        return Err(crate::CliError::Other("not indexed yet — run `scc index`".into()));
+    }
+    let addr = match port {
+        Some(p) => format!("127.0.0.1:{p}"),
+        None => "127.0.0.1:0".to_string(),
+    };
+    let server = tiny_http::Server::http(&addr)
+        .map_err(|e| crate::CliError::Other(format!("cannot bind {addr}: {e}")))?;
+    let bound = server.server_addr();
+    let url = format!("http://{bound}/");
+    println!("scc view: {url} (root {})", root.display());
+    if !no_open {
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    }
+    for request in server.incoming_requests() {
+        let url_path = request.url().to_string();
+        let method = request.method().clone();
+        if method == tiny_http::Method::Get && crate::viewer::is_viewer_path(&url_path) {
+            let store = match open_store(root) {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(format!("store error: {e}"))
+                            .with_status_code(500),
+                    );
+                    continue;
+                }
+            };
+            let (status, body) = crate::viewer::serve_viewer(&store, &url_path);
+            let response = tiny_http::Response::from_string(body)
+                .with_status_code(status)
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
+                        .unwrap(),
+                );
+            let _ = request.respond(response);
+            continue;
+        }
+        // Viewer-only server: the daemon (`scc serve`) owns /v1/*.
+        // Anything else is a 404 so typos fail loudly, not silently.
+        let _ = request.respond(
+            tiny_http::Response::from_string("no such viewer route (scc serve owns /v1/*)")
+                .with_status_code(404),
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
 

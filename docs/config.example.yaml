@@ -17,6 +17,7 @@ context:
   task_tokens: 10000
   detail_tokens: 6000
   include_low_confidence_inference: false
+  snap_enabled: false   # scc snap bitmap render (default OFF; text packs stay the carrier)
 inference:
   enabled: false
   provider: local        # local = ollama at http://127.0.0.1:11434/v1; also: openai | endpoint

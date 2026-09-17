@@ -119,6 +119,9 @@ scc context structural --task "..."
 scc impact --diff origin/main...HEAD
 scc verify
 scc drift
+scc diagram [--format mermaid|svg] [--out FILE]
+scc view [--port N] [--no-open]
+scc snap [--out FILE] [--png FILE.png] [--max-chars N]
 scc export system-ir.json
 scc setup claude
 scc setup omp

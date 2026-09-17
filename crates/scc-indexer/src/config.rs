@@ -72,6 +72,11 @@ pub struct ContextConfig {
     /// `true` injects a small task focus (<= 1500 tokens) for
     /// repository-changing prompts.
     pub inject_task_focus: bool,
+    /// Snapcompact-style bitmap export (`scc snap`): render the repo map
+    /// as a dense PNG for vision-capable models. Default false — text
+    /// packs remain the verified ceiling; the bitmap is an experiment
+    /// hatch (SPEC-SCC-VIEWER §3), never a silent carrier switch.
+    pub snap_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +228,7 @@ impl Default for ContextConfig {
             atlas_tokens: 15000,
             detail_tokens: 6000,
             inject_task_focus: false,
+            snap_enabled: false,
         }
     }
 }
@@ -275,6 +281,7 @@ pub enum ConfigError {
 
 // trace:exempt reason=internal-detail
 impl Config {
+    // trace:exempt reason=internal-detail
     pub fn load(path: &std::path::Path) -> Result<Config, ConfigError> {
         let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
             path: path.to_path_buf(),
@@ -284,6 +291,7 @@ impl Config {
         Ok(cfg)
     }
 
+    // trace:exempt reason=internal-detail
     pub fn default_yaml() -> String {
         serde_yaml::to_string(&Config::default()).unwrap()
     }
@@ -307,6 +315,7 @@ impl Config {
 
 // trace:exempt reason=internal-detail
 impl IndexConfig {
+    // trace:exempt reason=internal-detail
     pub fn compile_ignore(&self) -> Vec<GlobMatcher> {
         self.ignore
             .iter()
@@ -320,6 +329,7 @@ mod tests {
     use super::*;
 
     #[test]
+    // trace:exempt reason=unit-test
     fn default_config_roundtrip() {
         let cfg = Config::default();
         let yaml = serde_yaml::to_string(&cfg).unwrap();
@@ -327,6 +337,7 @@ mod tests {
         assert_eq!(back.context.task_tokens, 10000);
         assert_eq!(back.security.listen, "127.0.0.1:7777");
         assert!(back.index.ignore.len() >= 5);
+        assert!(!back.context.snap_enabled, "snap bitmap stays default-off");
     }
 
     #[test]
