@@ -43,4 +43,7 @@ coverage.lcov
 coverage.xml
 htmlcov/
 junit.xml
-.scc/
+.scc/*
+!.scc/intent.yaml
+brag-output/
+skills-lock.json
