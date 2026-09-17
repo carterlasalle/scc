@@ -1,5 +1,5 @@
 # Web Viewer, Architecture Diagram, and Snap Bitmap Export
-<!-- trace:v1 id=SPEC-SCC-VIEWER type=spec work=WORK-SCC-VIEWER title="Web viewer, SCC-native diagram, and Snapcompact-style bitmap export" -->
+<!-- trace:v1 id=SPEC-SCC-VIEWER type=document work=WORK-SCC-VIEWER title="Web viewer, SCC-native diagram, and Snapcompact-style bitmap export" -->
 
 ## Goal
 
