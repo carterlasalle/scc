@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.4] — 2026-09-17
+
+Web viewer, SCC-native diagram, and Snapcompact bitmap export.
+
+- **scc diagram.** Architecture diagram from the L1 layer (components,
+  services, stores, deployment units) with capped architectural edges
+  and flow subgraphs — as Mermaid (default) or dependency-free SVG.
+  Deterministic: same index, same bytes.
+- **scc view.** Local web viewer over the live index: overview,
+  components, flows, diagram, search. Loopback only; the daemon serves
+  the same pages as text/html alongside untouched /v1/* JSON.
+- **scc snap.** Snapcompact-style bitmap export of the repo map
+  (1568px canvas, 8x16 cells, 28px patch alignment, pinned Pillow
+  recipe). Default OFF via context.snap_enabled — text packs remain
+  the verified ceiling; the bitmap is an experiment hatch with a
+  token-honesty line, not a migration.
+
 ## [0.2.3] — 2026-09-16
 
 Root fixes for the bake-off gaps — no bandaids, no weakened contracts.
