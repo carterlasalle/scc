@@ -2265,6 +2265,18 @@ pub fn cmd_snap(
 /// printing the recipe path when Pillow is missing.
 // trace:v1 id=impl.crates-scc-cli-src-commands.render-snap-png work=WORK-SCC-VIEWER satisfies=SPEC-SCC-VIEWER
 fn render_snap_png(map: &str, dest: &str) -> crate::Result<()> {
+    // Fail fast with an actionable error when Pillow is missing (CI has no
+    // PIL): the operator installs Pillow or uses the printed recipe.
+    let probe = std::process::Command::new("python3")
+        .arg("-c")
+        .arg("import PIL")
+        .output()
+        .map_err(|e| crate::CliError::Other(format!("snap: cannot run python3 ({e})")))?;
+    if !probe.status.success() {
+        return Err(crate::CliError::Other(
+            "snap: python3 has no Pillow (pip install pillow); map text written, recipe printed above".into(),
+        ));
+    }
     let dir = tempfile::TempDir::new()?;
     let map_path = dir.path().join("map.txt");
     let recipe_path = dir.path().join("snap.py");

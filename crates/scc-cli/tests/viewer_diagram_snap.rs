@@ -28,27 +28,39 @@ fn snap_emits_map_text_and_renders_png() {
     common::run_ok(&dir, &["index", "--quiet"]);
     let map_path = dir.join("map.txt");
     let png_path = dir.join("map.png");
-    let out = common::run_ok(
-        &dir,
-        &[
-            "snap",
-            "--out",
-            map_path.to_str().unwrap(),
-            "--png",
-            png_path.to_str().unwrap(),
-        ],
-    );
-    assert!(out.contains("text ~"), "{out}");
-    assert!(out.contains("image tokens"), "{out}");
+    let has_pil = std::process::Command::new("python3")
+        .arg("-c")
+        .arg("import PIL")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if has_pil {
+        let out = common::run_ok(
+            &dir,
+            &[
+                "snap",
+                "--out",
+                map_path.to_str().unwrap(),
+                "--png",
+                png_path.to_str().unwrap(),
+            ],
+        );
+        assert!(out.contains("text ~"), "{out}");
+        assert!(out.contains("image tokens"), "{out}");
+        let png = std::fs::read(&png_path).unwrap();
+        // PNG magic + IHDR width 1568 (big-endian u32 at bytes 16..20).
+        assert_eq!(&png[0..8], &[137, 80, 78, 71, 13, 10, 26, 10], "PNG magic");
+        let w = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+        assert_eq!(w, 1568, "canvas width pins the token math");
+        let h = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
+        assert_eq!(h % 28, 0, "height aligns to the 28px vision patch grid");
+    } else {
+        // No Pillow here (CI): map text + recipe + honest skip, no render.
+        let out = common::run_ok(&dir, &["snap", "--out", map_path.to_str().unwrap()]);
+        assert!(out.contains("render OFF by default"), "{out}");
+    }
     let map = std::fs::read_to_string(&map_path).unwrap();
     assert!(map.starts_with("SCC REPO MAP:"), "{map:.120}");
-    let png = std::fs::read(&png_path).unwrap();
-    // PNG magic + IHDR width 1568 (big-endian u32 at bytes 16..20).
-    assert_eq!(&png[0..8], &[137, 80, 78, 71, 13, 10, 26, 10], "PNG magic");
-    let w = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
-    assert_eq!(w, 1568, "canvas width pins the token math");
-    let h = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
-    assert_eq!(h % 28, 0, "height aligns to the 28px vision patch grid");
 }
 
 #[test]
