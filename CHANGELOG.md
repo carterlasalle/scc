@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased] — second performance peel (2026-09-21)
+
+Samply/flamegraph + temporary spans, all semantics preserved.
+
+- **`SurfaceRenderResult.rendered_entries`.** The render pipeline already
+  held the rendered entries; callers recompiled the whole surface map to
+  resolve them (the startup path already avoided this). Both recompile
+  sites now use the attached entries. `ledger_record` 65ms → 1ms.
+  Wire-compatible (`default` + `skip_serializing_if empty`).
+- **Gated derived recompute on no-change index.** Mentions, RPC bridges,
+  and BM25 stats are pure functions of hash-identical inputs — skipped
+  when nothing was processed and nothing removed (removals included: a
+  purge changes what other files' mentions resolve to).
+  `indexer.index` 1070ms → ~220ms; no-change index ~1.1s → ~0.2s warm.
+- **Raw-column incremental content hash.** `graph_content_hash` parsed
+  every row's JSON and re-serialized 26k structs just to hash bytes; now
+  feeds raw columns into incremental FNV in query order. Same dedup
+  contract (opaque equality vs head) — one digest discontinuity, one
+  extra revision on first record after upgrade, then dedup resumes.
+
+Receipts (release, M1 Pro, self repo, 5-run medians): index 0.22s,
+surface --task 0.52s, context task 0.54s, startup 0.48s, surface 0.44s,
+important 0.27s, status 0.06s, atlas 0.17s. Full suite 980/980.
+Stop: remainder is SQLite row fetch + filesystem walk/hash (real work).
+Parked: `stale_paths` daemon dirty-set; cold-query page warmth.
 ## [0.2.5] — 2026-09-21
 
 Speed release: every read path profiled with Samply/flamegraph, all
