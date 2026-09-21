@@ -1201,30 +1201,10 @@ pub fn important_symbols(
     let mut map = compile_surface_map(compiler);
     // Rank exactly like the production pipeline: task seeds when tasked,
     // global PPR otherwise. Scores attach to entries via the shared tail.
-    let request = SurfaceRequest {
-        mode,
-        budget: usize::MAX,
-        explain: false,
-        policy: SurfacePolicy {
-            quotas: false,
-            mmr: false,
-            coverage: false,
-            hard_max: usize::MAX,
-        },
-        semantic: None,
-    };
-    let stages = SurfacePipelineStages {
-        lexical: true,
-        global_ppr: true,
-        task_ppr: true,
-        mmr: false,
-        quotas: false,
-        optimizer: true,
-    };
-    let _ = build_surface_staged(compiler, request, &stages);
-    // build_surface_staged does not return the ranked map; re-rank here
-    // over the same signals the pipeline used (global/task projection +
-    // final_importance blend) — deterministic, same order as selection.
+    // No throwaway pipeline build: the old code ran a full
+    // build_surface_staged and discarded the result, paying for a second
+    // SystemRanker build. Rank directly over the same signals
+    // (global/task projection) — deterministic, same order as before.
     let ranker = crate::pagerank::SystemRanker::new(&compiler.view);
     let gv = ranker.global_vector();
     let global_of: BTreeMap<String, f64> =

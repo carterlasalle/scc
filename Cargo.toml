@@ -31,5 +31,11 @@ chrono = { version = "0.4", features = ["serde"] }
 [profile.release]
 lto = "thin"
 
+[profile.profiling]
+# trace:exempt reason=internal-detail
+inherits = "release"
+# trace:exempt reason=internal-detail
+debug = true
+
 [profile.dev]
 opt-level = 1

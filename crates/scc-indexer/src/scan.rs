@@ -3,6 +3,7 @@
 
 use crate::config::IndexConfig;
 use blake3::Hash;
+use globset::GlobMatcher;
 use ignore::WalkBuilder;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -356,9 +357,8 @@ pub fn scan_repo_with_stats(
     // subtree is ignored is never descended. `.scc` still descends: only
     // `.scc/intent.yaml` is scannable and the per-file filter keeps it.
     let filter_root = root.to_path_buf();
-    let filter_config = config.clone();
+    let filter_matchers = config.compile_ignore();
     builder.filter_entry(move |e| {
-        let config = &filter_config;
         if e.depth() == 0 {
             return true;
         }
@@ -371,8 +371,8 @@ pub fn scan_repo_with_stats(
             return true;
         }
         if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            return !is_ignored(&rel_str, config)
-                && !is_ignored(&format!("{rel_str}/.scc-probe"), config);
+            return !is_ignored_with(&filter_matchers, &rel_str)
+                && !is_ignored_with(&filter_matchers, &format!("{rel_str}/.scc-probe"));
         }
         true
     });
@@ -380,6 +380,9 @@ pub fn scan_repo_with_stats(
     // One canonical root for the whole walk: canonicalization is a
     // syscall per file when left inside the loop below.
     let root_c = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    // Glob compilation (regex build per pattern) hoisted out of the
+    // per-file loop: same matchers, same semantics, ~6% wall on system_ir.
+    let matchers = config.compile_ignore();
     for entry in builder.build() {
         let entry = match entry {
             Ok(e) => e,
@@ -416,7 +419,7 @@ pub fn scan_repo_with_stats(
             continue;
         }
         stats.discovered += 1;
-        if is_ignored(&rel_str, config) {
+        if is_ignored_with(&matchers, &rel_str) {
             stats.ignored += 1;
             continue;
         }
@@ -452,14 +455,23 @@ pub fn scan_repo_with_stats(
 /// Check ignore globs: `**/node_modules/**` style patterns relative to the
 /// repo root. `.scc/intent.yaml` is repository intent, not SCC state, so it
 /// is always scanned.
+// trace:v1 id=impl.crates-scc-indexer-src-scan.is-ignored work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 pub fn is_ignored(rel: &str, config: &IndexConfig) -> bool {
+    is_ignored_with(&config.compile_ignore(), rel)
+}
+
+/// [`is_ignored`] over a precompiled matcher set: hoists glob compilation
+/// (regex build per pattern) out of the per-file hot loop. Same matchers,
+/// same semantics — the caller owns compilation.
+// trace:v1 id=impl.crates-scc-indexer-src-scan.is-ignored-with work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+pub fn is_ignored_with(matchers: &[GlobMatcher], rel: &str) -> bool {
     if rel == ".scc/intent.yaml" {
         return false;
     }
     if rel == ".scc" || rel.starts_with(".scc/") {
         return true;
     }
-    for pat in config.compile_ignore() {
+    for pat in matchers {
         if pat.is_match(rel) {
             return true;
         }
