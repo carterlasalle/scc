@@ -308,11 +308,40 @@ pub fn index_and_recompile(root: &Path, config: &Config) -> Result<scc_indexer::
             scc_indexer::resolver::MAX_CALL_SITES,
         );
     }
-    recompile(&store)?;
+    // No-change fast path (profiler receipt 2026-09-21: a no-change `scc
+    // index` still ran the full derived recompile + revision hash over
+    // 26k rows and bumped the Derived epoch, invalidating warm context
+    // caches). Derived facts are pure of source facts: zero changed /
+    // removed files with a matching extractor means the derived layer is
+    // already current — skip the recompile AND the revision record so
+    // epoch-keyed caches stay warm. Any source, extractor, or resolver
+    // change takes the full path.
+    let unchanged = report.changed == 0 && report.removed == 0 && !config.index.auto_resolve;
+    let extractor_current = store
+        .revisions()
+        .map(|rs| {
+            rs.into_iter().last().map(|h| {
+                h.extractor_version
+                    == format!(
+                        "store:{};core:{}",
+                        scc_store::SCHEMA_VERSION,
+                        scc_core::SCHEMA_VERSION
+                    )
+            })
+            .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    if !(unchanged && extractor_current) {
+        recompile(&store)?;
+    }
     // Revision AFTER recompile (never inside the indexer): history must
     // include derived facts (components, boundaries, flows). Recording
     // before recompile leaves history one recompile behind — V2 content
-    // dedup exposed this ordering bug.
+    // dedup exposed this ordering bug. Always recorded: the dedup inside
+    // returns the head without appending when nothing changed, preserving
+    // the epoch/ledger invalidation contract the task cache depends on.
+    // (The no-change fast path above skips only the recompile, whose
+    // writes would be byte-identical rows.)
         let _ = store.record_current_revision_with_config(
             &scc_indexer::semantic_config_hash(config),
         )?;

@@ -88,6 +88,29 @@ pub fn compile_surface_map(compiler: &ContextCompiler) -> SystemSurfaceMap {
     // per entry — ~15% of the render on system_ir). Computed once here;
     // entry output is byte-identical.
     let all_flows: Vec<scc_core::Flow> = view.flows();
+    // Actor index (profiler receipt 2026-09-21: `step_matches` ran a
+    // substring search per (symbol x flow x step) — ~10M `contains` per
+    // map on system_ir, ~2/3 of compile_surface_map). Exact actor ->
+    // flow names plus the distinct actor set for the file fallback;
+    // entry output is byte-identical.
+    let mut flows_by_actor: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut all_actors: Vec<&str> = Vec::new();
+    for f in &all_flows {
+        for s in &f.steps {
+            if let Some(v) = flows_by_actor.get_mut(s.actor.as_str()) {
+                if !v.contains(&f.name.as_str()) {
+                    v.push(f.name.as_str());
+                }
+            } else {
+                all_actors.push(s.actor.as_str());
+                flows_by_actor.insert(s.actor.as_str(), vec![f.name.as_str()]);
+            }
+        }
+    }
+    // Per-file fallback cache: actors containing the entry's file path
+    // (the fuzzy arm of `step_matches`). One pass over the distinct actor
+    // set per distinct file — hundreds of files, not thousands of symbols.
+    let mut flows_by_actor_file: HashMap<String, Vec<String>> = HashMap::new();
     let mut routes_by_handler: HashMap<&str, Vec<(String, String)>> = HashMap::new();
     for r in view.entities_of_kind(kinds::ROUTE) {
         if let (Some(h), Some(m), Some(path)) = (
@@ -120,7 +143,9 @@ pub fn compile_surface_map(compiler: &ContextCompiler) -> SystemSurfaceMap {
             &comp_names,
             &subsys_of_comp,
             &surface_by_symbol,
-            &all_flows,
+            &flows_by_actor,
+            &all_actors,
+            &mut flows_by_actor_file,
             &routes_by_handler,
         ));
     }
@@ -1412,8 +1437,8 @@ fn importance_profile(e: &SurfaceEntry, r: &SurfaceRank) -> scc_core::Importance
 }
 
 
-// trace:v1 id=impl.scc.surface.build-entry work=WORK-SCC-014 satisfies=REQ-SCC-IR
 #[allow(clippy::too_many_arguments)]
+// trace:v1 id=impl.scc.surface.build-entry work=WORK-SCC-014 satisfies=REQ-SCC-IR
 fn build_entry(
     compiler: &ContextCompiler,
     e: &scc_core::Entity,
@@ -1422,7 +1447,9 @@ fn build_entry(
     comp_names: &BTreeMap<String, String>,
     subsys_of_comp: &BTreeMap<String, String>,
     surface_by_symbol: &BTreeMap<String, Vec<(String, String)>>,
-    all_flows: &[scc_core::Flow],
+    flows_by_actor: &HashMap<&str, Vec<&str>>,
+    all_actors: &[&str],
+    flows_by_actor_file: &mut HashMap<String, Vec<String>>,
     routes_by_handler: &HashMap<&str, Vec<(String, String)>>,
 ) -> SurfaceEntry {
     let view = &compiler.view;
@@ -1516,15 +1543,30 @@ fn build_entry(
     annotations.sort();
     annotations.dedup();
 
-    // flows (precomputed per map — see compile_surface_map)
+    // flows via the per-map actor index: exact actor lookups for
+    // id/name/qualified plus the cached file-path fallback (same
+    // predicate as `step_matches`, precomputed — no per-step scan).
     let mut flows: BTreeSet<String> = BTreeSet::new();
-    for f in all_flows {
-        if f.steps
-            .iter()
-            .any(|s| step_matches(s, &e.id, &name, &qualified, &file))
-        {
-            flows.insert(f.name.clone());
+    for key in [&e.id, &name, &qualified] {
+        if let Some(names) = flows_by_actor.get(key.as_str()) {
+            flows.extend(names.iter().map(|s| s.to_string()));
         }
+    }
+    if !file.is_empty() {
+        let cached = flows_by_actor_file.entry(file.clone()).or_insert_with(|| {
+            let mut names: Vec<String> = Vec::new();
+            for actor in all_actors.iter() {
+                if actor.contains(file.as_str()) {
+                    if let Some(fs) = flows_by_actor.get(*actor) {
+                        names.extend(fs.iter().map(|s| s.to_string()));
+                    }
+                }
+            }
+            names.sort();
+            names.dedup();
+            names
+        });
+        flows.extend(cached.iter().cloned());
     }
 
     // contracts
@@ -2086,11 +2128,6 @@ fn synthesized_signature(kind_str: &str, simple: &str) -> String {
         "type" => format!("type {}", simple),
         _ => simple.to_string(),
     }
-}
-
-// trace:exempt reason=internal-detail
-fn step_matches(s: &scc_core::FlowStep, id: &str, name: &str, qualified: &str, file: &str) -> bool {
-    s.actor == id || s.actor == name || s.actor == qualified || (!file.is_empty() && s.actor.contains(file))
 }
 
 // trace:exempt reason=internal-detail

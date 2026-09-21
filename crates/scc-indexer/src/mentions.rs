@@ -172,50 +172,67 @@ fn is_mention_target_kind(kind: &str) -> bool {
     )
 }
 
+// Precomputed per-(entity, span) match inputs: span suffixes built once
+// per span and entity keys built once per index run (profiler receipt
+// 2026-09-21: `match_rank` rebuilt `.{span}`/`::{span}`/`/{span}` strings
+// and re-split route tokens per (entity x span) pair — the `format!`
+// leaf was ~1/3 of `scc index`). Same checks, same order, same ranks.
 // trace:exempt reason=internal-detail
-fn match_rank(entity_name: &str, kind: &str, path: &str, span: &str) -> Option<u8> {
-    if entity_name == span {
+struct SpanKeys {
+    span: String,
+    dot: String,
+    colon: String,
+    slash: String,
+}
+
+// trace:exempt reason=internal-detail
+struct EntityKeys {
+    id: String,
+    kind_is_file: bool,
+    kind_is_route: bool,
+    name: String,
+    file_base: String,
+    file_stem: String,
+    path_base: String,
+    path_stem: String,
+    route_tokens: Vec<String>,
+}
+
+// trace:exempt reason=internal-detail
+fn match_rank_precomputed(e: &EntityKeys, s: &SpanKeys) -> Option<u8> {
+    if e.name == s.span {
         return Some(0);
     }
-    if entity_name.eq_ignore_ascii_case(span) {
+    if e.name.eq_ignore_ascii_case(&s.span) {
         return Some(1);
     }
-    if entity_name.ends_with(&format!(".{span}")) || entity_name.ends_with(&format!("::{span}")) {
+    if e.name.ends_with(s.dot.as_str()) || e.name.ends_with(s.colon.as_str()) {
         return Some(2);
     }
-    if kind == kinds::FILE {
-        let base = entity_name.rsplit('/').next().unwrap_or(entity_name);
-        if base == span {
+    if e.kind_is_file {
+        if e.file_base == s.span {
             return Some(3);
         }
-        let stem = base.rsplit_once('.').map(|(s, _)| s).unwrap_or(base);
-        if stem == span {
+        if e.file_stem == s.span {
             return Some(4);
         }
-        if entity_name.ends_with(&format!("/{span}")) {
+        if e.name.ends_with(s.slash.as_str()) {
             return Some(3);
         }
     }
-    if kind == kinds::ROUTE {
-        let slash = format!("/{span}");
-        let tokens: Vec<&str> = entity_name
-            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '/'))
-            .filter(|t| !t.is_empty())
-            .collect();
-        if tokens.iter().any(|t| *t == span || *t == slash.as_str()) {
+    if e.kind_is_route {
+        if e.route_tokens.iter().any(|t| *t == s.span || *t == s.slash) {
             return Some(5);
         }
-        if entity_name.contains(span) && span.contains('/') {
+        if e.name.contains(s.span.as_str()) && s.span.contains('/') {
             return Some(5);
         }
     }
-    if !path.is_empty() {
-        let base = path.rsplit('/').next().unwrap_or(path);
-        if base == span {
+    if !e.path_base.is_empty() {
+        if e.path_base == s.span {
             return Some(4);
         }
-        let stem = base.rsplit_once('.').map(|(s, _)| s).unwrap_or(base);
-        if stem == span {
+        if e.path_stem == s.span {
             return Some(5);
         }
     }
@@ -238,6 +255,50 @@ pub fn write_mentions(store: &Store) -> Result<MentionStats, scc_store::StoreErr
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let entities = store.all_entities()?;
+    // Entity match keys once per run (not per span): target-kind filter +
+    // file/path base/stem + route tokens. Identical match outcomes.
+    let ekeys: Vec<EntityKeys> = entities
+        .iter()
+        .filter(|e| is_mention_target_kind(&e.kind))
+        .map(|e| {
+            let path_attr = e
+                .attributes
+                .get("file")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let file_base = e.name.rsplit('/').next().unwrap_or(e.name.as_str());
+            let path_base = path_attr.rsplit('/').next().unwrap_or(path_attr);
+            EntityKeys {
+                id: e.id.clone(),
+                kind_is_file: e.kind == kinds::FILE,
+                kind_is_route: e.kind == kinds::ROUTE,
+                name: e.name.clone(),
+                file_base: file_base.to_string(),
+                file_stem: file_base
+                    .rsplit_once('.')
+                    .map(|(s, _)| s)
+                    .unwrap_or(file_base)
+                    .to_string(),
+                path_base: path_base.to_string(),
+                path_stem: path_base
+                    .rsplit_once('.')
+                    .map(|(s, _)| s)
+                    .unwrap_or(path_base)
+                    .to_string(),
+                route_tokens: if e.kind == kinds::ROUTE {
+                    e.name
+                        .split(|c: char| {
+                            !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '/')
+                        })
+                        .filter(|t| !t.is_empty())
+                        .map(|t| t.to_string())
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            }
+        })
+        .collect();
     let mut stats = MentionStats::default();
 
     for (path, file_id) in &files {
@@ -251,17 +312,19 @@ pub fn write_mentions(store: &Store) -> Result<MentionStats, scc_store::StoreErr
         let spans = extract_markdown_backticks(&content);
         let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
         for m in spans {
+            // Span suffixes once per span (not per entity).
+            let skeys = SpanKeys {
+                dot: format!(".{}", m.span),
+                colon: format!("::{}", m.span),
+                slash: format!("/{}", m.span),
+                span: m.span.clone(),
+            };
             let mut ranked: Vec<(u8, String)> = Vec::new();
-            for e in &entities {
-                if e.id == *file_id || !is_mention_target_kind(&e.kind) {
+            for e in &ekeys {
+                if e.id == *file_id {
                     continue;
                 }
-                let path_attr = e
-                    .attributes
-                    .get("file")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                if let Some(rank) = match_rank(&e.name, &e.kind, path_attr, &m.span) {
+                if let Some(rank) = match_rank_precomputed(e, &skeys) {
                     ranked.push((rank, e.id.clone()));
                 }
             }
