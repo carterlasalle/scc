@@ -1659,6 +1659,11 @@ pub struct SurfaceRenderResult {
     pub text: String,
     /// Entry ids actually rendered, in selection order.
     pub rendered_ids: Vec<String>,
+    /// The rendered entries themselves (post hard-max pops — exactly the
+    /// set `rendered_ids` names). Lets callers resolve rendered ids without
+    /// recompiling the surface map. Wire-compatible: skipped when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rendered_entries: Vec<SurfaceEntry>,
     /// Candidate entry ids the pipeline omitted (budget/quotas/diversity).
     pub omitted_ids: Vec<String>,
     /// Per-kind omission summaries.
@@ -2252,6 +2257,7 @@ mod tests {
         let r = SurfaceRenderResult {
             text: "SCC SYSTEM SURFACE MAP\n\n  function serve\n".into(),
             rendered_ids: vec!["repo://r/symbol/api.py/serve".into()],
+            rendered_entries: vec![],
             omitted_ids: vec!["repo://r/symbol/api.py/internal".into()],
             omissions: vec![SurfaceOmission {
                 count: 1,

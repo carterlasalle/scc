@@ -314,21 +314,77 @@ impl Store {
 
 // trace:exempt reason=internal-detail
 impl Store {
-    /// Content hash of the live graph rows (entity + relationship JSON,
-    /// sorted): the content-identity half of revision dedup. An extractor,
-    /// confidence, or provenance change advances the revision even when no
-    /// source file moved.
+    /// Content hash of the live graph rows (raw entity + relationship
+    /// columns, fed incrementally in deterministic query order): the
+    /// content-identity half of revision dedup. An extractor, confidence,
+    /// or provenance change advances the revision even when no source file
+    /// moved. Raw columns, not re-serialized structs: the old code parsed
+    /// every row's JSON and re-serialized it (parse + reserialize of 26k
+    /// rows per record) only to hash the bytes. Same contract — opaque
+    /// equality vs the head — at read cost only. NOTE: the digest value
+    /// changes once vs pre-0.2.6 binaries (one extra revision on first
+    /// record after upgrade, then dedup resumes).
     // trace:exempt reason=internal-detail
     pub fn graph_content_hash(&self) -> Result<String, StoreError> {
-        let mut rows: Vec<String> = Vec::new();
-        for e in self.all_entities()? {
-            rows.push(serde_json::to_string(&e).unwrap_or_default());
+        const OFFSET: u64 = 0xcbf29ce484222325;
+        const PRIME: u64 = 0x100000001b3;
+        let mut h = OFFSET;
+        let mut feed = |b: &[u8]| {
+            for byte in b {
+                h ^= u64::from(*byte);
+                h = h.wrapping_mul(PRIME);
+            }
+            h ^= 0xff;
+            h = h.wrapping_mul(PRIME);
+        };
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, name, attributes, evidence FROM entities ORDER BY kind, name",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        for r in rows {
+            let (id, kind, name, attributes, evidence) = r?;
+            feed(id.as_bytes());
+            feed(kind.as_bytes());
+            feed(name.as_bytes());
+            feed(attributes.as_bytes());
+            feed(evidence.as_bytes());
         }
-        for r in self.all_relationships()? {
-            rows.push(serde_json::to_string(&r).unwrap_or_default());
+        let mut stmt = self.conn.prepare(
+            "SELECT id, subject, predicate, object, provenance, confidence, evidence, verified_at FROM relationships ORDER BY id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, f64>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+            ))
+        })?;
+        for r in rows {
+            let (id, subject, predicate, object, provenance, confidence, evidence, verified_at) =
+                r?;
+            feed(id.as_bytes());
+            feed(subject.as_bytes());
+            feed(predicate.as_bytes());
+            feed(object.as_bytes());
+            feed(provenance.as_bytes());
+            feed(&confidence.to_le_bytes());
+            feed(evidence.as_bytes());
+            feed(verified_at.as_bytes());
         }
-        rows.sort();
-        Ok(scc_core::fnv1a64_hex(rows.join("\n").as_bytes()))
+        Ok(format!("{h:016x}"))
     }
 
     /// Record the current graph, skipping fully-identical runs: when

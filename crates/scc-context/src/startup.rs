@@ -994,6 +994,7 @@ mod tests {
             surface_render: scc_core::SurfaceRenderResult {
                 text: "SURFACE-BODY".into(),
                 rendered_ids: vec![],
+                rendered_entries: vec![],
                 omitted_ids: vec![],
                 omissions: vec![],
                 token_count: 0,
