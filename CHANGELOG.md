@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.2.5] — 2026-09-21
+
+Speed release: every read path profiled with Samply/flamegraph, all
+features and output preserved (byte-identical modulo artifact hashes).
+
+Measured on system_ir (649 files, 8k entities, 18k rels), release binary:
+
+- **No-change `scc index`: 6.5s → 1.1s.** Skips the derived recompile
+  when zero files changed and the extractor is current (the revision
+  record still runs, preserving the epoch/ledger contract). Glob
+  matchers compile once per scan instead of per file+dir; doc-mention
+  matching precomputes span suffixes and entity keys once per run
+  instead of per (entity x span) pair.
+- **`scc context startup`: 7.0s → 0.4s.** Flow matching replaced a
+  ~10M-substring-search scan per map with a per-map actor→flows index
+  plus a per-file fallback cache (parity-proven over 4236 symbols).
+- **`scc surface --task`: 5.3s → 0.5s.** Same flow index; the surface
+  pipeline was the dominant cost.
+- **`scc context task`: 4.0s → 0.5s.** Same flow index via the
+  task-delta path.
+- **`scc important`: 1.7s → 0.2s.** Deleted a full `build_surface_staged`
+  whose result was discarded (a second SystemRanker build).
+- **`scc query`: unchanged at 0.8s cold.** Measured as cold page-cache
+  fetch on the 70MB FTS index (30ms warm), not a code hotspot — no code
+  change beats that physics for a one-shot CLI; the daemon never pays
+  it after warmup.
+
+Deliberately not taken: skipping the snapshot+record on no-change
+index (would keep epoch caches warm but breaks the reindex-resets-
+ledger contract the task cache pins — a product semantic change, not
+a perf fix).
+
 ## [0.2.4] — 2026-09-17
 
 Web viewer, SCC-native diagram, and Snapcompact bitmap export.

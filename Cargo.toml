@@ -11,7 +11,7 @@ members = [
 
 [workspace.package]
 # trace:v1 id=ops.release-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "MIT"
 
