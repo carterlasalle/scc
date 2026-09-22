@@ -3,8 +3,14 @@
 # at /repo, writable state at /data (mount an SCC volume).
 FROM rust:1.97-bookworm AS builder
 WORKDIR /build
-COPY crates crates
 COPY Cargo.toml Cargo.lock ./
+COPY crates crates
+# scc-cli embeds the harness integrations with include_str! (plugins/omp/scc,
+# plugins/hermes/scc, plugins/claude/hooks, plugins/opencode), so the build needs
+# plugins/ as well as crates/. scripts/docker_context_test.sh asserts that every
+# include_str! path is covered here, and CI runs it — the image build failed on
+# exactly this before.
+COPY plugins plugins
 RUN cargo build --release -p scc-cli
 
 FROM debian:bookworm-slim

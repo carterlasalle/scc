@@ -129,6 +129,11 @@ jobs:
             (cd "npm/$pkg" && npm pack --dry-run > /dev/null && echo "npm/$pkg packs")
           done
           (cd plugins/omp/scc && npm pack --dry-run > /dev/null && echo "plugins/omp/scc packs")
+      - name: Docker build context covers every embedded file
+        # Static: asserts each include_str! path is COPYed into the builder stage.
+        # The image build failed on exactly this (plugins/ was not copied), and a
+        # full docker build in CI would cost a Rust release compile per PR.
+        run: ./scripts/docker_context_test.sh
       - name: Canary — dry run against the published release
         env:
           SCC_GITHUB_TOKEN: ${{ github.token }}

@@ -1,0 +1,22 @@
+# trace:v1 id=ops.scc-dockerignore work=WORK-SCC-DISTRIBUTION title="Docker build context: only what the image build needs"
+# Keep the build context to what the image build needs: Cargo manifests,
+# crates/, and plugins/ (embedded with include_str! by scc-cli).
+# scripts/docker_context_test.sh fails if an embedded path lands in here.
+.git
+.github
+target
+fixtures
+benchmarks
+docs
+sdk
+npm
+contrib
+.trace
+.omp
+.pi
+.agents
+.serena
+.hermes
+.rtk
+node_modules
+dist
