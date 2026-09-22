@@ -207,31 +207,6 @@ pub fn lock_entry(p: &LoadedPlugin) -> serde_json::Value {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-// trace:exempt reason=unit-test
-    fn no_provider_is_not_ambiguous() {
-        let r = super::provider_for(&[], "acme.missing");
-        assert!(matches!(r, Err(super::HostError::NoProvider(_))));
-    }
-
-    #[test]
-// trace:exempt reason=unit-test
-    fn state_op_without_grant_is_denied() {
-        let p = super::LoadedPlugin {
-            manifest: scc_plugin_api::PluginManifest {
-                id: "x".into(), name: "X".into(), version: "1".into(), api: "1".into(),
-                operations: vec![], permissions: vec![], timeout_ms: 50, runtime: Default::default(),
-                failure_policy: "warn".into(), deterministic: true, command: vec!["true".into()], extensions: vec![],
-            },
-            dir: std::path::PathBuf::from("."),
-            config: serde_json::json!({}),
-            grants: vec![],
-        };
-        assert!(super::call(&p, "state.get", serde_json::json!({}), None).is_err());
-    }
-}
 
 /// Project plugin lockfile (§29): `.scc/plugins.lock` records the resolved
 /// plugin set so behavior reproduces across machines.
@@ -299,5 +274,31 @@ pub fn check_lockfile(repo_root: &std::path::Path, plugins: &[LoadedPlugin]) -> 
         Ok(())
     } else {
         Err(format!("plugin set drifted from .scc/plugins.lock: {}", drifted.join(", ")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+// trace:exempt reason=unit-test
+    fn no_provider_is_not_ambiguous() {
+        let r = super::provider_for(&[], "acme.missing");
+        assert!(matches!(r, Err(super::HostError::NoProvider(_))));
+    }
+
+    #[test]
+// trace:exempt reason=unit-test
+    fn state_op_without_grant_is_denied() {
+        let p = super::LoadedPlugin {
+            manifest: scc_plugin_api::PluginManifest {
+                id: "x".into(), name: "X".into(), version: "1".into(), api: "1".into(),
+                operations: vec![], permissions: vec![], timeout_ms: 50, runtime: Default::default(),
+                failure_policy: "warn".into(), deterministic: true, command: vec!["true".into()], extensions: vec![],
+            },
+            dir: std::path::PathBuf::from("."),
+            config: serde_json::json!({}),
+            grants: vec![],
+        };
+        assert!(super::call(&p, "state.get", serde_json::json!({}), None).is_err());
     }
 }
