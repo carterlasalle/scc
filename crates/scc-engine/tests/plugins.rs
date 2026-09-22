@@ -153,6 +153,28 @@ fn contribution_pipeline_validates_then_commits() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.contribution-atomic verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.commit-contribution
+fn contribution_mid_batch_failure_leaves_no_partial_state() {
+    // Spec 24: a broken plugin must not leave half a graph. The first
+    // entity decodes, the second does not — the whole batch must abort
+    // with nothing committed (decode happens before any write).
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let store = scc_store::Store::open(&dir.path().join("scc.db"), &root).unwrap();
+    let before = store.stats().unwrap()["entities"];
+    let mixed = serde_json::json!({"entities": [
+        {"id": "plugin:acme/ok", "kind": "plugin:acme/thing", "name": "ok", "attributes": {}, "evidence": []},
+        {"id": "plugin:acme/bad", "kind": "plugin:acme/thing", "name": 42, "attributes": {}, "evidence": []}
+    ], "relationships": [], "evidence": []});
+    assert!(scc_engine::plugins::commit_contribution(&store, "acme.t", &mixed).is_err());
+    assert!(store.search_entities("ok", 10).unwrap().is_empty(), "partial entity must roll back");
+    assert_eq!(store.stats().unwrap()["entities"], before, "entity count unchanged");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.context-section verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.context-sections
 fn context_section_plugin_appends_provenance_section() {
     use std::io::Write;

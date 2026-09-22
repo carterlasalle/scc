@@ -275,31 +275,54 @@ pub fn commit_contribution(
     plugin_id: &str,
     batch: &serde_json::Value,
 ) -> crate::Result<serde_json::Value> {
+    // Spec 24: validate everything BEFORE writing, then commit inside one
+    // batch so a mid-batch failure rolls back instead of leaving half a
+    // graph. Decode errors also abort before any write.
     let checked = validate_contribution(store, plugin_id, batch)?;
-    let mut n_entities = 0usize;
-    let mut n_rels = 0usize;
-    let mut n_ev = 0usize;
-    for e in checked.get("entities").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-        let entity: scc_core::Entity = serde_json::from_value(e)
-            .map_err(|e| crate::EngineError::Other(format!("contribution entity decode: {e}")))?;
-        store.insert_entity(&entity, &[format!("plugin:{plugin_id}")])?;
-        n_entities += 1;
-    }
-    for r in checked.get("relationships").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-        let rel: scc_core::Relationship = serde_json::from_value(r.clone())
-            .map_err(|e| crate::EngineError::Other(format!("contribution relationship decode: {e}")))?;
-        store.insert_relationship(&rel, &format!("plugin:{plugin_id}"))?;
-        n_rels += 1;
-    }
-    for e in checked.get("evidence").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-        let mut ev: scc_core::Evidence = serde_json::from_value(e)
-            .map_err(|e| crate::EngineError::Other(format!("contribution evidence decode: {e}")))?;
+    let entities: Vec<scc_core::Entity> = checked
+        .get("entities").and_then(|v| v.as_array()).cloned().unwrap_or_default()
+        .into_iter().map(serde_json::from_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| crate::EngineError::Other(format!("contribution entity decode: {e}")))?;
+    let rels: Vec<scc_core::Relationship> = checked
+        .get("relationships").and_then(|v| v.as_array()).cloned().unwrap_or_default()
+        .into_iter().map(serde_json::from_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| crate::EngineError::Other(format!("contribution relationship decode: {e}")))?;
+    let mut evs: Vec<scc_core::Evidence> = checked
+        .get("evidence").and_then(|v| v.as_array()).cloned().unwrap_or_default()
+        .into_iter().map(serde_json::from_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| crate::EngineError::Other(format!("contribution evidence decode: {e}")))?;
+    for ev in evs.iter_mut() {
         // Provenance stamp survives the typed decode via extractor tag.
         ev.extractor = Some(format!("plugin:{plugin_id}"));
-        store.insert_evidence(&ev)?;
-        n_ev += 1;
     }
-    Ok(serde_json::json!({"entities": n_entities, "relationships": n_rels, "evidence": n_ev}))
+    store.batch_begin().map_err(crate::EngineError::Store)?;
+    let mut counts = (0usize, 0usize, 0usize);
+    for e in &entities {
+        if let Err(err) = store.insert_entity(e, &[format!("plugin:{plugin_id}")]) {
+            store.batch_abort();
+            return Err(crate::EngineError::Store(err));
+        }
+        counts.0 += 1;
+    }
+    for r in &rels {
+        if let Err(err) = store.insert_relationship(r, &format!("plugin:{plugin_id}")) {
+            store.batch_abort();
+            return Err(crate::EngineError::Store(err));
+        }
+        counts.1 += 1;
+    }
+    for ev in &evs {
+        if let Err(err) = store.insert_evidence(ev) {
+            store.batch_abort();
+            return Err(crate::EngineError::Store(err));
+        }
+        counts.2 += 1;
+    }
+    store.batch_end().map_err(crate::EngineError::Store)?;
+    Ok(serde_json::json!({"entities": counts.0, "relationships": counts.1, "evidence": counts.2}))
 }
 
 /// Context-section contributions (§17 Context): every `context-section:*`
