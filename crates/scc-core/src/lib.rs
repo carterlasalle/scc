@@ -41,7 +41,7 @@ pub use retrieval::{mean_reciprocal_rank, recall_at_k};
 // trace:exempt reason=internal-detail
 
 /// Evidence class of a fact, per docs/SYSTEM_IR_SCHEMA.md §5.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 // trace:v1 id=impl.crates-scc-core-src-lib.Provenance work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub enum Provenance {
@@ -99,7 +99,7 @@ impl Provenance {
 
 // trace:exempt reason=internal-detail
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.Severity work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
@@ -128,7 +128,7 @@ impl Severity {
 // trace:exempt reason=internal-detail
 
 /// Flow view kinds (System Atlas), per docs/SYSTEM_IR_SCHEMA.md §7.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.FlowKind work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
@@ -160,7 +160,7 @@ pub fn flow_kind_str(k: &FlowKind) -> &'static str {
 }
 
 /// Evidence source type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 // trace:v1 id=impl.crates-scc-core-src-lib.EvidenceType work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub enum EvidenceType {
@@ -182,7 +182,7 @@ pub enum EvidenceType {
 /// (routes, exports, cli/framework signals, deployment/workspace shape) by
 /// `scc_graph::archetype::detect_archetype`. `Unknown` is the honest
 /// fallback when no signal fires.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.Archetype work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
@@ -258,7 +258,7 @@ impl Archetype {
 // Core records
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.Repository work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Repository {
     pub id: String,
@@ -267,7 +267,7 @@ pub struct Repository {
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.Snapshot work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Snapshot {
     pub revision: String,
@@ -278,7 +278,7 @@ pub struct Snapshot {
 
 // trace:exempt reason=internal-detail
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.Entity work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Entity {
@@ -340,7 +340,7 @@ pub struct Occurrence {
 
 // trace:exempt reason=internal-detail
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.Relationship work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Relationship {
@@ -391,7 +391,7 @@ impl Relationship {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.FlowStep work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct FlowStep {
     pub id: String,
@@ -414,7 +414,7 @@ pub struct FlowStep {
     pub evidence: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.Flow work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Flow {
     pub id: String,
@@ -427,7 +427,7 @@ pub struct Flow {
     pub attributes: BTreeMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.Invariant work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Invariant {
     pub id: String,
@@ -445,7 +445,7 @@ pub struct Invariant {
 
 // trace:exempt reason=internal-detail
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.Evidence work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Evidence {
@@ -613,7 +613,7 @@ pub struct FlowGraph {
 /// responsibility claim; consumes/produces come from data-flow edges;
 /// upstream/downstream from dependency edges; retry/failure from extracted
 /// failure behavior.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.AtlasComponent work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct AtlasComponent {
     pub name: String,
@@ -661,7 +661,7 @@ pub struct AtlasComponent {
 /// One hierarchical container (service or subsystem) with its direct member
 /// entity ids (component ids, or subsystem ids nested inside a service).
 /// Deterministic: `members` sorted by entity id.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.AtlasHierarchyNode work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct AtlasHierarchyNode {
     /// Container entity id (`repo://…/service/…` or `repo://…/subsystem/…`).
@@ -675,7 +675,7 @@ pub struct AtlasHierarchyNode {
 
 /// A typed ownership claim (provenance preserved — DECLARED intent never
 /// promoted).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.AtlasOwnershipClaim work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct AtlasOwnershipClaim {
     pub target: String,
@@ -684,7 +684,7 @@ pub struct AtlasOwnershipClaim {
 
 /// A condensed flow: steps collapsed to "Actor: operation" lines, with
 /// branch/async/failure markers preserved.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.AtlasFlow work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct AtlasFlow {
     pub name: String,
@@ -695,7 +695,7 @@ pub struct AtlasFlow {
     pub steps: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.AtlasEntrypoint work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct AtlasEntrypoint {
     pub name: String,
@@ -705,7 +705,7 @@ pub struct AtlasEntrypoint {
     pub symbol: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.AtlasInvariant work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct AtlasInvariant {
     pub statement: String,
@@ -722,7 +722,7 @@ pub struct AtlasInvariant {
 /// The legacy `kind` string stays for back-compat; `subclass` is the typed
 /// family (`http`/`cli`/`event`/`config`/`public-api`/`extension`/
 /// `serialization`/...).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.ContractSubclass work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
@@ -814,7 +814,7 @@ impl ContractSubclass {
 /// symbol and the symbols that consume it. `operations` carries the concrete
 /// contract strings (route `GET /api/x`, flag `--paging`, event
 /// `user.created`, config key `DEBUG`, annotation `router.get`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.Contract work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct Contract {
@@ -932,7 +932,7 @@ pub struct InvocationSurface {
 /// The full System Atlas: structured architecture before rendering. This is
 /// the machine model handed to agents at session start (docs/SYSTEM_DESIGN.md
 /// §8, Wave 2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.crates-scc-core-src-lib.SystemAtlas work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SystemAtlas {
     pub repository: String,
@@ -1011,7 +1011,7 @@ pub struct SystemAtlas {
 
 // trace:exempt reason=internal-detail
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SystemIr work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SystemIr {
@@ -1370,7 +1370,7 @@ pub fn now_rfc3339() -> String {
 // ---------------------------------------------------------------------------
 
 /// A source range: file path + 1-based inclusive line span.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SourceRange work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SourceRange {
@@ -1392,7 +1392,7 @@ impl SourceRange {
 }
 
 /// Symbol visibility as declared in source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.Visibility work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
@@ -1417,7 +1417,7 @@ impl Visibility {
 }
 
 /// The kind of code surface a definition exposes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SurfaceKind work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
@@ -1456,7 +1456,7 @@ impl SurfaceKind {
 }
 
 /// One function/method parameter in structured form.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SemanticParameter work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SemanticParameter {
@@ -1475,7 +1475,7 @@ pub struct SemanticParameter {
 /// The structured machine form of a signature — the semantic layer over
 /// the exact source text. Benchmark matching uses this, never string
 /// comparisons of source signatures alone.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SemanticSignature work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SemanticSignature {
@@ -1499,7 +1499,7 @@ pub struct SemanticSignature {
 
 /// Why a surface entry earned its rank (explainability; `scc surface
 /// --explain` renders this).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SurfaceRank work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SurfaceRank {
@@ -1539,7 +1539,7 @@ impl Default for SurfaceRank {
 /// One ranked definition on the system surface — a callable/typeable
 /// reality of the architecture, with exact signatures and architectural
 /// meaning attached.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SurfaceEntry work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SurfaceEntry {
@@ -1602,7 +1602,7 @@ pub struct SurfaceEntry {
 /// and change impact — computed from data the pipeline ALREADY has. Badges
 /// are derived labels over those numbers, not extra scoring magic: the
 /// overall score stays `rank.total`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.scc.core.importance-profile work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub struct ImportanceProfile {
     pub overall: f64,
@@ -1621,7 +1621,7 @@ pub struct ImportanceProfile {
     pub badges: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SurfaceOmission work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SurfaceOmission {
@@ -1632,7 +1632,7 @@ pub struct SurfaceOmission {
 
 /// The System Surface Map: the ranked actual-API layer of a repository,
 /// built from System IR (Level 1 of the context stack).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SystemSurfaceMap work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SystemSurfaceMap {
@@ -1651,7 +1651,7 @@ pub struct SystemSurfaceMap {
 /// the agent sees (ledger recording MUST use only these — omitted
 /// candidates are never marked visible); `omitted_ids` are every candidate
 /// the pipeline cut. `omissions` summarizes the cuts by kind.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-core-src-lib.SurfaceRenderResult work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub struct SurfaceRenderResult {

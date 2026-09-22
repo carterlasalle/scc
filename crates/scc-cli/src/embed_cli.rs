@@ -9,13 +9,16 @@ use scc_store::Store;
 use std::collections::HashMap;
 use std::path::Path;
 
+// trace:v1 id=impl.scc-cli-embed-cli work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 /// Fuses stored entity embeddings with the embedded goal. Vectors are
 /// preloaded once per pack generation.
+// trace:exempt reason=internal-detail
 pub struct EmbeddingScorer {
     goal_vector: Vec<f32>,
     vectors: HashMap<String, Vec<f32>>,
 }
 
+// trace:exempt reason=internal-detail
 impl EmbeddingScorer {
     pub fn new(goal: &str, cfg: &EmbedConfig, store: &Store) -> Result<EmbeddingScorer, String> {
         let vectors = scc_indexer::embed::embed_texts(cfg, &[goal])?;
@@ -49,16 +52,19 @@ impl SemanticScorer for EmbeddingScorer {
 
 /// Second-stage reranker calling the configured `/rerank` model on the top
 /// candidates. Any failure is a no-op (graceful degradation).
+// trace:exempt reason=internal-detail
 pub struct CliReranker {
     cfg: EmbedConfig,
 }
 
+// trace:exempt reason=internal-detail
 impl CliReranker {
     pub fn new(cfg: &EmbedConfig) -> CliReranker {
         CliReranker { cfg: cfg.clone() }
     }
 }
 
+// trace:exempt reason=internal-detail
 impl Reranker for CliReranker {
     fn rerank(&self, goal: &str, candidates: &mut Vec<ScoredEntity>) {
         if candidates.is_empty() || self.cfg.rerank_model.is_none() {
@@ -90,6 +96,7 @@ impl Reranker for CliReranker {
 /// may leave the machine only when `inference.enabled` AND
 /// `security.allow_remote_models` are both true. Loopback providers need
 /// only `inference.enabled`. Fails closed.
+// trace:exempt reason=internal-detail
 pub fn remote_inference_allowed(config: &scc_indexer::Config) -> bool {
     if !config.inference.enabled {
         return false;
@@ -98,39 +105,22 @@ pub fn remote_inference_allowed(config: &scc_indexer::Config) -> bool {
     !cfg.is_remote() || config.security.allow_remote_models
 }
 
-/// `scc embed` — compute and store embeddings for all embeddable entities.
+/// `scc embed` — terminal rendering over the `embeddings.build` operation.
+// trace:exempt reason=internal-detail
 pub fn cmd_embed(root: &Path) -> crate::Result<()> {
-    let config = crate::load_config(root)?;
-    if !config.inference.enabled {
-        return Err(crate::CliError::Other(
-            "inference is disabled — set `inference.enabled: true` in .scc/config.yaml".into(),
-        ));
-    }
-    if !remote_inference_allowed(&config) {
-        return Err(crate::CliError::Other(
-            "remote inference blocked: repository-derived content would leave the machine — \
-             set `security.allow_remote_models: true` to allow it (or use a loopback provider)"
-                .into(),
-        ));
-    }
-    let store = crate::open_store(root)?;
-    if store.snapshot_status()?.is_none() {
-        return Err(crate::CliError::Other("not indexed — run `scc index` first".into()));
-    }
-    let cfg = EmbedConfig::from_config(&config.inference);
+    let out = scc_engine::invoke(root, "embeddings.build", serde_json::json!({}))
+        .map_err(|e| crate::CliError::Other(e.to_string()))?;
     println!(
-        "embedding with model '{}' via {}",
-        cfg.model, cfg.base_url
+        "embedding with model '{}' stored {} embeddings",
+        out.get("model").and_then(|m| m.as_str()).unwrap_or(""),
+        out.get("stored").and_then(|n| n.as_u64()).unwrap_or(0),
     );
-    let n =
-        scc_indexer::embed::embed_repository(&store, &cfg).map_err(crate::CliError::Other)?;
-    store.cache_clear()?; // embeddings changed — drop cached packs
-    println!("stored {n} embeddings");
     Ok(())
 }
 
 /// Build the scorer/reranker when inference is enabled; any provider failure
 /// degrades to (None, None) so the lexical ranker is always the fallback.
+// trace:exempt reason=internal-detail
 pub fn rankers(
     store: &Store,
     config: &scc_indexer::Config,

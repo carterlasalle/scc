@@ -16,5 +16,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 blake3 = "1"
 
+# trace:exempt reason=internal-detail
+schemars = "1"
+
 [dev-dependencies]
 tempfile = "3"

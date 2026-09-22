@@ -188,11 +188,17 @@ pub fn enrich_task_pack(
             }
         }
     }
+    let sections = crate::plugins::context_sections(root, config, goal, files, symbols);
     let base = pack.content.clone();
+    pack.content.push_str(&sections);
     pack.content.push_str(&beads);
     pack.content.push_str(&hindsight);
     pack.tokens = scc_core::estimate_tokens(&pack.content);
-    EnrichedPack { pack, base, beads, hindsight }
+    // Sections are pack content (same authority line as beads/hindsight):
+    // fold into base so assemble() keeps them under budget accounting.
+    let mut base_with_sections = base;
+    base_with_sections.push_str(&sections);
+    EnrichedPack { pack, base: base_with_sections, beads, hindsight }
 }
 
 /// THE one complete task artifact builder. Transports pass the opened

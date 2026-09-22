@@ -141,7 +141,7 @@ pub mod confidence {
     pub const UNRESOLVED_LIKELY_INTERNAL: f64 = 0.4;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.scc.core.analysis-quality work=WORK-ripwire-lessons-phase1 satisfies=REQ-resolution-honesty-gauges
 pub struct AnalysisQuality {
     pub calls: CallQuality,
@@ -157,7 +157,7 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.scc.core.call-quality work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 pub struct CallQuality {
     pub resolved: u32,
@@ -171,7 +171,7 @@ pub struct CallQuality {
     pub unknown: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:v1 id=impl.scc.core.file-quality work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 pub struct FileQuality {
     pub parsed: u32,

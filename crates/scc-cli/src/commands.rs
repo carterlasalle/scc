@@ -439,17 +439,7 @@ pub fn cmd_context_task_json(
 /// (labeled external; never mixed with repository facts).
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-context-docs work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_context_docs(root: &Path, dependency: &str) -> crate::Result<()> {
-    let config = load_config(root)?;
-    if config.integrations.context7_command.is_empty() {
-        return Err(crate::CliError::Other(
-            "Context7 is not configured — set integrations.context7_command in .scc/config.yaml (e.g. 'npx -y @upstash/context7-mcp')".into(),
-        ));
-    }
-    let mut client =
-        scc_indexer::adapters::context7::start(&config.integrations.context7_command, root)
-            .map_err(crate::CliError::Other)?;
-    let docs = client.docs_for(dependency).map_err(crate::CliError::Other)?;
-    print!("{docs}");
+    print!("{}", scc_engine::invoke(root, "context.external_docs", serde_json::json!({"dependency": dependency})).map_err(engine_err)?);
     Ok(())
 }
 

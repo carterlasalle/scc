@@ -220,6 +220,31 @@ impl Engine<'_> {
     pub fn invoke(&self, operation: &str, input: serde_json::Value) -> crate::Result<serde_json::Value> {
         crate::invoke::invoke(&self.store.root, operation, input)
     }
+
+    // trace:exempt reason=internal-detail
+    pub fn invoke_session(
+        &self,
+        session: &Session,
+        operation: &str,
+        input: serde_json::Value,
+    ) -> crate::Result<serde_json::Value> {
+        let config = load_config(&self.store.root)?;
+        let live = open_session(self.store, &config)?;
+        if live != *session {
+            let mut drifted = Vec::new();
+            if live.repo_id != session.repo_id { drifted.push("repo_id"); }
+            if live.revision != session.revision { drifted.push("revision"); }
+            if live.epoch != session.epoch { drifted.push("epoch"); }
+            if live.config_hash != session.config_hash { drifted.push("config"); }
+            if live.plugin_lock != session.plugin_lock { drifted.push("plugins"); }
+            if live.rank_salt != session.rank_salt { drifted.push("rank_salt"); }
+            return Err(crate::EngineError::Other(format!(
+                "session stale (drifted: {}); re-open with workspace.session",
+                drifted.join(", ")
+            )));
+        }
+        crate::invoke::invoke(&self.store.root, operation, input)
+    }
 }
 
 // trace:v1 id=impl.crates-scc-engine-src-workspace.stale-paths work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC

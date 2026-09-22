@@ -81,7 +81,7 @@ impl Default for ContextSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct ContextPack {
     pub kind: String,

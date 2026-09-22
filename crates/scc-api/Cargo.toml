@@ -21,3 +21,5 @@ serde.workspace = true
 serde_json.workspace = true
 # trace:exempt reason=internal-detail
 thiserror.workspace = true
+# trace:exempt reason=internal-detail
+schemars = "1"

@@ -117,3 +117,54 @@ pub fn reconcile(root: &Path) -> crate::Result<scc_indexer::runtime::Reconciliat
     let store = crate::workspace::open_store(root)?;
     scc_indexer::runtime::reconcile(&store).map_err(crate::EngineError::Other)
 }
+
+// trace:exempt reason=internal-detail
+pub fn embeddings_build(root: &Path) -> crate::Result<serde_json::Value> {
+    use scc_indexer::embed::EmbedConfig;
+    let store = crate::workspace::open_store(root)?;
+    let config = crate::workspace::load_config(root)?;
+    if !config.inference.enabled {
+        return Err(crate::EngineError::Other(
+            "inference is disabled — set `inference.enabled: true` in .scc/config.yaml".into(),
+        ));
+    }
+    let cfg = EmbedConfig::from_config(&config.inference);
+    if cfg.is_remote() && !config.security.allow_remote_models {
+        return Err(crate::EngineError::Other(
+            "remote inference blocked: repository-derived content would leave the machine — set `security.allow_remote_models: true` to allow it (or use a loopback provider)".into(),
+        ));
+    }
+    if store.snapshot_status()?.is_none() {
+        return Err(crate::EngineError::Other("not indexed — run `scc index` first".into()));
+    }
+    let n = scc_indexer::embed::embed_repository(&store, &cfg).map_err(crate::EngineError::Other)?;
+    store.cache_clear()?;
+    Ok(serde_json::json!({"stored": n, "model": cfg.model}))
+}
+
+// trace:exempt reason=internal-detail
+pub fn embeddings_get(store: &scc_store::Store, entity_id: &str) -> crate::Result<serde_json::Value> {
+    match store.get_embedding(entity_id)? {
+        Some((v, model)) => Ok(serde_json::json!({"id": entity_id, "model": model, "dims": v.len(), "vector": v})),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+// trace:exempt reason=internal-detail
+pub fn embeddings_status(store: &scc_store::Store) -> crate::Result<serde_json::Value> {
+    let count = store.embedding_count()?;
+    Ok(serde_json::json!({"embeddings": count}))
+}
+
+// trace:exempt reason=internal-detail
+pub fn external_docs(root: &Path, dependency: &str) -> crate::Result<String> {
+    let config = crate::workspace::load_config(root)?;
+    if config.integrations.context7_command.is_empty() {
+        return Err(crate::EngineError::Other(
+            "Context7 is not configured — set integrations.context7_command in .scc/config.yaml".into(),
+        ));
+    }
+    let mut client = scc_indexer::adapters::context7::start(&config.integrations.context7_command, root)
+        .map_err(crate::EngineError::Other)?;
+    client.docs_for(dependency).map_err(crate::EngineError::Other)
+}

@@ -58,6 +58,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "context.flow", description: "Context pack for one flow", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "context.impact", description: "Impact analysis pack", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "context.verify", description: "Freshness/evidence verification pack", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "context.external_docs", description: "External dependency docs via the configured Context7 command", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "context.structural", description: "Structural Source representation", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "context.compress", description: "Compress a task pack", mutation: MutationClass::Read, streaming: false },
     // surface + ranking
@@ -76,6 +77,10 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "selection.budget", description: "Value/token budget selection", mutation: MutationClass::Read, streaming: false },
     // source
     OperationDescriptor { id: "source.structural", description: "Alias for context.structural", mutation: MutationClass::Read, streaming: false },
+    // embeddings (optional semantic ranker)
+    OperationDescriptor { id: "embeddings.build", description: "Compute and store entity embeddings with the configured model", mutation: MutationClass::Write, streaming: false },
+    OperationDescriptor { id: "embeddings.get", description: "Fetch the stored embedding vector for one entity", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "embeddings.status", description: "Stored embedding count", mutation: MutationClass::Read, streaming: false },
     // evidence
     OperationDescriptor { id: "evidence.get", description: "Fetch one evidence record by id", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "evidence.list", description: "List evidence records, optionally filtered by path", mutation: MutationClass::Read, streaming: false },
@@ -120,6 +125,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "plugins.describe", description: "Describe one plugin manifest", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "plugins.doctor", description: "Plugin environment + failure diagnostics", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "plugins.invoke", description: "Invoke any plugin operation explicitly", mutation: MutationClass::Write, streaming: false },
+    OperationDescriptor { id: "plugins.contribute", description: "Validate and commit a plugin contribution batch (entities, relationships, evidence)", mutation: MutationClass::Write, streaming: false },
 ];
 
 // trace:exempt reason=internal-detail

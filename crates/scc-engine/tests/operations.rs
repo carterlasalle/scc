@@ -108,3 +108,21 @@ fn subagent_and_compress_derive() {
     let pack = scc_engine::invoke(&root, "context.compress", json!({"goal": "hello"})).unwrap();
     assert!(pack.get("content").and_then(|c| c.as_str()).is_some(), "{pack}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.invoke-session verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-workspace.session
+fn invoke_session_rejects_stale() {
+    let (_dir, root) = fixture();
+    let store = scc_store::Store::open(&root.join(".scc").join("scc.db"), &root).unwrap();
+    let config = scc_indexer::Config::default();
+    let stale = scc_engine::workspace::stale_paths(&store).unwrap();
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).unwrap();
+    let sess = scc_engine::workspace::open_session(&store, &config).unwrap();
+    let ok = engine.invoke_session(&sess, "workspace.status", serde_json::json!({})).unwrap();
+    assert!(ok.get("stats").is_some(), "{ok}");
+    let mut tampered = sess.clone();
+    tampered.config_hash = "tampered".into();
+    let err = engine.invoke_session(&tampered, "workspace.status", serde_json::json!({}));
+    assert!(err.is_err(), "stale session must fail, not silently answer");
+    assert!(err.unwrap_err().to_string().contains("config"), "names the drifted field");
+}

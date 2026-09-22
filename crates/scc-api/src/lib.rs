@@ -34,7 +34,7 @@ pub use scc_core::{SurfaceRenderResult, SystemAtlas, SystemIr, SystemSurfaceMap}
 // Envelope: every operation response carries model identity.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct ModelIdentity {
     pub epoch: String,
@@ -42,7 +42,7 @@ pub struct ModelIdentity {
     pub repository_revision: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct OperationResponse<T> {
     pub operation: String,
@@ -56,7 +56,7 @@ pub struct OperationResponse<T> {
 // Requests: one struct per operation family, mirroring the CLI args.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct TaskContextRequest {
     pub goal: String,
@@ -70,14 +70,14 @@ pub struct TaskContextRequest {
     pub hook: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct StartupRequest {
     #[serde(default)]
     pub budget: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct SurfaceRequest {
     #[serde(default)]
@@ -88,7 +88,7 @@ pub struct SurfaceRequest {
     pub explain: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct DetailRequest {
     pub id: String,
@@ -96,7 +96,7 @@ pub struct DetailRequest {
     pub unbounded: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct ImpactRequest {
     #[serde(default)]
@@ -109,7 +109,7 @@ pub struct ImpactRequest {
     pub unbounded: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct StructuralRequest {
     #[serde(default)]
@@ -120,7 +120,7 @@ pub struct StructuralRequest {
     pub budget: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct QueryRequest {
     pub query: String,
@@ -128,14 +128,14 @@ pub struct QueryRequest {
     pub limit: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct DiffRequest {
     pub from: i64,
     pub to: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct SnapshotSaveRequest {
     pub task: String,
@@ -143,13 +143,13 @@ pub struct SnapshotSaveRequest {
     pub budget: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct ExportRequest {
     pub format: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct IndexPathsRequest {
     pub paths: Vec<String>,
@@ -157,7 +157,7 @@ pub struct IndexPathsRequest {
     pub quiet: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct RankRequest {
     #[serde(default)]
@@ -174,7 +174,7 @@ pub struct RankRequest {
     pub include_intermediate: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct RankItem {
     pub id: String,
@@ -187,7 +187,7 @@ pub struct RankItem {
     pub plugin_features: std::collections::BTreeMap<String, f64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct RankFeatures {
     pub task_ppr: f64,
@@ -200,7 +200,7 @@ pub struct RankFeatures {
     pub novelty: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct RankResult {
     pub items: Vec<RankItem>,
@@ -210,7 +210,7 @@ pub struct RankResult {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct SelectionRequest {
     pub ranked: Vec<RankedEntry>,
@@ -221,7 +221,7 @@ pub struct SelectionRequest {
     pub quotas: Option<Vec<QuotaEntry>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct RankedEntry {
     pub id: String,
@@ -234,9 +234,42 @@ pub struct RankedEntry {
     pub group: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct QuotaEntry {
     pub kind: String,
     pub fraction: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    // trace:exempt reason=unit-test
+    fn request_schemas_generate() {
+        // Every portable request type emits a JSON schema: the §6 contract.
+        let schemas = [
+            schemars::schema_for!(crate::TaskContextRequest),
+            schemars::schema_for!(crate::StartupRequest),
+            schemars::schema_for!(crate::SurfaceRequest),
+            schemars::schema_for!(crate::DetailRequest),
+            schemars::schema_for!(crate::ImpactRequest),
+            schemars::schema_for!(crate::StructuralRequest),
+            schemars::schema_for!(crate::QueryRequest),
+            schemars::schema_for!(crate::DiffRequest),
+            schemars::schema_for!(crate::SnapshotSaveRequest),
+            schemars::schema_for!(crate::ExportRequest),
+            schemars::schema_for!(crate::IndexPathsRequest),
+            schemars::schema_for!(crate::RankRequest),
+            schemars::schema_for!(crate::SelectionRequest),
+            schemars::schema_for!(crate::ContextPack),
+            schemars::schema_for!(crate::SystemIr),
+            schemars::schema_for!(crate::SystemAtlas),
+            schemars::schema_for!(crate::SystemSurfaceMap),
+            schemars::schema_for!(crate::SurfaceRenderResult),
+        ];
+        for s in &schemas {
+            let v = serde_json::to_value(s).unwrap();
+            assert!(v.get("$schema").is_some(), "{v}");
+        }
+    }
 }

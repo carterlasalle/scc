@@ -132,6 +132,16 @@ pub fn invoke(
             serde_json::to_value(crate::history::diff(&store, req.from, req.to)?)?
         }
         "model.get" => serde_json::to_value(crate::exports::model_get(&store)?)?,
+        "context.external_docs" => {
+            let dep = input.get("dependency").and_then(|v| v.as_str()).unwrap_or("");
+            Value::String(crate::state::external_docs(root, dep)?)
+        }
+        "embeddings.build" => crate::state::embeddings_build(root)?,
+        "embeddings.get" => {
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            crate::state::embeddings_get(&store, id)?
+        }
+        "embeddings.status" => crate::state::embeddings_status(&store)?,
         "export.system_ir" => {
             let req: scc_api::ExportRequest = serde_json::from_value(input).unwrap_or(scc_api::ExportRequest { format: "system-ir.json".into() });
             export_value(&store, root, &req.format)?
@@ -265,6 +275,7 @@ pub fn invoke(
             let req: scc_api::RankRequest = serde_json::from_value(input)?;
             let ranker = engine.ranking();
             let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
             let hooks = ranking_hooks_from_plugins(&mut ap, req.goal.as_deref().unwrap_or(""));
             let out = ranker.symbols_with_hooks(&req, &hooks)?;
             let mut v = serde_json::to_value(&out)?;
@@ -312,6 +323,7 @@ pub fn invoke(
             let req = scc_api::RankRequest { profile: None, goal: Some(goal.into()), limit: 1000, explain: true, include_features: true, include_intermediate: true };
             let ranker = engine.ranking();
             let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
             let hooks = ranking_hooks_from_plugins(&mut ap, goal);
             let out = ranker.symbols_with_hooks(&req, &hooks)?;
             match out.items.into_iter().find(|i| i.id == id) {
@@ -360,6 +372,14 @@ pub fn invoke(
         "plugins.doctor" => {
             let ap = crate::plugins::active(root, &config);
             serde_json::json!({"plugins": ap.plugins.iter().map(|p| serde_json::json!({"id": p.manifest.id, "operations": p.manifest.operations})).collect::<Vec<_>>(), "diagnostics": ap.diagnostics})
+        }
+        "plugins.contribute" => {
+            let plugin = input.get("plugin").and_then(|v| v.as_str()).unwrap_or("");
+            let batch = input.get("batch").cloned().unwrap_or(serde_json::json!({}));
+            if plugin.is_empty() {
+                return Err(crate::EngineError::Other("plugins.contribute requires a `plugin` id".into()));
+            }
+            crate::plugins::commit_contribution(&store, plugin, &batch)?
         }
         "plugins.invoke" => {
             let op = input.get("operation").and_then(|v| v.as_str()).unwrap_or(operation);

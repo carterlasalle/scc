@@ -92,3 +92,90 @@ fn extension_registration_wires_rank_feature() {
         "reason recorded: {out}"
     );
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.ordering verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.order-extensions
+fn order_extensions_respects_priority_and_edges() {
+    use scc_engine::plugins::ExtensionOrder;
+    let exts = vec![
+        ExtensionOrder { extension_type: "rank-feature".into(), id: "c".into(), priority: 30, after: vec![], before: vec![] },
+        ExtensionOrder { extension_type: "rank-feature".into(), id: "a".into(), priority: 10, after: vec![], before: vec![] },
+        ExtensionOrder { extension_type: "rank-feature".into(), id: "b".into(), priority: 20, after: vec!["rank-feature:a".into()], before: vec![] },
+    ];
+    let order = scc_engine::plugins::order_extensions(&exts).unwrap();
+    let ids: Vec<&str> = order.iter().map(|&i| exts[i].id.as_str()).collect();
+    assert_eq!(ids, vec!["a", "b", "c"], "{ids:?}");
+}
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.ordering-rejects verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.order-extensions
+fn order_extensions_rejects_unknown_and_cycle() {
+    use scc_engine::plugins::ExtensionOrder;
+    let unknown = vec![
+        ExtensionOrder { extension_type: "t".into(), id: "x".into(), priority: 0, after: vec!["t:nope".into()], before: vec![] },
+    ];
+    assert!(scc_engine::plugins::order_extensions(&unknown).is_err());
+    let cycle = vec![
+        ExtensionOrder { extension_type: "t".into(), id: "x".into(), priority: 0, after: vec!["t:y".into()], before: vec![] },
+        ExtensionOrder { extension_type: "t".into(), id: "y".into(), priority: 0, after: vec!["t:x".into()], before: vec![] },
+    ];
+    assert!(scc_engine::plugins::order_extensions(&cycle).is_err());
+}
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.contribution-pipeline verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.commit-contribution
+fn contribution_pipeline_validates_then_commits() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let store = scc_store::Store::open(&dir.path().join("scc.db"), &root).unwrap();
+    // Dangling endpoint fails BEFORE any write.
+    let bad = serde_json::json!({"entities": [], "relationships": [
+        {"id": "r1", "subject": "ghost", "predicate": "calls", "object": "ghost2", "provenance": "extracted", "confidence": 1.0}
+    ], "evidence": []});
+    assert!(scc_engine::plugins::commit_contribution(&store, "acme.t", &bad).is_err());
+    assert!(store.search_entities("ghost", 10).unwrap().is_empty());
+    // Valid batch commits with provenance.
+    let good = serde_json::json!({"entities": [
+        {"id": "plugin:acme/boundary", "kind": "plugin:acme/security_boundary", "name": "edge", "attributes": {}, "evidence": []}
+    ], "relationships": [], "evidence": []});
+    let out = scc_engine::plugins::commit_contribution(&store, "acme.t", &good).unwrap();
+    assert_eq!(out.get("entities"), Some(&serde_json::json!(1)));
+    let found = store.search_entities("edge", 10).unwrap();
+    assert!(found.iter().any(|e| e.id == "plugin:acme/boundary"), "{found:?}");
+    // Custom kind without the plugin: namespace is rejected.
+    let unscoped = serde_json::json!({"entities": [
+        {"id": "x", "kind": "custom/thing", "name": "x", "attributes": {}, "evidence": []}
+    ], "relationships": [], "evidence": []});
+    assert!(scc_engine::plugins::commit_contribution(&store, "acme.t", &unscoped).is_err());
+}
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.context-section verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.context-sections
+fn context_section_plugin_appends_provenance_section() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.sec");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.sec\"\nname = \"Sec\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"context.section\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"context-section:acme.impact\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\ngoal = req[\"input\"].get(\"goal\", \"\")\nprint(json.dumps({\"output\": {\"section\": \"risk: \" + goal}}))\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let out = scc_engine::invoke(
+        &root,
+        "context.task",
+        serde_json::json!({"goal": "hello", "files": [], "symbols": [], "budget": null, "hook": false}),
+    )
+    .unwrap();
+    let content = out["pack"]["content"].as_str().unwrap_or("");
+    assert!(content.contains("# PLUGIN SECTION acme.impact (from acme.sec"), "{content}");
+    assert!(content.contains("risk: hello"), "{content}");
+}
