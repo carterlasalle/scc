@@ -1,5 +1,5 @@
 /**
- * @scc/sdk — thin TypeScript SDK for the `scc` (System Context Compiler) CLI.
+ * scc-sdk — thin TypeScript SDK for the `scc` (System Context Compiler) CLI.
  *
  * Every method shells out to the `scc` binary with `--root <cwd>` and `--json`,
  * and parses the emitted context pack. The binary is resolved from the `bin`

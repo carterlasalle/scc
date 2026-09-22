@@ -1,3 +1,4 @@
+<!-- trace:v1 id=doc.scc-benchmark-blind-test type=document work=WORK-SCC-DISTRIBUTION -->
 # SCC Blind-Test Corpus — 20 frozen repos (v1)
 
 The NEW blind corpus for measuring generalization. These 20 repos were
@@ -57,7 +58,7 @@ Notes:
 ## Re-clone instructions
 
 ```bash
-# from the repo root (system_ir)
+# from the repo root (scc)
 mkdir -p benchmarks/blind-test
 git clone --depth 1 https://github.com/encode/httpx.git benchmarks/blind-test/httpx
 git clone --depth 1 https://github.com/pallets/jinja.git benchmarks/blind-test/jinja2

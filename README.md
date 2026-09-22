@@ -10,7 +10,7 @@
 ![SQLite](https://img.shields.io/badge/SQLite-WAL%20%2B%20FTS5-003B57?logo=sqlite&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-10%20tools-000000?logo=modelcontextprotocol&logoColor=white)
 
-[Getting started](docs/IMPLEMENTATION_PLAN.md) · [Context packs](docs/CONTEXT_COMPILER.md) · [System IR schema](docs/SYSTEM_IR_SCHEMA.md) · [Adapters](docs/API_AND_INTEGRATIONS.md) · [Benchmarks](docs/TEST_PLAN.md) · [Contributing](CONTRIBUTING.md)
+[Install](docs/INSTALL.md) · [Getting started](docs/IMPLEMENTATION_PLAN.md) · [Context packs](docs/CONTEXT_COMPILER.md) · [System IR schema](docs/SYSTEM_IR_SCHEMA.md) · [Adapters](docs/API_AND_INTEGRATIONS.md) · [Benchmarks](docs/TEST_PLAN.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -61,35 +61,59 @@ Inferred claims are labeled with confidence and evidence and never silently prom
 
 ## Quick start
 
-### Prerequisites
+### Install
 
-- Rust stable
-- Optional: `pyright` + `typescript-language-server` (LSP resolution), `ollama` (semantic ranking), `zstd` (CBM adapter), `python3` + `node/npm` (SDK, plugin tests, or npm installation)
-
-### Install from npm
-
-Install the published [`scc` CLI package](https://www.npmjs.com/package/scc) globally:
+Pin the release, verify the installer, then run it:
 
 ```bash
-npm install -g scc
+V=0.2.6
+P=Linux-x86_64            # or Darwin-arm64
+B="https://github.com/carterlasalle/scc/releases/download/v${V}"
+curl -fsSLO "${B}/install.sh" -O "${B}/sha256-${V}-${P}.txt"
+shasum -a 256 -c "sha256-${V}-${P}.txt" --ignore-missing   # install.sh: OK
+sh install.sh --version "${V}"
 ```
 
-Verify the installation:
+The installer detects your platform (Linux x86_64, macOS arm64), downloads the
+release binary, verifies it against the published SHA-256, refuses to install on
+a mismatch (that refusal is never overridable), and fails the install if the
+binary cannot run on your host. Then:
 
 ```bash
 scc --version
 ```
 
+Every install path — the one-liner convenience form, manual download with
+checksum verification, Docker, building from source, supported platforms,
+uninstall and troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
+
+> **Package names.** `scc` is taken on npm, crates.io, PyPI and Homebrew by
+> unrelated projects: `npm install -g scc` installs a 2013 SeaJS bundler,
+> `brew install scc` installs a Go line counter ([boyter/scc](https://github.com/boyter/scc)),
+> `cargo install scc` installs `scalable-concurrent-containers`, and
+> `pip install scc` installs Open Microscopy OME tools. This project ships the
+> CLI through GitHub Releases (installer above); the SDKs are published as
+> [`scc-sdk`](https://www.npmjs.com/package/scc-sdk) on npm and
+> [`scc-sdk`](https://pypi.org/project/scc-sdk/) on PyPI.
+
+### Build from source
+
+```bash
+git clone https://github.com/carterlasalle/scc.git && cd scc
+cargo build --release -p scc-cli     # → target/release/scc
+cargo test --workspace               # full suite
+cargo clippy --workspace -- -D warnings
+```
+
+Rust stable is the only hard requirement. Optional: `pyright` +
+`typescript-language-server` (LSP resolution), `ollama` or any
+OpenAI-compatible embedding endpoint (semantic ranking), `zstd` (CBM adapter),
+`python3` + `node` (SDK and plugin tests).
+
 If you're using Oh My Pi, also install the native OMP extension:
 
 ```bash
 omp install scc
-```
-
-```bash
-cargo build --release -p scc-cli     # → target/release/scc
-cargo test --workspace               # 290 tests
-cargo clippy --workspace -- -D warnings
 ```
 
 ### Index your repository
@@ -142,7 +166,7 @@ The local daemon implements [`docs/openapi.yaml`](docs/openapi.yaml) on loopback
 | Hermes | `scc setup hermes` | Native plugin: ten tools + bundled `scc-system-context` skill |
 | Oh My Pi (OMP) | `omp install scc` (npm extension) or `scc setup omp` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
 
-SDKs: TypeScript (`sdk/typescript`, `@scc/sdk`) and Python (`sdk/python`, `scc-sdk`) wrapping the CLI.
+SDKs: TypeScript ([`scc-sdk`](https://www.npmjs.com/package/scc-sdk), source in `sdk/typescript`) and Python ([`scc-sdk`](https://pypi.org/project/scc-sdk/), source in `sdk/python`) wrapping the CLI.
 
 ## Application workflow
 
@@ -207,8 +231,20 @@ services:
     volumes:
       - .:/repo:ro
       - scc-data:/data               # SCC_STATE_DIR=/data (set in the image)
-    ports: ["7777:7777"]
+      - ./docker/scc-config/.scc:/repo/.scc:ro   # container-only config
+    environment:
+      # The daemon binds 127.0.0.1:7777 and refuses a non-loopback bind unless
+      # this is set — it has no authentication, so the opt-in is deliberate.
+      SCC_ALLOW_REMOTE_LISTEN: "1"
+    ports: ["127.0.0.1:7777:7777"]   # never publish on 0.0.0.0
 ```
+
+That container-only config must set `security.listen: 0.0.0.0:7777` (the default
+`127.0.0.1` is unreachable through a published port), and the repository needs a
+`.scc/` directory before the container starts (`scc init`), because Docker
+cannot create that mountpoint under a read-only mount. On Linux you can skip all
+of it by sharing the host network instead. Both recipes, verified against the
+daemon, are in [docs/INSTALL.md](docs/INSTALL.md#docker).
 
 ## Benchmarks
 
@@ -230,6 +266,7 @@ Reproduce them: `scc bench context --min-recall 0.9`, `scc bench resolution`, `s
 
 | Document | Purpose |
 |---|---|
+| [Install](docs/INSTALL.md) | Installer, supported platforms, checksums, harness setup, troubleshooting |
 | [Implementation plan](docs/IMPLEMENTATION_PLAN.md) | Phases 0–12, MVP cut, per-phase deliverables |
 | [Product requirements](docs/PRD.md) | Problem, goals, functional requirements, success metrics |
 | [System design](docs/SYSTEM_DESIGN.md) | Architecture, modules, authority model |

@@ -44,15 +44,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build release binary
         run: cargo build --release -p scc-cli
-      - name: Package binary + SBOM
-        run: |
-          TAG="${VERSION#v}"
-          ARCH="$(uname -m)"
-          OUT="scc-${TAG}-$(uname -s)-${ARCH}"
-          mkdir -p dist
-          cp target/release/scc "dist/${OUT}"
-          cargo tree --edges normal --format '{p}' > "dist/sbom-${TAG}.txt"
-          (cd dist && shasum -a 256 "${OUT}" "sbom-${TAG}.txt" > "sha256-${TAG}-$(uname -s)-${ARCH}.txt")
+      - name: Package binary + SBOM + installer + checksums
+        # One source of truth for asset naming: scripts/package_release.sh is
+        # what the install contract test builds its fixture with, so a rename
+        # here fails that test instead of breaking installs after publishing.
+        run: ./scripts/package_release.sh "${VERSION}" dist
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.os }}
@@ -72,7 +68,7 @@ jobs:
         run: |
           gh release create "${VERSION}" dist/* \
             --title "${VERSION}" \
-            --notes "SCC ${VERSION}: CLI binaries (Linux/macOS), SBOM, checksums. Python SDK → PyPI (scc-sdk), TypeScript SDK → npm (@scc/sdk). Plugins ship embedded in the binary (\`scc setup omp|hermes\`)."
+            --notes "SCC ${VERSION}: CLI binaries (Linux/macOS), installer, SBOM, checksums. Verify install.sh and the binary against sha256-${VERSION#v}-<os>-<arch>.txt before running either. Python SDK → PyPI (scc-sdk), TypeScript SDK → npm (scc-sdk). Plugins ship embedded in the binary (\`scc setup omp|hermes\`)."
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -98,7 +94,7 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
-      - name: Build + publish @scc/sdk
+      - name: Build + publish scc-sdk (npm)
         run: |
           cd sdk/typescript
           npm install --no-audit --no-fund

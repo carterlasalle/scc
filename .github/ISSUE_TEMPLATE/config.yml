@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, ideas, and "how do I use this with X?"
+    url: https://github.com/carterlasalle/scc/discussions
+    about: Use Discussions for usage questions, harness integration help, and design conversations — issues are for reproducible bugs and concrete feature requests.
+  - name: Install problems
+    url: https://github.com/carterlasalle/scc/blob/main/docs/INSTALL.md
+    about: docs/INSTALL.md covers the installer, supported platforms, checksums, harness setup, and troubleshooting.
+  - name: Report a security vulnerability
+    url: https://github.com/carterlasalle/scc/security/advisories/new
+    about: Please report vulnerabilities privately, never in a public issue. See SECURITY.md.
