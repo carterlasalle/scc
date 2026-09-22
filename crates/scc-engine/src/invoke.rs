@@ -41,11 +41,21 @@ pub fn invoke(
         }
         "context.task" => {
             let req: scc_api::TaskContextRequest = serde_json::from_value(input)?;
-            serde_json::to_value(crate::task::build_task_context(&engine, &config, root, &req, None, None)?)?
+            let (scorer, reranker) = crate::inference::rankers(&store, &config, &req.goal);
+            let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
+                reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
+            serde_json::to_value(crate::task::build_task_context(&engine, &config, root, &req, scorer_trait, reranker_trait)?)?
         }
         "context.task_pack" => {
             let req: scc_api::TaskContextRequest = serde_json::from_value(input)?;
-            serde_json::to_value(crate::task::build_enriched_task_pack(&engine, &config, root, &req, None, None)?)?
+            let (scorer, reranker) = crate::inference::rankers(&store, &config, &req.goal);
+            let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
+                reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
+            serde_json::to_value(crate::task::build_enriched_task_pack(&engine, &config, root, &req, scorer_trait, reranker_trait)?)?
         }
         "context.subagent" => {
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
@@ -59,11 +69,16 @@ pub fn invoke(
             // no ledger: same derivation the CLI uses with --cmd omitted.
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
             let budget = input.get("budget").and_then(|v| v.as_u64()).map(|b| b as usize);
-            let pack = crate::task::build_enriched_task_pack(&engine, &config, root, &scc_api::TaskContextRequest { goal: goal.into(), files: vec![], symbols: vec![], budget, hook: false }, None, None)?;
+            let (scorer, reranker) = crate::inference::rankers(&store, &config, goal);
+            let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
+                reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
+            let pack = crate::task::build_enriched_task_pack(&engine, &config, root, &scc_api::TaskContextRequest { goal: goal.into(), files: vec![], symbols: vec![], budget, hook: false }, scorer_trait, reranker_trait)?;
             serde_json::to_value(pack)?
         }
         "context.component" | "context.flow" | "context.impact" | "context.verify" | "context.structural" | "source.structural" | "surface.build" => {
-            invoke_context(&ctx, &store, operation, input)?
+            invoke_context(&ctx, &store, &config, operation, input)?
         }
         "graph.query" => {
             let req: scc_api::QueryRequest = serde_json::from_value(input)?;
@@ -490,10 +505,10 @@ fn ranking_hooks_from_plugins(
 fn invoke_context(
     ctx: &crate::SccContext,
     store: &scc_store::Store,
+    config: &scc_indexer::Config,
     operation: &str,
     input: Value,
 ) -> crate::Result<Value> {
-    let _ = store;
     Ok(match operation {
         "context.component" => {
             let req: scc_api::DetailRequest = serde_json::from_value(input)?;
@@ -513,11 +528,19 @@ fn invoke_context(
         }
         "context.structural" => {
             let req: scc_api::StructuralRequest = serde_json::from_value(input)?;
-            Value::String(ctx.structural(&req, &store.root, None)?)
+            let goal = req.task.clone().unwrap_or_default();
+            let (scorer, _) = crate::inference::rankers(store, config, &goal);
+            let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            Value::String(ctx.structural(&req, &store.root, semantic)?)
         }
         "surface.build" | "ranking.important" => {
             let req: scc_api::SurfaceRequest = serde_json::from_value(input)?;
-            let (result, text) = ctx.surface(&req, None)?;
+            let goal = req.task.clone().unwrap_or_default();
+            let (scorer, _) = crate::inference::rankers(store, config, &goal);
+            let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            let (result, text) = ctx.surface(&req, semantic)?;
             serde_json::json!({ "result": result, "text": text })
         }
         _ => unreachable!("invoke routes only context ops here"),

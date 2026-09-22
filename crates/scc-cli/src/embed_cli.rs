@@ -1,112 +1,11 @@
-//! CLI wiring for the optional semantic ranker (SCC-071): an
-//! `EmbeddingScorer` fusing stored entity embeddings via cosine similarity,
-//! a `Reranker` calling a separate `/rerank` model, the `scc embed` command,
-//! and the task-pack plumbing that activates when `inference.enabled` is set.
+//! Thin CLI shell: `cmd_embed` renders `embeddings.build`; the scorer,
+//! reranker, policy, and constructor live in `scc_engine::inference`
+//! (single implementation — DoD 5: no transport reimplements ranking).
 
-use scc_context::rank::{Reranker, ScoredEntity, SemanticScorer};
-use scc_indexer::embed::{cosine, rerank, EmbedConfig, EMBED_KINDS};
-use scc_store::Store;
-use std::collections::HashMap;
 use std::path::Path;
 
-// trace:v1 id=impl.scc-cli-embed-cli work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-/// Fuses stored entity embeddings with the embedded goal. Vectors are
-/// preloaded once per pack generation.
-// trace:exempt reason=internal-detail
-pub struct EmbeddingScorer {
-    goal_vector: Vec<f32>,
-    vectors: HashMap<String, Vec<f32>>,
-}
-
-// trace:exempt reason=internal-detail
-impl EmbeddingScorer {
-    pub fn new(goal: &str, cfg: &EmbedConfig, store: &Store) -> Result<EmbeddingScorer, String> {
-        let vectors = scc_indexer::embed::embed_texts(cfg, &[goal])?;
-        let goal_vector = vectors
-            .into_iter()
-            .next()
-            .ok_or_else(|| "embedding request returned no vector".to_string())?;
-        let mut map = HashMap::new();
-        for kind in EMBED_KINDS {
-            for e in store.entities_by_kind(kind).map_err(|e| e.to_string())? {
-                if let Ok(Some((v, _))) = store.get_embedding(&e.id) {
-                    map.insert(e.id, v);
-                }
-            }
-        }
-        Ok(EmbeddingScorer {
-            goal_vector,
-            vectors: map,
-        })
-    }
-}
-
-impl SemanticScorer for EmbeddingScorer {
-    fn score(&self, _goal: &str, entity: &scc_core::Entity) -> f64 {
-        match self.vectors.get(&entity.id) {
-            Some(v) => cosine(&self.goal_vector, v),
-            None => 0.0,
-        }
-    }
-}
-
-/// Second-stage reranker calling the configured `/rerank` model on the top
-/// candidates. Any failure is a no-op (graceful degradation).
-// trace:exempt reason=internal-detail
-pub struct CliReranker {
-    cfg: EmbedConfig,
-}
-
-// trace:exempt reason=internal-detail
-impl CliReranker {
-    pub fn new(cfg: &EmbedConfig) -> CliReranker {
-        CliReranker { cfg: cfg.clone() }
-    }
-}
-
-// trace:exempt reason=internal-detail
-impl Reranker for CliReranker {
-    fn rerank(&self, goal: &str, candidates: &mut Vec<ScoredEntity>) {
-        if candidates.is_empty() || self.cfg.rerank_model.is_none() {
-            return;
-        }
-        let docs: Vec<String> = candidates
-            .iter()
-            .take(30)
-            .map(|c| format!("{} {}", c.kind, c.name))
-            .collect();
-        if let Ok(scores) = rerank(&self.cfg, goal, &docs) {
-            for (c, s) in candidates.iter_mut().take(30).zip(scores.iter()) {
-                // rerank dominates; the lexical residue keeps ties
-                // deterministic
-                c.score = c.score * 0.2 + s * 5.0;
-                c.reason = format!("{} + rerank", c.reason);
-            }
-            candidates.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-        }
-        // Err: graceful degrade — keep lexical order
-    }
-}
-
-/// Remote-model policy (P0, docs/SECURITY.md): repository-derived content
-/// may leave the machine only when `inference.enabled` AND
-/// `security.allow_remote_models` are both true. Loopback providers need
-/// only `inference.enabled`. Fails closed.
-// trace:exempt reason=internal-detail
-pub fn remote_inference_allowed(config: &scc_indexer::Config) -> bool {
-    if !config.inference.enabled {
-        return false;
-    }
-    let cfg = EmbedConfig::from_config(&config.inference);
-    !cfg.is_remote() || config.security.allow_remote_models
-}
-
 /// `scc embed` — terminal rendering over the `embeddings.build` operation.
-// trace:exempt reason=internal-detail
+// trace:v1 id=impl.scc-cli-embed-cli work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_embed(root: &Path) -> crate::Result<()> {
     let out = scc_engine::invoke(root, "embeddings.build", serde_json::json!({}))
         .map_err(|e| crate::CliError::Other(e.to_string()))?;
@@ -118,36 +17,15 @@ pub fn cmd_embed(root: &Path) -> crate::Result<()> {
     Ok(())
 }
 
-/// Build the scorer/reranker when inference is enabled; any provider failure
-/// degrades to (None, None) so the lexical ranker is always the fallback.
-// trace:exempt reason=internal-detail
-pub fn rankers(
-    store: &Store,
-    config: &scc_indexer::Config,
-    goal: &str,
-) -> (Option<EmbeddingScorer>, Option<CliReranker>) {
-    if !remote_inference_allowed(config) {
-        if config.inference.enabled {
-            eprintln!(
-                "scc: warning: remote inference blocked by security policy \
-                 (security.allow_remote_models is false); using lexical ranking only"
-            );
-        }
-        return (None, None);
-    }
-    let cfg = EmbedConfig::from_config(&config.inference);
-    let scorer = EmbeddingScorer::new(goal, &cfg, store).ok();
-    let reranker = if cfg.rerank_model.is_some() {
-        Some(CliReranker::new(&cfg))
-    } else {
-        None
-    };
-    (scorer, reranker)
-}
+/// Back-compat re-exports: keep external `scc_cli::embed_cli::` paths
+/// compiling during migration (single implementation in the engine).
+pub use scc_engine::inference::{EmbeddingScorer, EngineReranker as CliReranker, rankers, remote_inference_allowed};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scc_context::rank::{Reranker, ScoredEntity, SemanticScorer};
+    use scc_indexer::embed::EmbedConfig;
     use scc_store::Store;
 
     fn tmp_store() -> (Store, tempfile::TempDir) {
@@ -223,6 +101,7 @@ mod tests {
     }
 
     #[test]
+// trace:exempt reason=unit-test
     fn scorer_uses_stored_embeddings() {
         let (store, _d) = tmp_store();
         let mut e = scc_core::Entity::new("repo://r/symbol/a.py/boosted", "symbol", "boosted");
@@ -240,15 +119,13 @@ mod tests {
         };
         // scorer construction needs to embed the goal — bypass via a
         // hand-built scorer with a known goal vector
-        let scorer = EmbeddingScorer {
-            goal_vector: vec![1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            vectors: {
-                let mut m = HashMap::new();
-                m.insert(e.id.clone(), v);
-                m
-            },
-        };
-        assert!((scorer.score("goal", &e) - 1.0).abs() < 1e-6);
+        let mut m = std::collections::HashMap::new();
+        m.insert(e.id.clone(), v);
+        let scorer = EmbeddingScorer::from_vectors(
+            vec![1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            m,
+        );
+assert!((scorer.score("goal", &e) - 1.0).abs() < 1e-6);
         // unrelated entity scores 0
         let other = scc_core::Entity::new("repo://r/symbol/a.py/z", "symbol", "z");
         assert_eq!(scorer.score("goal", &other), 0.0);

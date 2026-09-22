@@ -210,7 +210,7 @@ pub fn cmd_surface(
     // pipeline explicitly redistributes the 10% semantic share.
     let scorer = match task {
         Some(goal) => {
-            let (scorer, _reranker) = crate::embed_cli::rankers(&store, &config, goal);
+            let (scorer, _reranker) = scc_engine::inference::rankers(&store, &config, goal);
             scorer
         }
         None => None,
@@ -268,7 +268,7 @@ pub fn cmd_context_structural(
     let stale = crate::stale_paths(&store)?;
     let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
     let (scorer, _reranker) = match task {
-        Some(goal) => crate::embed_cli::rankers(&store, &config, goal),
+        Some(goal) => scc_engine::inference::rankers(&store, &config, goal),
         None => (None, None),
     };
     let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
@@ -333,7 +333,7 @@ fn build_task_context_engine(
     let config = scc_engine::workspace::load_config(root)?;
     let stale = scc_engine::workspace::stale_paths(&store)?;
     let engine = scc_engine::workspace::open_engine(&store, &config, stale)?;
-    let (scorer, reranker) = crate::embed_cli::rankers(&store, &config, goal);
+    let (scorer, reranker) = scc_engine::inference::rankers(&store, &config, goal);
     let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
         scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
     let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
@@ -364,7 +364,7 @@ pub fn build_enriched_task_pack(
     let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
     // No delta, no ledger: pack-only, pure. Scorer resolved for the pack's
     // candidate fusion (same fallback-closed semantics as the full builder).
-    let (scorer, reranker) = crate::embed_cli::rankers(&store, &config, goal);
+    let (scorer, reranker) = scc_engine::inference::rankers(&store, &config, goal);
     let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
         scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
     let reranker_trait: Option<&dyn scc_context::rank::Reranker> =

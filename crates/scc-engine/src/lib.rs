@@ -44,6 +44,8 @@ pub mod integrations;
 // trace:exempt reason=module-facade
 pub mod history;
 // trace:exempt reason=module-facade
+pub mod inference;
+// trace:exempt reason=module-facade
 pub mod invoke;
 // trace:exempt reason=module-facade
 pub mod misc;
