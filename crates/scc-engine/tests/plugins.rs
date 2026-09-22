@@ -309,3 +309,36 @@ fn plugin_state_crud_is_namespaced_and_gated() {
     .unwrap();
     assert!(gone.is_null(), "deleted key reads null: {gone}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.pagerank-edge-weights verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn pagerank_stage_ops_ignore_edge_weights() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\ndef zeta():\n    return alpha()\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let score_of = |v: &serde_json::Value, sub: &str| -> f64 {
+        v["vector"].as_array().unwrap().iter()
+            .find(|e| e["id"].as_str().unwrap_or("").contains(sub))
+            .unwrap_or_else(|| panic!("{sub} missing: {v}"))["score"].as_f64().unwrap()
+    };
+    let plain_task = scc_engine::invoke(&root, "ranking.pagerank.task", serde_json::json!({"goal": "alpha"})).unwrap();
+    let plain_global = scc_engine::invoke(&root, "ranking.pagerank.global", serde_json::json!({})).unwrap();
+    // Add an edge-weight plugin: stage ops are raw introspection, so the
+    // vectors must be byte-identical with the plugin present.
+    let plugdir = root.join(".scc").join("plugins").join("acme.edge");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.edge\"\nname = \"Edge\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.edge_weight\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"edge-weight:acme.edge\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nobj = req[\"input\"].get(\"object\", \"\")\nmode = \"multiply\" if \"alpha\" in obj else \"none\"\nprint(json.dumps({\"output\": {\"mode\": mode, \"value\": 0.001}}))\n").unwrap();
+    let hooked_task = scc_engine::invoke(&root, "ranking.pagerank.task", serde_json::json!({"goal": "alpha"})).unwrap();
+    let hooked_global = scc_engine::invoke(&root, "ranking.pagerank.global", serde_json::json!({})).unwrap();
+    assert_eq!(plain_task, hooked_task, "raw task vector must ignore edge-weight hooks");
+    assert_eq!(plain_global, hooked_global, "raw global vector must ignore edge-weight hooks");
+    let _ = score_of(&plain_task, "alpha");
+}

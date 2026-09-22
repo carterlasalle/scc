@@ -306,10 +306,12 @@ pub fn invoke(
             serde_json::json!({"candidates": cands.iter().map(|c| serde_json::json!({"id": c.id, "kind": c.kind, "name": c.name, "score": c.score, "reason": c.reason})).collect::<Vec<_>>()})
         }
         "ranking.pagerank.global" => {
+            // Raw stage introspection: no plugin hooks by contract.
             let v = engine.ranking().pagerank_global()?;
             serde_json::json!({"vector": v.iter().map(|(id, s)| serde_json::json!({"id": id, "score": s})).collect::<Vec<_>>()})
         }
         "ranking.pagerank.task" => {
+            // Raw stage introspection: no plugin hooks by contract.
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
             let v = engine.ranking().pagerank_task(goal)?;
             serde_json::json!({"vector": v.iter().map(|(id, s)| serde_json::json!({"id": id, "score": s})).collect::<Vec<_>>()})
@@ -350,7 +352,10 @@ pub fn invoke(
             let goal = input.get("goal").and_then(|v| v.as_str()).map(|s| s.to_string());
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
             let req = scc_api::RankRequest { profile: None, goal, limit, explain: false, include_features: true, include_intermediate: false };
-            serde_json::to_value(engine.ranking().symbols(&req)?)?
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, req.goal.as_deref().unwrap_or(""));
+            serde_json::to_value(engine.ranking().symbols_with_hooks(&req, &hooks)?)?
         }
         "selection.mmr" => {
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
