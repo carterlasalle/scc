@@ -36,6 +36,25 @@ impl Permission {
             Permission::Subprocess => "subprocess",
         }
     }
+
+    /// Parse a project-config grant name. Unknown names are an `Err` —
+    /// callers must surface it (diagnostic or hard error), never silently
+    /// narrow the grant set (a typo'd permission must not read as "deny").
+    // trace:exempt reason=internal-detail
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "repo.read" => Ok(Permission::RepoRead),
+            "graph.read" => Ok(Permission::GraphRead),
+            "graph.contribute" => Ok(Permission::GraphContribute),
+            "state.read" => Ok(Permission::StateRead),
+            "state.write" => Ok(Permission::StateWrite),
+            "network" => Ok(Permission::Network),
+            "subprocess" => Ok(Permission::Subprocess),
+            other => Err(format!(
+                "unknown permission '{other}' (known: repo.read, graph.read, graph.contribute, state.read, state.write, network, subprocess)"
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

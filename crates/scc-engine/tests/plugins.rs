@@ -468,3 +468,35 @@ fn mmr_similarity_hook_diversifies() {
     assert!((scc_engine::ranking::fold_similarity(&[plug], "a", "b", None, None) - 0.42).abs() < 1e-12);
     assert!((scc_engine::ranking::fold_similarity(&[], "a", "b", Some("g"), Some("g")) - 1.0).abs() < 1e-12);
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.unknown-grants verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn unknown_grant_names_surface_diagnostics() {
+    // A typo'd grant must not silently narrow the set: it surfaces as a
+    // diagnostic on the active set (visible via plugins.doctor), and the
+    // known grants still apply.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let mut cfg = scc_indexer::Config::default();
+    cfg.plugins.grants.insert(
+        "any.plugin".into(),
+        vec!["state.read".into(), "graph.write".into(), "repo_read".into()],
+    );
+    let ap = scc_engine::plugins::active(&root, &cfg);
+    assert_eq!(ap.diagnostics.len(), 2, "both typos diagnosed: {:?}", ap.diagnostics);
+    assert!(ap.diagnostics.iter().all(|d| d.plugin == "any.plugin"), "{:?}", ap.diagnostics);
+    assert!(ap.diagnostics.iter().any(|d| d.error.contains("graph.write")), "{:?}", ap.diagnostics);
+    // plugins.doctor surfaces the same diagnostics over invoke.
+    std::fs::create_dir_all(root.join(".scc")).unwrap();
+    std::fs::write(
+        root.join(".scc").join("config.yaml"),
+        "schema: 1\nplugins:\n  grants:\n    any.plugin: [state.read, graph.write, repo_read]\n",
+    )
+    .unwrap();
+    let doc = scc_engine::invoke(&root, "plugins.doctor", serde_json::json!({})).unwrap();
+    let diags = doc["diagnostics"].as_array().unwrap();
+    assert!(diags.iter().any(|d| d["error"].as_str().unwrap_or("").contains("graph.write")), "{doc}");
+}

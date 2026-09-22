@@ -18,6 +18,7 @@ pub struct ActivePlugins {
 
 // trace:exempt reason=internal-detail
 pub fn active(root: &Path, config: &scc_indexer::Config) -> ActivePlugins {
+    let mut ap = ActivePlugins { plugins: Vec::new(), diagnostics: Vec::new() };
     let mut plugins = scc_plugin_host::discover(root);
     // Project allow-list: only `plugins.enabled` run when non-empty.
     if !config.plugins.enabled.is_empty() {
@@ -29,22 +30,27 @@ pub fn active(root: &Path, config: &scc_indexer::Config) -> ActivePlugins {
             p.config = c.clone();
         }
     }
-    // Grants: explicit project grants narrow manifest defaults.
-    let grants = config.plugins.grants.iter().map(|(k, v)| {
-        let perms = v.iter().filter_map(|s| match s.as_str() {
-            "repo.read" => Some(scc_plugin_api::Permission::RepoRead),
-            "graph.read" => Some(scc_plugin_api::Permission::GraphRead),
-            "graph.contribute" => Some(scc_plugin_api::Permission::GraphContribute),
-            "state.read" => Some(scc_plugin_api::Permission::StateRead),
-            "state.write" => Some(scc_plugin_api::Permission::StateWrite),
-            "network" => Some(scc_plugin_api::Permission::Network),
-            "subprocess" => Some(scc_plugin_api::Permission::Subprocess),
-            _ => None,
-        }).collect::<Vec<_>>();
-        (k.clone(), perms)
-    }).collect::<std::collections::BTreeMap<_, _>>();
+    // Grants: explicit project grants narrow manifest defaults. Unknown
+    // grant names are diagnostics (fail-loud: a typo must not silently
+    // narrow the grant set and misdirect the later denied error).
+    let mut grants: std::collections::BTreeMap<String, Vec<scc_plugin_api::Permission>> =
+        std::collections::BTreeMap::new();
+    for (k, v) in &config.plugins.grants {
+        let mut perms = Vec::new();
+        for s in v {
+            match scc_plugin_api::Permission::parse(s) {
+                Ok(p) => perms.push(p),
+                Err(e) => ap.diagnostics.push(scc_plugin_host::PluginDiagnostic {
+                    plugin: k.clone(), operation: "grants".into(),
+                    error: e, action: "skipped".into(),
+                }),
+            }
+        }
+        grants.insert(k.clone(), perms);
+    }
     scc_plugin_host::apply_grants(&mut plugins, &grants);
-    ActivePlugins { plugins, diagnostics: Vec::new() }
+    ap.plugins = plugins;
+    ap
 }
 
 // trace:exempt reason=internal-detail
