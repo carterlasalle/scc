@@ -263,18 +263,14 @@ pub fn cmd_context_structural(
     task: Option<&str>,
     budget: Option<usize>,
 ) -> crate::Result<String> {
-    let store = open_store(root)?;
-    let config = load_config(root)?;
-    let stale = crate::stale_paths(&store)?;
-    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
-    let (scorer, _reranker) = match task {
-        Some(goal) => scc_engine::inference::rankers(&store, &config, goal),
-        None => (None, None),
-    };
-    let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
-        scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-    let req = scc_api::StructuralRequest { files: files.to_vec(), task: task.map(|s| s.to_string()), budget };
-    engine.context().structural(&req, root, semantic).map_err(engine_err)
+    // Registry derivation: parse + dispatch only; the engine owns the build.
+    let out = scc_engine::invoke(
+        root,
+        "context.structural",
+        serde_json::json!({"files": files, "task": task, "budget": budget}),
+    )
+    .map_err(engine_err)?;
+    Ok(out.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
 }
 
 /// THE one complete task artifact (transport parity): the enriched task
@@ -329,17 +325,14 @@ fn build_task_context_engine(
     budget: Option<usize>,
     hook: bool,
 ) -> scc_engine::Result<scc_engine::TaskContextArtifact> {
-    let store = scc_engine::workspace::open_store(root)?;
-    let config = scc_engine::workspace::load_config(root)?;
-    let stale = scc_engine::workspace::stale_paths(&store)?;
-    let engine = scc_engine::workspace::open_engine(&store, &config, stale)?;
-    let (scorer, reranker) = scc_engine::inference::rankers(&store, &config, goal);
-    let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
-        scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-    let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
-        reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
-    let req = scc_api::TaskContextRequest { goal: goal.to_string(), files: files.to_vec(), symbols: symbols.to_vec(), budget, hook };
-    scc_engine::task::build_task_context(&engine, &config, root, &req, scorer_trait, reranker_trait)
+    // Registry derivation: the engine owns the task build; this crate only
+    // parses args and renders. One path for CLI/HTTP/MCP/SDKs (spec 2).
+    let out = scc_engine::invoke(
+        root,
+        "context.task",
+        serde_json::json!({"goal": goal, "files": files, "symbols": symbols, "budget": budget, "hook": hook}),
+    )?;
+    serde_json::from_value(out).map_err(|e| scc_engine::EngineError::Other(e.to_string()))
 }
 
 /// pack with scorer + beads + hindsight and its post-enrichment token
@@ -358,19 +351,15 @@ pub fn build_enriched_task_pack(
     budget: Option<usize>,
     hook: bool,
 ) -> crate::Result<scc_context::ContextPack> {
-    let store = scc_engine::workspace::open_store(root).map_err(engine_err)?;
-    let config = scc_engine::workspace::load_config(root).map_err(engine_err)?;
-    let stale = scc_engine::workspace::stale_paths(&store).map_err(engine_err)?;
-    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
-    // No delta, no ledger: pack-only, pure. Scorer resolved for the pack's
-    // candidate fusion (same fallback-closed semantics as the full builder).
-    let (scorer, reranker) = scc_engine::inference::rankers(&store, &config, goal);
-    let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
-        scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-    let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
-        reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
-    let req = scc_api::TaskContextRequest { goal: goal.to_string(), files: files.to_vec(), symbols: symbols.to_vec(), budget, hook };
-    scc_engine::task::build_enriched_task_pack(&engine, &config, root, &req, scorer_trait, reranker_trait).map_err(engine_err)
+    // Registry derivation: the engine owns the pack build (spec 2).
+    let out = scc_engine::invoke(
+        root,
+        "context.task_pack",
+        serde_json::json!({"goal": goal, "files": files, "symbols": symbols, "budget": budget, "hook": hook}),
+    )
+    .map_err(engine_err)?;
+    // Engine returns the pack directly (ContextPack), not wrapped.
+    serde_json::from_value(out).map_err(|e: serde_json::Error| crate::CliError::Other(e.to_string()))
 }
 
 /// `scc context task <goal> [--budget N] [--json] [--hook]` — the complete

@@ -142,12 +142,15 @@ fn route(
             let files = json_arr(&req, "files");
             let symbols = json_arr(&req, "symbols");
             let budget = req.get("token_budget").and_then(|b| b.as_u64()).map(|b| b as usize);
-            // Transport parity: THE one complete task artifact — pack AND
-            // surface delta, same derivation as CLI text/JSON and MCP.
-            // Serialization is the only difference (structured JSON here).
-            let artifact =
-                crate::commands::build_task_context(root, goal, &files, &symbols, budget, false)?;
-            Ok((200, "application/json".to_string(), serde_json::to_string(&artifact)?))
+            // Transport parity: THE one complete task artifact via the
+            // operation registry — same derivation as CLI/MCP. The friendly
+            // route is parsing + dispatch only; the engine owns the build.
+            let output = scc_engine::invoke(root, "context.task", serde_json::json!({
+                "goal": goal, "files": files, "symbols": symbols,
+                "budget": budget, "hook": false,
+            }))
+            .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("POST", "/v1/context/startup") => {
             let input: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::json!({}));

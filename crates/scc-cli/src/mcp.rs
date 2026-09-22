@@ -392,8 +392,13 @@ fn call_tool(root: &Path, name: &str, args: &serde_json::Value) -> crate::Result
                 .map(|b| b as usize);
             let files = arr_arg("files");
             let task = if goal.is_empty() { None } else { Some(goal.as_str()) };
-            // P0 parity: the same implementation as the CLI command.
-            Ok(crate::commands::cmd_context_structural(root, &files, task, budget)?)
+            // Registry derivation: the engine owns the structural
+            // build; this transport renders its `text` field.
+            let task_s: Option<String> = task.map(|s: &str| s.to_string());
+            let out = invoke("context.structural", serde_json::json!({
+                "files": files, "task": task_s, "budget": budget,
+            }))?;
+            Ok(out.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
         }
         other => Err(crate::CliError::Other(format!("unknown tool: {other}"))),
     }

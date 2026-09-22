@@ -578,13 +578,13 @@ fn invoke_context(
             let unbounded = input.get("unbounded").and_then(|v| v.as_bool()).unwrap_or(false);
             serde_json::to_value(ctx.verify(unbounded)?)?
         }
-        "context.structural" => {
+        "context.structural" | "source.structural" => {
             let req: scc_api::StructuralRequest = serde_json::from_value(input)?;
             let goal = req.task.clone().unwrap_or_default();
             let (scorer, _) = crate::inference::rankers(store, config, &goal);
             let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
                 scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-            Value::String(ctx.structural(&req, &store.root, semantic)?)
+            serde_json::json!({"text": ctx.structural(&req, &store.root, semantic)?})
         }
         "surface.build" | "ranking.important" => {
             let req: scc_api::SurfaceRequest = serde_json::from_value(input)?;
