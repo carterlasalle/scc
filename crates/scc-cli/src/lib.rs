@@ -240,6 +240,11 @@ pub fn compiler<'a>(
     stale: Vec<String>,
 ) -> Result<Compiler<'a>> {
     let graph = RealityGraph::load(store)?;
+    // Same plugin-keyed salt as scc-engine open_engine: the CLI process and
+    // in-process test compilers must derive identical cache keys.
+    let plugin_salt = scc_engine::workspace::cache_key_fragment(
+        &scc_engine::plugins::active(&store.root, config),
+    );
     let settings = scc_context::ContextSettings {
         startup_tokens: config.context.startup_tokens,
         task_tokens: config.context.task_tokens,
@@ -247,10 +252,11 @@ pub fn compiler<'a>(
         detail_tokens: config.context.detail_tokens,
         include_low_confidence_inference: config.context.include_low_confidence_inference,
         rank_salt: format!(
-            "{}:{}:{}",
+            "{}:{}:{}:{}",
             config.inference.enabled,
             config.inference.embedding_model,
-            config.inference.rerank_model
+            config.inference.rerank_model,
+            plugin_salt,
         ),
         pack_allocator: scc_context::PackAllocator::AdaptivePriority,
     };
