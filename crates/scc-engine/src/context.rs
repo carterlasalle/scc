@@ -130,6 +130,37 @@ impl SccContext<'_> {
     }
 
     // trace:exempt reason=internal-detail
+    pub fn important(&self, limit: usize, component: Option<&str>, task: Option<&str>) -> crate::Result<(Vec<scc_core::SurfaceEntry>, bool)> {
+        use scc_context::surface::{important_symbols, SurfaceMode};
+        let ctx = self.engine.ctx();
+        let mode = match task {
+            Some(goal) => SurfaceMode::Task { goal, visible: None },
+            None => SurfaceMode::Global,
+        };
+        let tasked = task.is_some();
+        let mut entries = important_symbols(&ctx, mode, 0);
+        if let Some(c) = component {
+            entries.retain(|e| e.component.as_deref().is_some_and(|s| s.contains(c)));
+        }
+        entries.truncate(limit.max(1));
+        Ok((entries, tasked))
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn subagent(&self, goal: &str, files: &[String], symbols: &[String], budget: Option<usize>) -> crate::Result<scc_context::ContextPack> {
+        let mut pack = self.engine.ctx().task_context(goal, files, symbols, budget);
+        pack.kind = "subagent".into();
+        let mut header = String::new();
+        header.push_str("# SUBAGENT SCOPE\n");
+        header.push_str("You are a delegated agent. Work ONLY within the context below; ");
+        header.push_str("do not re-derive the system model. If a needed fact is absent, ");
+        header.push_str("state it and ask rather than assume. Your goal is bounded to:\n");
+        header.push_str(&format!("> {goal}\n\n"));
+        pack.content = format!("{header}{}", pack.content);
+        Ok(pack)
+    }
+
+    // trace:exempt reason=internal-detail
     pub fn component(&self, req: &DetailRequest) -> crate::Result<scc_context::ContextPack> {
         let ctx = self.engine.ctx();
         Ok(if req.unbounded { ctx.component_context_full(&req.id) } else { ctx.component_context(&req.id) })

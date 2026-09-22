@@ -198,6 +198,16 @@ impl Engine<'_> {
     pub fn context(&self) -> SccContext<'_> {
         SccContext { engine: self }
     }
+
+    // trace:exempt reason=internal-detail
+    pub fn operations(&self) -> Operations<'_> {
+        Operations { engine: self }
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn invoke(&self, operation: &str, input: serde_json::Value) -> crate::Result<serde_json::Value> {
+        crate::invoke::invoke(&self.store.root, operation, input)
+    }
 }
 
 // trace:v1 id=impl.crates-scc-engine-src-workspace.stale-paths work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
@@ -226,4 +236,23 @@ pub fn stale_paths(store: &Store) -> crate::Result<Vec<String>> {
     out.sort();
     out.dedup();
     Ok(out)
+}
+
+#[allow(dead_code)]
+// trace:exempt reason=internal-detail
+pub struct Operations<'a> {
+    engine: &'a Engine<'a>,
+}
+
+// trace:v1 id=impl.crates-scc-engine-src-workspace.operations work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
+impl Operations<'_> {
+    // trace:exempt reason=internal-detail
+    pub fn list(&self) -> &'static [crate::ops::OperationDescriptor] {
+        crate::ops::OPERATIONS
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn describe(&self, id: &str) -> Option<&'static crate::ops::OperationDescriptor> {
+        crate::ops::describe(id)
+    }
 }

@@ -8,7 +8,6 @@ pub mod benchctx;
 pub mod benchloop;
 pub mod benchres;
 pub mod benchret;
-pub mod checkpoint;
 pub mod commands;
 pub mod compress;
 pub mod embed_cli;

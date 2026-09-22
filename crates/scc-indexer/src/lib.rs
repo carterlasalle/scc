@@ -62,7 +62,7 @@ pub enum IndexError {
     Empty,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexReport {
     pub revision: String,
     pub scanned: usize,

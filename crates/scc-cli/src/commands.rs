@@ -1,13 +1,11 @@
 //! Command implementations for the `scc` CLI (docs/API_AND_INTEGRATIONS.md §4).
 
-use crate::{checkpoint, compiler, config_path, load_config, open_store, recompile, scc_dir};
+use crate::{config_path, load_config, open_store, scc_dir};
 
 // trace:exempt reason=internal-detail
 fn engine_err(e: scc_engine::EngineError) -> crate::CliError {
     crate::CliError::Other(e.to_string())
 }
-use scc_core::kinds;
-use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -37,7 +35,7 @@ pub fn cmd_init(root: &Path) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-index work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_index(root: &Path, quiet: bool) -> crate::Result<()> {
     let config = load_config(root)?;
-    let report = crate::index_and_recompile(root, &config)?;
+    let report = scc_engine::index::full(root, &config).map_err(engine_err)?;
     if !quiet {
         println!(
             "indexed {} file(s) ({} changed, {} added, {} removed, {} failed) in {:.2}s",
@@ -61,16 +59,7 @@ pub fn cmd_index(root: &Path, quiet: bool) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-index-paths work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_index_paths(root: &Path, paths: &[String], quiet: bool) -> crate::Result<()> {
     let config = load_config(root)?;
-    let (store, quarantined) = crate::open_store_recovering(root)?;
-    crate::report_quarantine(&quarantined);
-    let indexer = scc_indexer::Indexer::new(crate::open_store(root)?, config.clone());
-    let report = indexer.refresh_paths(paths)?;
-    drop(indexer);
-    recompile(&store)?;
-    // Same ordering contract as full index: revision after recompile.
-    let _ = store.record_current_revision_with_config(
-        &scc_indexer::semantic_config_hash(&config),
-    )?;
+    let report = scc_engine::index::refresh_paths(root, &config, paths).map_err(engine_err)?;
     if !quiet && report.indexed > 0 {
         println!("refreshed {} file(s)", report.indexed);
     }
@@ -80,61 +69,55 @@ pub fn cmd_index_paths(root: &Path, paths: &[String], quiet: bool) -> crate::Res
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-status work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_status(root: &Path) -> crate::Result<()> {
     let store = open_store(root)?;
-    let repo = store.repository();
-    println!("Repository: {} ({})", repo.name, repo.id);
-    if let Some(url) = &repo.url {
+    let s = scc_engine::status::status(&store).map_err(engine_err)?;
+    println!("Repository: {} ({})", s.repository, s.repository_id);
+    if let Some(url) = &s.remote {
         println!("Remote: {url}");
     }
-    match store.snapshot_status()? {
-        Some((snap, _files)) => {
-            println!("Revision: {}", snap.revision);
-            if let Some(b) = snap.branch {
-                println!("Branch: {b}");
-            }
-            println!("Indexed at: {}", snap.indexed_at);
-            let stats = store.stats()?;
-            for (k, v) in &stats {
-                println!("{k}: {v}");
-            }
-            let stale = crate::stale_paths(&store)?;
-            if stale.is_empty() {
-                println!("freshness: CURRENT — model matches working tree");
-            } else {
-                println!(
-                    "freshness: STALE — {} file(s) changed since index (run `scc index`)",
-                    stale.len()
-                );
-            for p in stale.iter().take(10) {
-                println!("  {p}");
-            }
-            }
-            if let Some(raw) = store.meta_get("analysis_quality")? {
-                match serde_json::from_str::<scc_core::AnalysisQuality>(&raw) {
-                    Ok(q) => println!("analysis_quality: {}", q.compact_line()),
-                    Err(_) => println!("analysis_quality: {raw}"),
-                }
-            }
-            if let Some(raw) = store.meta_get("scan_stats")? {
-                // Counts only, recorded at index time; live staleness is
-                // reported above from the working-tree scan.
-                match serde_json::from_str::<serde_json::Value>(&raw) {
-                    Ok(v) => {
-                        let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
-                        println!(
-                            "files: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={}",
-                            n("discovered"),
-                            n("indexed"),
-                            n("ignored"),
-                            n("unsupported"),
-                            n("oversized"),
-                            n("unreadable")
-                        );
-                    }
-                    Err(_) => println!("files: {raw}"),
-                }
+    if s.indexed {
+        println!("Revision: {}", s.revision);
+        if let Some(b) = &s.branch {
+            println!("Branch: {b}");
+        }
+        println!("Indexed at: {}", s.indexed_at.as_deref().unwrap_or(""));
+        let mut keys: Vec<&String> = s.stats.keys().collect();
+        keys.sort();
+        for k in keys {
+            println!("{k}: {}", s.stats[k]);
+        }
+        if s.freshness == "CURRENT" {
+            println!("freshness: CURRENT — model matches working tree");
+        } else {
+            println!(
+                "freshness: STALE — {} file(s) changed since index (run `scc index`)",
+                s.stale_count
+            );
+            for f in &s.stale_files {
+                println!("  {f}");
             }
         }
-        None => println!("not indexed yet — run `scc index`"),
+        if let Some(raw) = &s.analysis_quality {
+            match serde_json::from_str::<scc_core::AnalysisQuality>(raw) {
+                Ok(q) => println!("analysis_quality: {}", q.compact_line()),
+                Err(_) => println!("analysis_quality: {raw}"),
+            }
+        }
+        if let Some(v) = &s.scan_stats {
+            // Counts only, recorded at index time; live staleness is
+            // reported above from the working-tree scan.
+            let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+            println!(
+                "files: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={}",
+                n("discovered"),
+                n("indexed"),
+                n("ignored"),
+                n("unsupported"),
+                n("oversized"),
+                n("unreadable")
+            );
+        }
+    } else {
+        println!("not indexed yet — run `scc index`");
     }
     Ok(())
 }
@@ -254,27 +237,16 @@ pub fn cmd_important(
     task: Option<&str>,
     json: bool,
 ) -> crate::Result<()> {
-    use scc_context::surface::{important_symbols, render_important, SurfaceMode};
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let ctx = comp.ctx();
-    let mode = match task {
-        Some(goal) => SurfaceMode::Task { goal, visible: None },
-        None => SurfaceMode::Global,
-    };
-    let tasked = task.is_some();
-    let mut entries = important_symbols(&ctx, mode, 0);
-    if let Some(c) = component {
-        entries.retain(|e| e.component.as_deref().is_some_and(|s| s.contains(c)));
-    }
-    entries.truncate(limit.max(1));
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let (entries, tasked) = engine.context().important(limit, component, task).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&entries)?);
         return Ok(());
     }
-    print!("{}", render_important(&entries, tasked));
+    print!("{}", scc_context::surface::render_important(&entries, tasked));
     Ok(())
 }
 
@@ -308,115 +280,19 @@ pub fn cmd_context_structural(
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let ctx = comp.ctx();
-    let tokens = budget.unwrap_or(scc_core::ContextBudget::default().structural_source);
-    // Structural units run ~1000 tokens each: scale the unit cap with the
-    // budget (default 6000 -> 6 units).
-    // ponytail: linear unit cap; revisit if a unit's real cost drifts far
-    // from 1000 tokens.
-    let max_units = (tokens / 1000).clamp(1, 64);
-
-    let paths: Vec<String> = if !files.is_empty() {
-        let mut resolved = Vec::new();
-        for f in files {
-            match scc_context::structural_source::resolve_handle_to_path(&store.root, f) {
-                Ok(p) => resolved.push(p),
-                Err(e) => {
-                    return Ok(format!("# HANDLE REFUSED\n{e}\n"));
-                }
-            }
-        }
-        resolved
-    } else if let Some(goal) = task {
-        let goal = goal.trim();
-        if goal.is_empty() {
-            return Ok(STRUCTURAL_HELP.to_string());
-        }
-        // Semantic scorer (SCC-071) when the embed_cli rankers are
-        // available; None when embeddings are disabled (the pipeline
-        // redistributes the 10% semantic share).
-        let (scorer, _reranker) = crate::embed_cli::rankers(&store, &config, goal);
-        let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
-            scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-        surface_task_files(&ctx, goal, max_units, tokens, semantic)
-    } else {
-        return Ok(STRUCTURAL_HELP.to_string());
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let (scorer, _reranker) = match task {
+        Some(goal) => crate::embed_cli::rankers(&store, &config, goal),
+        None => (None, None),
     };
-    if paths.is_empty() {
-        return Ok(
-            "# STRUCTURAL SOURCE\n\nNo indexed files matched the task goal \
-             (run `scc index` first, or pass --files explicitly)."
-                .to_string(),
-        );
-    }
-    let units = scc_context::structural_source::structural_source(&ctx, &paths, max_units);
-    if units.is_empty() {
-        return Ok(
-            "# STRUCTURAL SOURCE\n\nNo indexed symbols in the requested files \
-             (run `scc index` first)."
-                .to_string(),
-        );
-    }
-    Ok(scc_context::structural_source::render_structural(&units))
-}
-
-const STRUCTURAL_HELP: &str = "# STRUCTURAL SOURCE\n\nPass --files <paths...> or --task \"<goal>\".";
-
-/// Task -> files resolution for `scc context structural --task`: the REAL
-/// PPR->Surface path — `build_surface(Task{goal, visible: None})` ->
-/// rendered entry ids -> `SurfaceEntry.path` (the overload-sensitive entry
-/// ids resolve through the compiled map, never the entity view). Files are
-/// deduped in first-seen (importance) order and capped at `limit`.
-/// `semantic` is the optional embed_cli scorer (None when embeddings are
-/// disabled). Deterministic: the surface pipeline is deterministic per
-/// epoch.
-// trace:exempt reason=internal-detail
-// trace:v1 id=impl.crates-scc-cli-src-commands.surface-task-files work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
-fn surface_task_files(
-    ctx: &scc_context::ContextCompiler,
-    goal: &str,
-    limit: usize,
-    tokens: usize,
-    semantic: Option<&dyn scc_context::rank::SemanticScorer>,
-) -> Vec<String> {
-    let budget = tokens.max(1);
-    let request = scc_context::surface::SurfaceRequest {
-        mode: scc_context::surface::SurfaceMode::Task { goal, visible: None },
-        budget,
-        explain: false,
-        policy: scc_context::surface::SurfacePolicy::defaults(budget),
-        semantic,
-    };
-    let result = scc_context::surface::build_surface(ctx, request);
-    let by_id: BTreeMap<&str, &scc_core::SurfaceEntry> = result
-        .rendered_entries
-        .iter()
-        .map(|e| (e.id.as_str(), e))
-        .collect();
-    let mut files: Vec<String> = Vec::new();
-    let mut seen: BTreeSet<String> = BTreeSet::new();
-    for id in &result.rendered_ids {
-        let path = by_id.get(id.as_str()).map(|e| e.path.as_str()).unwrap_or("");
-        if path.is_empty() || !seen.insert(path.to_string()) {
-            continue;
-        }
-        files.push(path.to_string());
-        if files.len() >= limit {
-            break;
-        }
-    }
-    files
+    let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
+        scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+    let req = scc_api::StructuralRequest { files: files.to_vec(), task: task.map(|s| s.to_string()), budget };
+    engine.context().structural(&req, root, semantic).map_err(engine_err)
 }
 
 /// THE one complete task artifact (transport parity): the enriched task
-/// pack AND its surface delta derived together, from ONE builder. Every
-/// transport — CLI text, CLI `--json`, MCP `task_context`, HTTP
-/// `/v1/context/task`, Hermes, both SDKs (via the CLI), and the Claude
-/// hook — calls [`build_task_context`]; outputs differ in serialization
-/// only, never in semantic content. The semantic scorer is resolved ONCE
-/// here and feeds BOTH the pack rankers and the task-delta Surface request,
-/// so interface choice cannot change ranking quality.
+/// pack AND its surface delta derived together, from ONE builder.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 // trace:v1 id=impl.crates-scc-cli-src-commands.task-context-artifact work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching satisfies=REQ-complete-task-context-identical-across-transports
 pub struct TaskContextArtifact {
@@ -606,20 +482,8 @@ pub fn cmd_context_subagent(
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let mut pack = comp.ctx().task_context(goal, files, symbols, budget);
-    pack.kind = "subagent".into();
-    let mut header = String::new();
-    header.push_str("# SUBAGENT SCOPE
-");
-    header.push_str("You are a delegated agent. Work ONLY within the context below; ");
-    header.push_str("do not re-derive the system model. If a needed fact is absent, ");
-    header.push_str("state it and ask rather than assume. Your goal is bounded to:
-");
-    header.push_str(&format!("> {goal}
-
-"));
-    pack.content = format!("{header}{}", pack.content);
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let pack = engine.context().subagent(goal, files, symbols, budget).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&pack)?);
     } else {
@@ -633,12 +497,8 @@ pub fn cmd_context_component(root: &Path, id: &str, json: bool, unbounded: bool)
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let pack = if unbounded {
-        comp.ctx().component_context_full(id)
-    } else {
-        comp.ctx().component_context(id)
-    };
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let pack = engine.context().component(&scc_api::DetailRequest { id: id.into(), unbounded }).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&pack)?);
     } else {
@@ -652,12 +512,8 @@ pub fn cmd_context_flow(root: &Path, id: &str, json: bool, unbounded: bool) -> c
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let pack = if unbounded {
-        comp.ctx().flow_context_full(id)
-    } else {
-        comp.ctx().flow_context(id)
-    };
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let pack = engine.context().flow(&scc_api::DetailRequest { id: id.into(), unbounded }).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&pack)?);
     } else {
@@ -678,12 +534,8 @@ pub fn cmd_impact(
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let pack = if unbounded {
-        comp.ctx().impact_context_full(files, symbols, diff)
-    } else {
-        comp.ctx().impact_context(files, symbols, diff)
-    };
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let pack = engine.context().impact(&scc_api::ImpactRequest { files: files.to_vec(), symbols: symbols.to_vec(), diff: diff.map(|s| s.to_string()), unbounded }).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&pack)?);
     } else {
@@ -702,12 +554,8 @@ pub fn cmd_verify(
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let pack = if unbounded {
-        comp.ctx().verify_context_full()
-    } else {
-        comp.ctx().verify_context()
-    };
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let pack = engine.context().verify(unbounded).map_err(engine_err)?;
     if warnings_only {
         for w in &pack.warnings {
             println!("⚠ {w}");
@@ -725,21 +573,15 @@ pub fn cmd_verify(
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-drift work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_drift(root: &Path, json: bool) -> crate::Result<()> {
     let store = open_store(root)?;
-    let findings = store.drift_findings(false)?;
+    let findings = scc_engine::misc::drift(&store).map_err(engine_err)?;
     if json {
-        let arr: Vec<serde_json::Value> = findings
-            .iter()
-            .map(|(id, kind, sev, msg, at)| {
-                serde_json::json!({"id": id, "kind": kind, "severity": sev, "message": msg, "created_at": at})
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&arr)?);
+        println!("{}", serde_json::to_string_pretty(&findings)?);
     } else {
         if findings.is_empty() {
             println!("no drift findings");
         }
-        for (id, kind, sev, msg, at) in &findings {
-            println!("[{sev}] {kind} (#{id}, {at}): {msg}");
+        for f in &findings {
+            println!("[{0}] {1} (#{2}, {3}): {4}", f.severity, f.kind, f.id, f.created_at, f.message);
         }
     }
     Ok(())
@@ -747,21 +589,17 @@ pub fn cmd_drift(root: &Path, json: bool) -> crate::Result<()> {
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-system work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_system(_root: &Path, members: &[std::path::PathBuf], json: bool) -> crate::Result<()> {
-    let roots: Vec<&Path> = members.iter().map(|p| p.as_path()).collect();
-    let sys = scc_store::system::System::open(&roots)?;
-    let mut all = sys.stitch_routes()?;
-    all.extend(sys.stitch_topics()?);
-    all.extend(sys.stitch_package_exports()?);
+    let (members, all) = scc_engine::systems::stitch(members).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&all)?);
         return Ok(());
     }
     println!(
         "system: {} members, {} stitches",
-        sys.members.len(),
+        members.len(),
         all.len()
     );
-    for m in &sys.members {
+    for m in &members {
         println!("member {} ({})", m.repo_id, m.root.display());
     }
     for s in &all {
@@ -785,7 +623,7 @@ pub fn cmd_system(_root: &Path, members: &[std::path::PathBuf], json: bool) -> c
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-history work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_history(root: &Path, json: bool) -> crate::Result<()> {
     let store = open_store(root)?;
-    let revs = store.revisions()?;
+    let revs = scc_engine::history::revisions(&store).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&revs)?);
         return Ok(());
@@ -813,7 +651,7 @@ pub fn cmd_history(root: &Path, json: bool) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-diff work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_diff(root: &Path, from: i64, to: i64, json: bool) -> crate::Result<()> {
     let store = open_store(root)?;
-    let d = store.semantic_diff(from, to)?;
+    let d = scc_engine::history::diff(&store, from, to).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&d)?);
         return Ok(());
@@ -854,23 +692,7 @@ pub fn cmd_snapshot_save(
     budget: Option<usize>,
     json: bool,
 ) -> crate::Result<()> {
-    let artifact = build_task_context(root, task, &[], &[], budget, false)?;
-    let store = open_store(root)?;
-    let head = store.revisions()?.into_iter().last().map(|r| r.rev).unwrap_or(0);
-    let epoch = store.model_epoch()?.composite(&head.to_string());
-    let mut ids = artifact.pack.entity_ids.clone();
-    ids.extend(artifact.delta_ids.iter().cloned());
-    ids.sort();
-    ids.dedup();
-    let snap = store.save_snapshot(scc_store::snapshot::SnapshotSave {
-        task,
-        epoch: &epoch,
-        revision: head,
-        artifact: &format!("{}{}", artifact.pack.content, artifact.delta),
-        entity_ids: &ids,
-        budget: artifact.token_count,
-        warnings: &artifact.pack.warnings,
-    })?;
+    let snap = scc_engine::misc::snapshot_save(root, task, budget).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snap)?);
     } else {
@@ -882,7 +704,7 @@ pub fn cmd_snapshot_save(
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-snapshot-show work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_snapshot_show(root: &Path, id: &str) -> crate::Result<()> {
     let store = open_store(root)?;
-    match store.load_snapshot(id)? {
+    match scc_engine::snapshots::get(&store, id).map_err(engine_err)? {
         Some(s) => print!("{}", s.artifact),
         None => println!("no snapshot {id}"),
     }
@@ -892,7 +714,7 @@ pub fn cmd_snapshot_show(root: &Path, id: &str) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-snapshot-diff work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_snapshot_diff(root: &Path, id: &str, json: bool) -> crate::Result<()> {
     let store = open_store(root)?;
-    match store.diff_snapshot(id)? {
+    match scc_engine::snapshots::diff(&store, id).map_err(engine_err)? {
         Some(d) => {
             if json {
                 println!("{}", serde_json::to_string_pretty(&d)?);
@@ -935,22 +757,22 @@ pub fn cmd_snapshot_diff(root: &Path, id: &str, json: bool) -> crate::Result<()>
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-export work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_export(root: &Path, format: &str) -> crate::Result<()> {
     let store = open_store(root)?;
-    let ir = crate::export_ir(&store)?;
     match format {
-        "system-ir.json" => println!("{}", serde_json::to_string_pretty(&ir)?),
+        "system-ir.json" => println!("{}", serde_json::to_string_pretty(&scc_engine::exports::system_ir(&store).map_err(engine_err)?)?),
         "system-ir.jsonl" => {
-            for line in crate::export_jsonl(&ir)? {
+            let ir = scc_engine::exports::system_ir(&store).map_err(engine_err)?;
+            for line in scc_engine::exports::jsonl(&ir).map_err(engine_err)? {
                 println!("{line}");
             }
         }
-        "ccg" => println!("{}", serde_json::to_string_pretty(&crate::export_ccg(&ir)?)?),
+        "ccg" => println!("{}", serde_json::to_string_pretty(&scc_engine::exports::ccg(&scc_engine::exports::system_ir(&store).map_err(engine_err)?).map_err(engine_err)?)?),
         "flow-graphs.json" => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&store.flow_graphs()?)?
             )
         }
-        "capsule.md" => print!("{}", crate::compress::capsule_markdown(root)?),
+        "capsule.md" => print!("{}", scc_engine::exports::capsule(root).map_err(engine_err)?),
         other => {
             return Err(crate::CliError::Other(format!(
                 "unknown export format '{other}' (use system-ir.json, system-ir.jsonl, ccg, or capsule.md)"
@@ -964,26 +786,13 @@ pub fn cmd_export(root: &Path, format: &str) -> crate::Result<()> {
 // trace:v1 id=impl.cli.query.fallback work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_query(root: &Path, query: &str, limit: usize) -> crate::Result<()> {
     let store = open_store(root)?;
-    let entities = store.search_entities(query, limit)?;
-    let symbols = store.search_symbols(query, limit)?;
-    // Lexical fallback: FTS tokenizes on punctuation, so a query like
-    // "tree.go" or "addRoute" can miss while the name sits verbatim in the
-    // table. Empty semantic results fall back to substring LIKE — same
-    // tables, no new index, no architecture.
-    let (entities, symbols) = if entities.is_empty() && symbols.is_empty() {
-        (
-            store.search_entities_like(query, limit)?,
-            store.search_symbols_like(query, limit)?,
-        )
-    } else {
-        (entities, symbols)
-    };
+    let hit = scc_engine::graph::query(&store, &scc_api::QueryRequest { query: query.into(), limit }).map_err(engine_err)?;
     println!("— entities —");
-    for e in &entities {
+    for e in &hit.entities {
         println!("{} [{}]", e.name, e.kind);
     }
     println!("— symbols —");
-    for (name, sig, kind, file) in &symbols {
+    for (name, sig, kind, file) in &hit.symbols {
         println!("{name} ({kind}) {file} {sig}");
     }
     Ok(())
@@ -992,7 +801,7 @@ pub fn cmd_query(root: &Path, query: &str, limit: usize) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-list-components work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_list_components(root: &Path) -> crate::Result<()> {
     let store = open_store(root)?;
-    for c in store.components()? {
+    for c in scc_engine::graph::components(&store).map_err(engine_err)? {
         println!("{}", c.name);
     }
     Ok(())
@@ -1001,7 +810,7 @@ pub fn cmd_list_components(root: &Path) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-list-flows work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_list_flows(root: &Path) -> crate::Result<()> {
     let store = open_store(root)?;
-    for f in store.flows()? {
+    for f in scc_engine::graph::flows(&store).map_err(engine_err)? {
         println!("{} [{}] {}", f.name, crate::flow_kind_str(&f.kind), f.trigger.unwrap_or_default());
     }
     Ok(())
@@ -1012,8 +821,7 @@ pub fn cmd_list_flows(root: &Path) -> crate::Result<()> {
 /// with the signal.
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-cochange work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_cochange(root: &Path, min_commits: u32) -> crate::Result<()> {
-    let pairs = scc_graph::cochange::cochange_pairs(root, min_commits)
-        .map_err(crate::CliError::Other)?;
+    let (pairs, n) = scc_engine::misc::cochange(root, min_commits).map_err(engine_err)?;
     if pairs.is_empty() {
         println!("no co-change pairs with >= {min_commits} shared commits");
     } else {
@@ -1022,13 +830,8 @@ pub fn cmd_cochange(root: &Path, min_commits: u32) -> crate::Result<()> {
             println!("  {} <-> {} ×{}", p.a, p.b, p.commits);
         }
     }
-    if crate::db_path(root).exists() {
-        let store = crate::open_store(root)?;
-        let n = scc_graph::cochange::enrich_components(&store, &pairs)
-            .map_err(crate::CliError::Other)?;
-        if n > 0 {
-            println!("enriched {n} components with co-change signal");
-        }
+    if n > 0 {
+        println!("enriched {n} components with co-change signal");
     }
     Ok(())
 }
@@ -1037,43 +840,11 @@ pub fn cmd_cochange(root: &Path, min_commits: u32) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-check-invariants work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_check_invariants(root: &Path) -> crate::Result<bool> {
     let store = open_store(root)?;
-    let graph = scc_graph::RealityGraph::load(&store)?;
-    let mut ok = true;
-    // dangling refs
-    for r in graph.all_rels() {
-        let known = |id: &str| {
-            graph.entities.contains_key(id)
-                || id.contains("/external_api/")
-                || id.contains("/component/")
-                || id.contains("/flow/")
-                || id.contains("/invariant/")
-        };
-        if !known(&r.subject) {
-            println!("dangling subject: {} — {}", r.subject, r.predicate);
-            ok = false;
-        }
-        if !known(&r.object) {
-            println!("dangling object: {} — {}", r.predicate, r.object);
-            ok = false;
-        }
+    let violations = scc_engine::misc::check_invariants(&store).map_err(engine_err)?;
+    for v in &violations {
+        println!("{}", v.message);
     }
-    // resolved without evidence
-    for r in graph.all_rels() {
-        if r.provenance == scc_core::Provenance::Resolved && r.evidence.is_empty() {
-            println!("RESOLVED without evidence: {} — {}", r.subject, r.predicate);
-            ok = false;
-        }
-    }
-    // critical invariants unenforced
-    for inv in store.invariants()? {
-        if inv.severity == scc_core::Severity::Critical && inv.enforced_by.is_empty() {
-            println!("critical invariant unenforced: {}", inv.statement);
-            ok = false;
-        }
-    }
-    // conflicting owners
-    let _ = kinds::DATA_STORE;
-    Ok(ok)
+    Ok(violations.is_empty())
 }
 
 /// `scc ci check` (docs/DEPLOYMENT_AND_INFRA.md §3, EPIC-180 CI policies):
@@ -1081,39 +852,23 @@ pub fn cmd_check_invariants(root: &Path) -> crate::Result<bool> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-ci-check work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_ci_check(root: &Path, max_severity: &str) -> crate::Result<bool> {
     let store = open_store(root)?;
-    let mut ok = cmd_check_invariants(root)?;
-    let allowed = match max_severity {
-        "low" => 1u8,
-        "medium" => 2u8,
-        "high" => 3u8,
-        "critical" => 4u8,
-        _ => 2u8, // default: medium allowed
-    };
-    let findings = store.drift_findings(true)?;
-    for (_, kind, sev, msg, _) in &findings {
-        let rank = match sev.as_str() {
-            "low" => 1u8,
-            "medium" => 2u8,
-            "high" => 3u8,
-            "critical" => 4u8,
-            _ => 2u8,
-        };
-        if rank > allowed {
-            println!("[ci:fail] [{sev}] {kind}: {msg}");
-            ok = false;
-        } else {
-            println!("[ci:warn] [{sev}] {kind}: {msg}");
-        }
+    let violations = scc_engine::misc::check_invariants(&store).map_err(engine_err)?;
+    for v in &violations {
+        println!("{}", v.message);
     }
-    if ok {
-        println!("ci check passed");
+    let (ok, lines) = scc_engine::misc::ci_check(&store, &violations, max_severity).map_err(engine_err)?;
+    for l in &lines {
+        // invariant lines already printed above; print only ci lines + summary
+        if l.starts_with("[ci:") || *l == "ci check passed" {
+            println!("{l}");
+        }
     }
     Ok(ok)
 }
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-checkpoint-save work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_checkpoint_save(root: &Path, json: bool) -> crate::Result<()> {
-    let data = checkpoint::capture(root)?;
+    let data = scc_engine::checkpoint::capture(root).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string(&data)?);
     } else {
@@ -1124,7 +879,7 @@ pub fn cmd_checkpoint_save(root: &Path, json: bool) -> crate::Result<()> {
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-checkpoint-load work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_checkpoint_load(root: &Path, inject: bool) -> crate::Result<()> {
-    if let Some(content) = checkpoint::load(root)? {
+    if let Some(content) = scc_engine::checkpoint::load(root).map_err(engine_err)? {
         print!("{content}");
     } else if !inject {
         println!("no checkpoint found");
@@ -1249,8 +1004,7 @@ pub fn cmd_setup_detected(root: &Path, all: bool) -> crate::Result<()> {
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-ingest-runtime work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_ingest_runtime(root: &Path, body: &str) -> crate::Result<()> {
-    let store = open_store(root)?;
-    crate::httpd::ingest_runtime(&store, body)?;
+    scc_engine::state::ingest_runtime(root, body).map_err(engine_err)?;
     println!("accepted");
     Ok(())
 }
@@ -1334,239 +1088,25 @@ pub fn cmd_adapters(root: &Path, json: bool) -> crate::Result<()> {
 /// in the graph (or a handshake succeeded under --deep/--network).
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-doctor work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_doctor(root: &Path, json: bool, deep: bool, network: bool, strict: bool) -> crate::Result<bool> {
-    use scc_indexer::adapters::integration_registry;
     let store = open_store(root)?;
     let config = load_config(root)?;
-    let stale = crate::stale_paths(&store).unwrap_or_default();
-
-    #[derive(serde::Serialize)]
-    struct Row {
-        id: String,
-        category: String,
-        mode: String,
-        implemented: bool,
-        configured: bool,
-        reachable: Option<bool>,
-        contributing: bool,
-        detail: String,
-    }
-    let mut rows: Vec<Row> = Vec::new();
-    let mut warnings: u32 = 0;
-
-    // Evidence already in the graph, by extractor tag (the honest
-    // contribution signal): native facts carry extractor `scc-native`;
-    // TraceLayer facts carry requirement/decision/implementation/test/work
-    // entity kinds (the importer emits no extractor tag); beads/cbm/
-    // hindsight/gitnexus carry their kinds.
-    let ev_by_extractor: std::collections::BTreeMap<String, u64> = store
-        .all_evidence()
-        .map(|evs| {
-            let mut m = std::collections::BTreeMap::new();
-            for e in evs {
-                if let Some(x) = e.extractor.as_deref() {
-                    *m.entry(x.to_string()).or_insert(0) += 1;
-                }
-            }
-            m
-        })
-        .unwrap_or_default();
-    let count_kind = |kind: &str| -> u64 {
-        store.entities_by_kind(kind).map(|v| v.len() as u64).unwrap_or(0)
-    };
-    let on_path = |bin: &str| -> bool {
-        std::env::var_os("PATH")
-            .map(|p| {
-                std::env::split_paths(&p).any(|d| {
-                    d.join(bin).is_file() || d.join(format!("{bin}.exe")).is_file()
-                })
-            })
-            .unwrap_or(false)
-    };
-
-    // CORE section facts (not registry rows).
-    let scc_version = env!("CARGO_PKG_VERSION");
-    let stats = store.stats().unwrap_or_default();
-    let rev = store
-        .snapshot_status()
-        .ok()
-        .flatten()
-        .map(|(s, _)| s.revision.to_string())
-        .unwrap_or_else(|| "unindexed".into());
-    let dangling = scc_graph::RealityGraph::load(&store)
-        .map(|g| {
-            g.all_rels()
-                .iter()
-                .filter(|r| {
-                    let known = |id: &str| {
-                        g.entities.contains_key(id)
-                            || id.contains("/external_api/")
-                            || id.contains("/component/")
-                            || id.contains("/flow/")
-                            || id.contains("/invariant/")
-                    };
-                    !known(&r.subject) || !known(&r.object)
-                })
-                .count()
-        })
-        .unwrap_or(0);
-
-    for d in integration_registry() {
-        let (configured, reachable, contributing, detail) = match d.id {
-            "native" => {
-                let n: u64 = stats.get("entities").copied().unwrap_or(0);
-                (true, None, n > 0, format!("{n} entities in graph"))
-            }
-            "scip" | "ccg" | "cbm" => {
-                // On-demand file import, always available, needs no config:
-                // an availability note, never a warning.
-                (false, None, false, format!("importer available (on-demand `scc import {}`)", d.id))
-            }
-            "gitnexus" => {
-                let n = count_kind("symbol")
-                    + ev_by_extractor.get("gitnexus").copied().unwrap_or(0);
-                let cli = on_path("gitnexus");
-                (
-                    config.integrations.gitnexus,
-                    None,
-                    n > 0 && config.integrations.gitnexus,
-                    format!(
-                        "mode: file import; configured: {}; CLI detected: {}; symbol-ish evidence: {n}",
-                        config.integrations.gitnexus, cli
-                    ),
-                )
-            }
-            "tracelayer" => {
-                let n = count_kind("requirement")
-                    + count_kind("decision")
-                    + count_kind("implementation")
-                    + count_kind("test")
-                    + count_kind("work");
-                (
-                    true,
-                    None,
-                    n > 0,
-                    format!("{n} trace facts (requirement/decision/implementation/test/work); last import: revision {rev}"),
-                )
-            }
-            "beads" => {
-                let n = count_kind("task");
-                (
-                    config.integrations.beads,
-                    None,
-                    n > 0 && config.integrations.beads,
-                    format!("task-state entities: {n}; configured: {}", config.integrations.beads),
-                )
-            }
-            "hindsight" => {
-                let n = count_kind("lesson");
-                (
-                    config.integrations.hindsight,
-                    None,
-                    n > 0 && config.integrations.hindsight,
-                    format!("lessons in graph: {n}; bank: .scc/lessons.jsonl"),
-                )
-            }
-            "context7" => {
-                let cfg = !config.integrations.context7_command.is_empty();
-                let reach = if network {
-                    // Explicit opt-in only: never probed by default.
-                    Some(config.integrations.context7_command.contains("context7"))
-                } else {
-                    None
-                };
-                if cfg && reach == Some(false) {
-                    warnings += 1;
-                }
-                (
-                    cfg,
-                    reach,
-                    false,
-                    if cfg {
-                        "configured; handshake only under --network (never auto-downloads)".into()
-                    } else {
-                        "disabled (empty context7_command)".into()
-                    },
-                )
-            }
-            "lsp-pyright" => {
-                let bin = on_path("pyright") || on_path("basedpyright");
-                let reach = if deep {
-                    // --deep may handshake locally; default only reports
-                    // the binary presence (offline, read-only).
-                    Some(bin && std::process::Command::new("pyright").arg("--version").output().map(|o| o.status.success()).unwrap_or(false))
-                } else {
-                    None
-                };
-                if !bin {
-                    warnings += 1;
-                }
-                (true, reach, bin, if bin { "binary on PATH (resolver available)".into() } else { "not installed".into() })
-            }
-            "lsp-tsserver" => {
-                let bin = on_path("tsserver") || on_path("typescript-language-server");
-                if !bin {
-                    warnings += 1;
-                }
-                (true, if deep { Some(bin) } else { None }, bin, if bin { "binary on PATH (resolver available)".into() } else { "not installed".into() })
-            }
-            "runtime" => {
-                (false, None, false, "ingestion source available (`scc ingest`)".into())
-            }
-            "serena" => {
-                // Compatibility-only: presence is coexistence info, never
-                // a warning either way.
-                (
-                    false,
-                    None,
-                    false,
-                    "compatibility only; no SCC evidence adapter (coexistence/exact-source workflow)".into(),
-                )
-            }
-            "configrefs" | "failures" => (true, None, true, "internal post-pass; always runs at index".into()),
-            _ => (false, None, false, "unknown integration".into()),
-        };
-        // Unconfigured-but-capable importers are availability notes, not
-        // warnings; missing optionals (pyright binary) and failed
-        // handshakes warn; strict promotes every non-contributing
-        // configured row to a warning at report time (counted below).
-        if matches!(d.id, "gitnexus" | "beads" | "hindsight") && configured && !contributing {
-            warnings += 1;
-        }
-        rows.push(Row {
-            id: d.id.to_string(),
-            category: d.category.as_str().into(),
-            mode: d.mode.to_string(),
-            implemented: true,
-            configured,
-            reachable,
-            contributing,
-            detail,
-        });
-    }
-
-    // Agent integrations: presence probes over install artifacts (local,
-    // offline). Hermes installs outside the repo, so absence is a note.
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let agent_rows: Vec<(&str, bool, String)> = vec![
-        ("omp", root.join(".omp").is_dir() || root.join("plugins/omp/scc").is_dir(), "repo .omp/ or plugin dir".into()),
-        ("claude-code", root.join("plugins/claude").is_dir(), "repo plugin dir".into()),
-        ("codex", root.join("AGENTS.md").is_file(), "AGENTS.md present".into()),
-        ("opencode", root.join("plugins/opencode").is_dir(), "repo plugin dir".into()),
-        ("hermes", home.as_ref().map(|h| h.join(".hermes").is_dir()).unwrap_or(false) || root.join("plugins/hermes").is_dir(), "home or repo plugin".into()),
-        ("mcp-server", root.join(".mcp.json").is_file() || root.join("opencode.json").is_file(), "MCP config present".into()),
-    ];
-
+    let rep = scc_engine::integrations::doctor_report(&store, &config, root, deep, network).map_err(engine_err)?;
+    let rows = rep.integrations;
+    let agent_rows = rep.agents;
+    let mut warnings = rep.warnings;
+    let (scc_version, rev, stale_len, dangling, stats) =
+        (rep.scc_version, rep.revision, rep.stale_files, rep.dangling_edges, rep.stats);
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "scc": scc_version,
                 "revision": rev,
-                "stale_files": stale.len(),
+                "stale_files": stale_len,
                 "dangling_edges": dangling,
                 "stats": stats,
                 "integrations": rows,
-                "agents": agent_rows.iter().map(|(id, present, detail)| serde_json::json!({"id": id, "present": present, "detail": detail})).collect::<Vec<_>>(),
+                "agents": agent_rows.iter().map(|a| serde_json::json!({"id": a.id, "present": a.present, "detail": a.detail})).collect::<Vec<_>>(),
                 "warnings": warnings,
             }))?
         );
@@ -1577,7 +1117,7 @@ pub fn cmd_doctor(root: &Path, json: bool, deep: bool, network: bool, strict: bo
         println!("CORE");
         println!("  scc        {scc_version}");
         println!("  revision   {rev}");
-        println!("  stale      {} file(s)", stale.len());
+        println!("  stale      {} file(s)", stale_len);
         println!("  dangling   {dangling} edge(s) (see `scc check-invariants`)");
         println!("  entities   {}", stats.get("entities").copied().unwrap_or(0));
         println!();
@@ -1599,8 +1139,8 @@ pub fn cmd_doctor(root: &Path, json: bool, deep: bool, network: bool, strict: bo
         }
         println!();
         println!("AGENTS");
-        for (id, present, detail) in &agent_rows {
-            println!("  {} {id:<12} {detail}", if *present { "✓" } else { "-" });
+        for a in &agent_rows {
+            println!("  {} {:<12} {}", if a.present { "✓" } else { "-" }, a.id, a.detail);
         }
         println!();
         if warnings == 0 {
@@ -1652,8 +1192,7 @@ pub fn cmd_lessons_add(root: &Path, text: &str) -> crate::Result<()> {
 /// first, same ordering as the context-pack enrichment).
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-lessons-list work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_lessons_list(root: &Path, limit: usize) -> crate::Result<()> {
-    let store = open_store(root)?;
-    let lessons = scc_indexer::adapters::hindsight::lessons(&store, limit);
+    let lessons = scc_engine::state::lessons_list(root, limit).map_err(engine_err)?;
     if lessons.is_empty() {
         println!("no lessons in the store — run `scc lessons add \"...\"` then `scc import hindsight .scc/lessons.jsonl`");
         return Ok(());
@@ -1673,7 +1212,7 @@ pub fn cmd_lessons_list(root: &Path, limit: usize) -> crate::Result<()> {
 /// (task state, not system facts).
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-beads work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_beads(root: &Path) -> crate::Result<()> {
-    let active = scc_indexer::adapters::beads::active_beads(root, 20);
+    let active = scc_engine::state::beads(root, 20).map_err(engine_err)?;
     if active.is_empty() {
         println!("no active beads tasks (checked .beads/issues.jsonl)");
         return Ok(());
@@ -1687,57 +1226,9 @@ pub fn cmd_beads(root: &Path) -> crate::Result<()> {
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-import work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_import(root: &Path, format: &str, file: &str) -> crate::Result<()> {
-    let store = open_store(root)?;
-    let report = match format {
-        "scip" => scc_indexer::adapters::import_scip(&store, std::path::Path::new(file)),
-        "ccg" => scc_indexer::adapters::import_ccg(&store, std::path::Path::new(file)),
-        "gitnexus" => scc_indexer::adapters::gitnexus::import_gitnexus(&store, std::path::Path::new(file))
-            .map(|r| scc_indexer::adapters::ImportReport {
-                symbols: r.symbols,
-                calls: r.edges,
-                imports: 0,
-                errors: r.errors,
-            }),
-        "beads" => scc_indexer::adapters::beads::import_beads(&store, std::path::Path::new(file))
-            .map(|r| scc_indexer::adapters::ImportReport {
-                symbols: r.tasks,
-                calls: r.dependencies,
-                imports: r.active,
-                errors: r.errors,
-            }),
-        "cbm" => scc_indexer::adapters::cbm::import_cbm(&store, std::path::Path::new(file))
-            .map(|r| scc_indexer::adapters::ImportReport {
-                symbols: r.symbols,
-                calls: r.relationships,
-                imports: 0,
-                errors: r.errors,
-            }),
-        "hindsight" => scc_indexer::adapters::hindsight::import_hindsight(&store, std::path::Path::new(file))
-            .map(|r| scc_indexer::adapters::ImportReport {
-                symbols: r.lessons,
-                calls: 0,
-                imports: 0,
-                errors: r.errors,
-            }),
-        "tracelayer" => scc_indexer::adapters::tracelayer::import_tracelayer(&store, std::path::Path::new(file))
-            .map(|r| scc_indexer::adapters::ImportReport {
-                symbols: r.requirements + r.implementations + r.tests + r.decisions,
-                calls: r.relationships,
-                imports: r.work_items,
-                errors: r.errors,
-            }),
-        other => {
-            return Err(crate::CliError::Other(format!(
-                "unknown import format '{other}' (use scip, ccg, gitnexus, beads, cbm, hindsight, or tracelayer)"
-            )))
-        }
-    }
-    .map_err(crate::CliError::Other)?;
-    // P0: imported evidence changes system truth — bump the evidence model
-    // epoch (invalidating every epoch-keyed context pack/atlas) and
-    // recompile the derived layer so flows/components reflect the new facts.
-    store.bump_epoch(scc_store::ModelEpochKind::Evidence)?;
-    crate::recompile(&store)?;
+    let report = scc_engine::state::import_evidence(root, format, file).map_err(engine_err)?;
+    // P0: imported evidence changes system truth — the engine already bumped
+    // the evidence epoch and recompiled the derived layer.
     println!(
         "imported {} symbols, {} calls, {} imports ({} errors); evidence epoch bumped, derived layer recompiled",
         report.symbols, report.calls, report.imports, report.errors
@@ -1747,9 +1238,7 @@ pub fn cmd_import(root: &Path, format: &str, file: &str) -> crate::Result<()> {
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-runtime-status work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_runtime_status(root: &Path, json: bool) -> crate::Result<()> {
-    let store = open_store(root)?;
-    let edges = scc_indexer::runtime::runtime_edges(&store)
-        .map_err(crate::CliError::Other)?;
+    let edges = scc_engine::state::runtime_edges(root).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&edges)?);
         return Ok(());
@@ -1771,8 +1260,7 @@ pub fn cmd_runtime_status(root: &Path, json: bool) -> crate::Result<()> {
 
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-runtime-reconcile work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_runtime_reconcile(root: &Path, json: bool) -> crate::Result<()> {
-    let store = open_store(root)?;
-    let rec = scc_indexer::runtime::reconcile(&store).map_err(crate::CliError::Other)?;
+    let rec = scc_engine::state::reconcile(root).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&rec)?);
         return Ok(());

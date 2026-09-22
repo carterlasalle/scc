@@ -17,8 +17,38 @@ pub mod error;
 pub mod workspace;
 // trace:exempt reason=module-facade
 pub mod task;
+// trace:exempt reason=module-facade
+pub mod checkpoint;
+// trace:exempt reason=module-facade
+pub mod graph;
+// trace:exempt reason=module-facade
+pub mod index;
+// trace:exempt reason=module-facade
+pub mod ops;
+// trace:exempt reason=module-facade
+pub mod snapshots;
+// trace:exempt reason=module-facade
+pub mod state;
+// trace:exempt reason=module-facade
+pub mod status;
+// trace:exempt reason=module-facade
+pub mod systems;
+// trace:exempt reason=module-facade
+pub mod exports;
+// trace:exempt reason=module-facade
+pub mod integrations;
+// trace:exempt reason=module-facade
+pub mod history;
+// trace:exempt reason=module-facade
+pub mod invoke;
+// trace:exempt reason=module-facade
+pub mod misc;
+
+
 
 pub use context::SccContext;
 pub use error::{EngineError, Result};
 pub use workspace::{Engine, open_engine};
+pub use invoke::invoke;
+pub use ops::{describe as describe_operation, OPERATIONS};
 pub use task::{TaskContextArtifact, build_task_context, build_enriched_task_pack};

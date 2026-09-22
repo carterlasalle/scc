@@ -25,6 +25,7 @@ pub struct Checkpoint {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
 pub struct TaskRef {
     #[serde(default)]
     pub goal: String,
@@ -33,6 +34,7 @@ pub struct TaskRef {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
 pub struct Affected {
     #[serde(default)]
     pub components: Vec<String>,
@@ -45,6 +47,7 @@ pub struct Affected {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
 pub struct Files {
     #[serde(default)]
     pub modified: Vec<String>,
@@ -53,6 +56,7 @@ pub struct Files {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
 pub struct Tests {
     #[serde(default)]
     pub passed: Vec<String>,
@@ -66,7 +70,7 @@ pub struct Tests {
 /// revision + affected system entities derived from the working tree.
 // trace:v1 id=impl.scc.checkpoint work=WORK-SCC-001 satisfies=REQ-SCC-API
 pub fn capture(root: &Path) -> crate::Result<Checkpoint> {
-    let store = crate::open_store(root)?;
+    let store = crate::workspace::open_store(root)?;
     let revision = store
         .latest_snapshot()?
         .map(|s| s.revision)
@@ -141,7 +145,7 @@ pub fn capture(root: &Path) -> crate::Result<Checkpoint> {
         }
     }
 
-    let path = crate::checkpoint_path(root);
+    let path = crate::workspace::checkpoint_path(root);
     std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
     std::fs::write(&path, serde_json::to_string_pretty(&cp)?)?;
     Ok(cp)
@@ -150,7 +154,7 @@ pub fn capture(root: &Path) -> crate::Result<Checkpoint> {
 /// Load and render the checkpoint as markdown for session rehydration.
 // trace:v1 id=impl.scc.checkpoint.load work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn load(root: &Path) -> crate::Result<Option<String>> {
-    let path = crate::checkpoint_path(root);
+    let path = crate::workspace::checkpoint_path(root);
     if !path.exists() {
         return Ok(None);
     }
@@ -208,10 +212,10 @@ pub fn load(root: &Path) -> crate::Result<Option<String>> {
     // Semantic rehydration verdict: what the pinned snapshot says about
     // model drift since capture (still-valid vs invalidated vs modified).
     if let Some(sid) = cp.snapshot_id.as_deref() {
-        match crate::open_store(root).and_then(|store| {
+        match crate::workspace::open_store(root).and_then(|store| {
             store
                 .diff_snapshot(sid)
-                .map_err(crate::CliError::from)
+                .map_err(crate::EngineError::from)
         }) {
             Ok(Some(d)) => {
                 out.push_str(&format!(
@@ -247,6 +251,7 @@ pub fn load(root: &Path) -> crate::Result<Option<String>> {
     Ok(Some(out))
 }
 
+// trace:exempt reason=internal-detail
 fn git_modified(root: &Path) -> Vec<String> {
     let out = std::process::Command::new("git")
         .args(["status", "--porcelain"])
