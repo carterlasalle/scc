@@ -10,7 +10,7 @@
 ![SQLite](https://img.shields.io/badge/SQLite-WAL%20%2B%20FTS5-003B57?logo=sqlite&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-10%20tools-000000?logo=modelcontextprotocol&logoColor=white)
 
-[Install](docs/INSTALL.md) · [Getting started](docs/IMPLEMENTATION_PLAN.md) · [Context packs](docs/CONTEXT_COMPILER.md) · [System IR schema](docs/SYSTEM_IR_SCHEMA.md) · [Adapters](docs/API_AND_INTEGRATIONS.md) · [Benchmarks](docs/TEST_PLAN.md) · [Contributing](CONTRIBUTING.md)
+[Install](docs/INSTALL.md) · [Publishing](docs/PUBLISHING.md) · [Getting started](docs/IMPLEMENTATION_PLAN.md) · [Context packs](docs/CONTEXT_COMPILER.md) · [System IR schema](docs/SYSTEM_IR_SCHEMA.md) · [Adapters](docs/API_AND_INTEGRATIONS.md) · [Benchmarks](docs/TEST_PLAN.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -87,6 +87,19 @@ Every install path — the one-liner convenience form, manual download with
 checksum verification, Docker, building from source, supported platforms,
 uninstall and troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
 
+Other channels:
+
+```bash
+brew install carterlasalle/tap/system-context-compiler        # Homebrew tap (live)
+docker run --rm ghcr.io/carterlasalle/scc --version          # image, published from main
+npm install -g @carterlasalle/scc                            # npm (scoped: bare `scc` is taken)
+cargo install scc-cli                                        # crates.io
+```
+
+The npm and crates.io packages are published by the release workflow, so they
+appear with the next tagged release; the installer above always works. How each
+channel publishes and how to verify it: [docs/PUBLISHING.md](docs/PUBLISHING.md).
+
 > **Package names.** `scc` is taken on npm, crates.io, PyPI and Homebrew by
 > unrelated projects: `npm install -g scc` installs a 2013 SeaJS bundler,
 > `brew install scc` installs a Go line counter ([boyter/scc](https://github.com/boyter/scc)),
@@ -110,10 +123,11 @@ Rust stable is the only hard requirement. Optional: `pyright` +
 OpenAI-compatible embedding endpoint (semantic ranking), `zstd` (CBM adapter),
 `python3` + `node` (SDK and plugin tests).
 
-If you're using Oh My Pi, also install the native OMP extension:
+If you're using Oh My Pi, the native extension ships inside the binary:
 
 ```bash
-omp install scc
+scc setup omp                 # writes .omp/extensions/scc, MCP config, skill
+# or, from npm: omp install @carterlasalle/omp-scc
 ```
 
 ### Index your repository
@@ -164,7 +178,7 @@ The local daemon implements [`docs/openapi.yaml`](docs/openapi.yaml) on loopback
 | Codex | `scc setup codex` | AGENTS.md with capsule, usage rules, authority ordering |
 | OpenCode | `scc setup opencode` | AGENTS.md + `.opencode/opencode.json` wiring the SCC MCP server |
 | Hermes | `scc setup hermes` | Native plugin: ten tools + bundled `scc-system-context` skill |
-| Oh My Pi (OMP) | `omp install scc` (npm extension) or `scc setup omp` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
+| Oh My Pi (OMP) | `scc setup omp` (embedded) or `omp install @carterlasalle/omp-scc` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
 
 SDKs: TypeScript ([`scc-sdk`](https://www.npmjs.com/package/scc-sdk), source in `sdk/typescript`) and Python ([`scc-sdk`](https://pypi.org/project/scc-sdk/), source in `sdk/python`) wrapping the CLI.
 
@@ -218,7 +232,7 @@ The normative requirements are in [docs/SECURITY.md](docs/SECURITY.md).
 
 SCC ships as a single static binary and supports three modes:
 
-- **Mode A — developer local (default):** `sccd` (or `scc serve`), SQLite, local parsers, loopback HTTP + MCP. No network dependencies.
+- **Mode A — developer local (default):** `scc serve` — the daemon ships inside the `scc` binary, SQLite, local parsers, loopback HTTP + MCP. No network dependencies.
 - **Mode B — CI:** `scc verify`, `scc drift`, `scc impact --diff origin/main...HEAD`, `scc ci check`. CI can fail on stale generated IR, critical drift, ownership violations, broken invariants, or unapproved new boundaries.
 - **Mode C — team server:** post-MVP; not built.
 

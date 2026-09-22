@@ -1,0 +1,32 @@
+{
+  "name": "@carterlasalle/scc-darwin-arm64",
+  "version": "0.2.6",
+  "description": "The scc binary for macOS arm64 (Apple silicon) — installed automatically by @carterlasalle/scc.",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/scc",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/carterlasalle/scc.git",
+    "directory": "npm/cli-darwin-arm64"
+  },
+  "homepage": "https://github.com/carterlasalle/scc#readme",
+  "keywords": [
+    "scc",
+    "system-context",
+    "coding-agents",
+    "mcp"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

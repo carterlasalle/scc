@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.carterlasalle/scc",
+  "title": "System Context Compiler",
+  "description": "Compile a repository into an evidence-backed system model for coding agents (10 MCP tools)",
+  "version": "0.2.6",
+  "websiteUrl": "https://github.com/carterlasalle/scc",
+  "repository": {
+    "url": "https://github.com/carterlasalle/scc",
+    "source": "github",
+    "id": "1328591497"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@carterlasalle/scc",
+      "version": "0.2.6",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "value": "-y",
+          "description": "Skip the npx install prompt, which would otherwise stall the stdio handshake on a cold cache",
+          "isRequired": true
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Run SCC as an MCP server over stdio",
+          "isRequired": true
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "SCC_STATE_DIR",
+          "description": "Writable state directory (index database). Set it when the repository itself is read-only.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "System Context Compiler context: ranking and bounded context packs"
+# trace:exempt reason=package-metadata
+repository.workspace = true
 
 [dependencies]
 scc-core.workspace = true

@@ -4,7 +4,8 @@
 ## 1. Modes
 
 ### Local developer
-`sccd` + SQLite + local extractors + loopback HTTP/MCP.
+`scc serve` (the daemon lives in the `scc` binary) + SQLite + local extractors +
+loopback HTTP/MCP.
 
 ### CI
 ```bash
@@ -19,11 +20,16 @@ Post-MVP: API, repo workers, queue, Postgres, object storage, auth, optional gra
 
 ## 2. Local daemon
 
-Rust `sccd`, Unix socket or loopback port, per-repo DB, watcher, bounded worker pool.
+`scc serve`: loopback port (`security.listen`, default `127.0.0.1:7777`), per-repo
+DB, watcher, bounded worker pool. There is no separate `sccd` binary.
 
 ## 3. Docker
 
-Read-only repo mount + writable SCC data volume.
+Published image: `ghcr.io/carterlasalle/scc` (`:latest`, plus `:vX.Y.Z` per
+release). Read-only repo mount + writable SCC data volume; `SCC_STATE_DIR=/data`
+is set in the image, and the daemon refuses a non-loopback bind without
+`SCC_ALLOW_REMOTE_LISTEN=1`. Working recipes:
+[docs/INSTALL.md](INSTALL.md#docker).
 
 ## 4. Resource targets
 

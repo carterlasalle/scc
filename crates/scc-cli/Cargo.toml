@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "System Context Compiler CLI, daemon, MCP server, and Claude Code plugin"
+# trace:exempt reason=package-metadata
+repository.workspace = true
 
 [[bin]]
 name = "scc"
