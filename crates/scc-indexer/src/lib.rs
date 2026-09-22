@@ -504,8 +504,19 @@ impl Indexer {
             }
         }
 
-        apply_doc_mentions(&self.store)?;
-        bridges::link_rpc_bridges(&self.store)?;
+        // No-change gate (profiler receipt 2026-09-21: mentions + bridges
+        // re-derive identical rows on every index — a full md x entity match
+        // plus deletes+reinserts of byte-identical DECLARED_AS edges).
+        // Mentions are f(md contents, entity names); bridges f(contracts,
+        // symbols); BM25 stats f(entity corpus) — all inputs hash-identical
+        // when nothing was processed and nothing removed, so the stored rows
+        // already equal the recompute. The gate needs BOTH: a removal purges
+        // facts other md files' mentions may reference.
+        let recompute_derived = !(removed.is_empty() && to_process.is_empty());
+        if recompute_derived {
+            apply_doc_mentions(&self.store)?;
+            bridges::link_rpc_bridges(&self.store)?;
+        }
 
         self.store.finish_snapshot(snapshot_id, report.indexed)?;
         self.store.cache_clear()?;
@@ -514,7 +525,9 @@ impl Indexer {
         // flows), which only exist post-recompile. Recording here would
         // leave history systematically one recompile behind.
         report.analysis_quality = persist_analysis_quality(&self.store)?;
-        persist_bm25_corpus(&self.store)?;
+        if recompute_derived {
+            persist_bm25_corpus(&self.store)?;
+        }
         report.duration_ms = started.elapsed().as_millis() as u64;
         Ok(report)
     }

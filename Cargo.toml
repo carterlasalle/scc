@@ -11,7 +11,7 @@ members = [
 
 [workspace.package]
 # trace:v1 id=ops.release-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 license = "MIT"
 
@@ -34,8 +34,16 @@ lto = "thin"
 [profile.profiling]
 # trace:exempt reason=internal-detail
 inherits = "release"
+# Symbolized profiling build: full line tables, never stripped, so Samply
+# resolves scc frames (release addr-only profiles proved useless 2026-09-21).
 # trace:exempt reason=internal-detail
-debug = true
+debug = 1
+# trace:exempt reason=internal-detail
+strip = false
+# NOTE (2026-09-21): split-debuginfo=packed does NOT fix samply 0.13.1
+# macOS symbolication (tried — still addr-only frames). The scc frames ARE
+# in the binary (nm + dtrace flamegraph resolve them); samply-side lookup is
+# the gap. Primary recipe stays cargo-flamegraph; retry samply on upgrade.
 
 [profile.dev]
 opt-level = 1

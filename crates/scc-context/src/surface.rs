@@ -799,6 +799,7 @@ fn finish_selection(
     scc_core::SurfaceRenderResult {
         text,
         rendered_ids,
+        rendered_entries: selected_entries,
         omitted_ids,
         omissions,
         token_count,

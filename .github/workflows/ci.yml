@@ -116,3 +116,17 @@ jobs:
         run: cargo test -p scc-cli --release --test perf cold_index_50k_loc_under_30s -- --test-threads=1 --nocapture
       - name: 250k LOC benchmark
         run: ./target/release/scc bench index --files 1000 --lines 250
+      # Entrypoint timings audit (perf audit test): times every fast read
+      # entry point on one warm synthetic repo. AUDIT, not gate — no time
+      # bound (GHA runner variance makes hard bounds a lottery). The log
+      # uploads as an artifact; tripwires live in
+      # docs/CAPABILITY_LEDGER.md (warm medians on the self repo).
+      - name: Entrypoint timings audit (release)
+        run: |
+          cargo test -p scc-cli --release --test perf entrypoint_timings_audit -- --test-threads=1 --nocapture 2>&1 | tee perf-audit.log
+          grep PERF-AUDIT perf-audit.log | sort | tee perf-audit-timings.log
+      - name: Upload perf audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-audit-timings
+          path: perf-audit-timings.log

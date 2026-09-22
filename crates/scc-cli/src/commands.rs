@@ -295,9 +295,8 @@ pub fn cmd_surface(
     // Record what the session just showed (novelty-suppression source):
     // rendered entry ids resolve to logical symbol ids/files/components.
     if !result.rendered_ids.is_empty() {
-        let map = scc_context::surface::compile_surface_map(&ctx);
         let mut led = scc_context::context_ledger::ContextLedgerStore::new(&store).load();
-        record_rendered_surface(&mut led, &map, &result.rendered_ids);
+        record_rendered_entries(&mut led, &result.rendered_entries, &result.rendered_ids);
         scc_context::context_ledger::ContextLedgerStore::new(&store).save(&led);
     }
     Ok(())
@@ -462,15 +461,13 @@ pub(crate) fn truncate_to(content: &str, cap: usize) -> String {
 /// the compiled map so the ledger always records the logical symbol id.
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-cli-src-commands.record-rendered-surface work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
-fn record_rendered_surface(
+fn record_rendered_entries(
     led: &mut scc_core::ContextLedger,
-    map: &scc_core::SystemSurfaceMap,
+    entries: &[scc_core::SurfaceEntry],
     rendered_ids: &[String],
 ) {
-    let by_id: BTreeMap<&str, &scc_core::SurfaceEntry> =
-        map.entries.iter().map(|e| (e.id.as_str(), e)).collect();
-    for id in rendered_ids {
-        if let Some(e) = by_id.get(id.as_str()) {
+    if !entries.is_empty() {
+        for e in entries {
             led.visible_entities.insert(e.symbol_id.clone());
             led.visible_symbols.insert(e.symbol_id.clone());
             led.visible_files.insert(e.path.clone());
@@ -478,6 +475,11 @@ fn record_rendered_surface(
                 led.visible_components.insert(c.clone());
             }
         }
+        return;
+    }
+    // Legacy renders (no entries attached): record ids as entities.
+    for id in rendered_ids {
+        led.visible_entities.insert(id.clone());
     }
 }
 
@@ -578,9 +580,11 @@ fn surface_task_files(
         semantic,
     };
     let result = scc_context::surface::build_surface(ctx, request);
-    let map = scc_context::surface::compile_surface_map(ctx);
-    let by_id: BTreeMap<&str, &scc_core::SurfaceEntry> =
-        map.entries.iter().map(|e| (e.id.as_str(), e)).collect();
+    let by_id: BTreeMap<&str, &scc_core::SurfaceEntry> = result
+        .rendered_entries
+        .iter()
+        .map(|e| (e.id.as_str(), e))
+        .collect();
     let mut files: Vec<String> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for id in &result.rendered_ids {
