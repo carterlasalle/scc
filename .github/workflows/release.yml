@@ -18,16 +18,30 @@ permissions:
 # One-time setup (run once, then tags publish hands-free):
 # - PyPI: add a pending publisher for project `scc-sdk` on this repo + tag.
 # - npm: create an automation `NPM_TOKEN` (classic) and store it as a repo
-#   secret. NOTE: the `scc` npm org is taken, so the TS SDK publishes
-#   unscoped as `scc-sdk` (same name as PyPI).
+#   secret. NOTE: the bare `scc` name is taken on npm, crates.io, PyPI and
+#   Homebrew, so the TS SDK publishes unscoped as `scc-sdk` (same name as PyPI),
+#   the CLI publishes scoped as `@carterlasalle/scc` plus two platform packages,
+#   and the Oh My Pi extension publishes as `@carterlasalle/omp-scc`.
+# - crates.io: `gh secret set CARGO_REGISTRY_TOKEN` (token from
+#   https://crates.io/settings/tokens) and `gh variable set CRATES_PUBLISH
+#   --body true`. The `crates` job is gated on the VARIABLE because `secrets` is
+#   not allowed in `if:` expressions — a workflow that references secrets there
+#   fails at 0s with no job log.
+# - Homebrew and the MCP registry are not automated here (they need a PAT for
+#   the tap repo and an `mcp-publisher` login). Runbook: docs/PUBLISHING.md.
+# - The container image publishes from .github/workflows/publish-image.yml with
+#   the workflow token; no setup.
 #
 # Registries are immutable: PyPI and npm both reject re-uploading an
 # already-published version (PyPI 400 "File already exists", npm E409/E404
 # semantics). Every publish needs a fresh version — bump ALL of these
 # together before tagging:
-#   Cargo.toml (workspace.package.version), sdk/python/pyproject.toml,
+#   Cargo.toml (workspace.package.version AND the five internal dependency
+#   versions in [workspace.dependencies]), sdk/python/pyproject.toml,
 #   sdk/typescript/package.json, plugins/omp/scc/package.json,
-#   plugins/hermes/scc/plugin.yaml
+#   plugins/hermes/scc/plugin.yaml, server.json
+# The npm CLI packages and the Oh My Pi extension are stamped from the tag by
+# npm/stamp-version.sh in this workflow, so they cannot drift.
 
 env:
   VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', inputs.version) }}
@@ -44,15 +58,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build release binary
         run: cargo build --release -p scc-cli
-      - name: Package binary + SBOM
-        run: |
-          TAG="${VERSION#v}"
-          ARCH="$(uname -m)"
-          OUT="scc-${TAG}-$(uname -s)-${ARCH}"
-          mkdir -p dist
-          cp target/release/scc "dist/${OUT}"
-          cargo tree --edges normal --format '{p}' > "dist/sbom-${TAG}.txt"
-          (cd dist && shasum -a 256 "${OUT}" "sbom-${TAG}.txt" > "sha256-${TAG}-$(uname -s)-${ARCH}.txt")
+      - name: Package binary + SBOM + installer + checksums
+        # One source of truth for asset naming: scripts/package_release.sh is
+        # what the install contract test builds its fixture with, so a rename
+        # here fails that test instead of breaking installs after publishing.
+        run: ./scripts/package_release.sh "${VERSION}" dist
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.os }}
@@ -72,7 +82,7 @@ jobs:
         run: |
           gh release create "${VERSION}" dist/* \
             --title "${VERSION}" \
-            --notes "SCC ${VERSION}: CLI binaries (Linux/macOS), SBOM, checksums. Python SDK → PyPI (scc-sdk), TypeScript SDK → npm (@scc/sdk). Plugins ship embedded in the binary (\`scc setup omp|hermes\`)."
+            --notes "SCC ${VERSION}: CLI binaries (Linux/macOS), installer, SBOM, checksums. Verify install.sh and the binary against sha256-${VERSION#v}-<os>-<arch>.txt before running either. Python SDK → PyPI (scc-sdk), TypeScript SDK → npm (scc-sdk). Plugins ship embedded in the binary (\`scc setup omp|hermes\`)."
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -98,7 +108,7 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
-      - name: Build + publish @scc/sdk
+      - name: Build + publish scc-sdk (npm)
         run: |
           cd sdk/typescript
           npm install --no-audit --no-fund
@@ -106,3 +116,79 @@ jobs:
           npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  npm-cli:
+    # Publishes @carterlasalle/scc plus its two platform packages. The platform
+    # packages MUST go first: the launcher's optionalDependencies pin the exact
+    # version, so publishing the launcher first would point npm at versions that
+    # do not exist yet.
+    needs: [dist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist/
+      - name: Stage the platform binaries into the npm packages
+        run: |
+          tag="${VERSION#v}"
+          install -D -m 755 "dist/scc-${tag}-Linux-x86_64" npm/cli-linux-x64/bin/scc
+          install -D -m 755 "dist/scc-${tag}-Darwin-arm64" npm/cli-darwin-arm64/bin/scc
+          ls -l npm/cli-linux-x64/bin/scc npm/cli-darwin-arm64/bin/scc
+      - name: Smoke the staged binary and the launcher
+        run: |
+          ./npm/cli-linux-x64/bin/scc --version
+          node npm/test-launcher.js
+      - name: Stamp the release version
+        run: ./npm/stamp-version.sh "${VERSION#v}"
+      - name: Publish the platform packages
+        run: |
+          for pkg in cli-linux-x64 cli-darwin-arm64; do
+            echo "==> publishing @carterlasalle/scc-${pkg#cli-}"
+            (cd "npm/$pkg" && npm publish --access public --provenance)
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish the launcher
+        run: cd npm/cli && npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  npm-omp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish the Oh My Pi extension
+        # Scoped, because the bare name `scc` on npm is an unrelated 2013
+        # package. The extension also ships embedded in the binary
+        # (`scc setup omp`), so npm is the optional route.
+        run: |
+          cd plugins/omp/scc
+          npm version "${VERSION#v}" --no-git-tag-version
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  crates:
+    # Gated on a repository VARIABLE (secrets are not allowed in `if:`).
+    #   gh variable set CRATES_PUBLISH --body true
+    #   gh secret set CARGO_REGISTRY_TOKEN
+    if: ${{ vars.CRATES_PUBLISH == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish scc-core … scc-cli in dependency order
+        run: ./contrib/publish-crates.sh --execute
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

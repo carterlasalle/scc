@@ -1,0 +1,78 @@
+name: Bug report
+description: Something behaves incorrectly — wrong context, wrong graph fact, crash, or a broken install.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. SCC is a local-first tool, so most bugs are
+        reproducible from a command plus the output — the fields below are what
+        usually makes a report actionable in one round.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The exact command, and the output you got (trim long packs, but keep the section that is wrong).
+      placeholder: |
+        $ scc context task "change transcript normalization"
+        ...output...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: For context-quality bugs, name the entity/file you expected to see, and what SCC said instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: SCC version
+      description: Output of `scc --version`.
+      placeholder: scc 0.2.6
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - scripts/install.sh (GitHub Releases)
+        - Manual release binary download
+        - Built from source (cargo build --release -p scc-cli)
+        - Docker
+        - Other (say which in the description)
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and architecture
+      placeholder: Linux x86_64 / macOS arm64 / WSL2
+    validations:
+      required: true
+  - type: input
+    id: repo-shape
+    attributes:
+      label: Repository shape
+      description: Approximate size and languages of the repository you indexed (a 5k-line Python service and a 250k-line polyglot monorepo fail differently).
+      placeholder: ~40k lines, Rust + TypeScript, 3 crates
+    validations:
+      required: false
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`scc doctor --json` (if the bug is integration-related)"
+      description: Redact paths if needed. Leave empty for pure extraction/context bugs.
+      render: json
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything else
+      description: Index stats (`scc status`), whether the index was cold or incremental, and any staleness warning you saw.
+    validations:
+      required: false

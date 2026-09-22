@@ -9,6 +9,8 @@ edition.workspace = true
 license.workspace = true
 # trace:exempt reason=internal-detail
 description = "System Context Compiler CLI, daemon, MCP server, and Claude Code plugin"
+# trace:exempt reason=package-metadata
+repository.workspace = true
 
 [[bin]]
 # trace:exempt reason=internal-detail

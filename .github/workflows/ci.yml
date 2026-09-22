@@ -101,6 +101,47 @@ jobs:
           name: sbom
           path: sbom-deps.txt
 
+  install-smoke:
+    runs-on: ubuntu-latest
+    # Two layers, because they catch different failures. The contract test runs
+    # the installer against a local fixture built by the same packaging script
+    # the release uses — no network — so a rename in the release workflow alone
+    # fails here. The canary installs the *published* release, so a rename that
+    # only reached the published assets fails there.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer syntax
+        run: |
+          sh -n scripts/install.sh
+          bash -n scripts/install.sh
+          sh -n scripts/package_release.sh
+          sh -n scripts/install_contract_test.sh
+      - name: Install contract test (local fixture, no network)
+        run: ./scripts/install_contract_test.sh
+      - name: npm launcher contract test
+        # The npm package is a JS launcher around the platform binary; this
+        # exercises resolution, argv/exit-code forwarding and the missing-package
+        # error path without touching the network.
+        run: node npm/test-launcher.js
+      - name: npm package manifests
+        run: |
+          for pkg in cli cli-linux-x64 cli-darwin-arm64; do
+            (cd "npm/$pkg" && npm pack --dry-run > /dev/null && echo "npm/$pkg packs")
+          done
+          (cd plugins/omp/scc && npm pack --dry-run > /dev/null && echo "plugins/omp/scc packs")
+      - name: Canary — dry run against the published release
+        env:
+          SCC_GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/install.sh --dry-run
+      - name: Canary — install the published release end to end
+        env:
+          SCC_INSTALL_DIR: ${{ runner.temp }}/scc-bin
+          SCC_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install.sh
+          "$SCC_INSTALL_DIR/scc" --version
+          "$SCC_INSTALL_DIR/scc" --help > /dev/null
+
   bench-250k:
     runs-on: ubuntu-latest
     # Independent of `test`: a green PR used to wait for the full test job

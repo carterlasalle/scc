@@ -1,0 +1,41 @@
+{
+  "name": "@carterlasalle/scc",
+  "version": "0.2.6",
+  "description": "System Context Compiler — compile a repository into an evidence-backed system model and emit task-specific context packs for coding agents (MCP server included).",
+  "license": "MIT",
+  "bin": {
+    "scc": "bin/scc.js"
+  },
+  "files": [
+    "bin/scc.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/carterlasalle/scc.git",
+    "directory": "npm/cli"
+  },
+  "homepage": "https://github.com/carterlasalle/scc#readme",
+  "bugs": {
+    "url": "https://github.com/carterlasalle/scc/issues"
+  },
+  "keywords": [
+    "scc",
+    "system-context",
+    "context-engineering",
+    "coding-agents",
+    "mcp",
+    "tree-sitter"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "optionalDependencies": {
+    "@carterlasalle/scc-darwin-arm64": "0.2.6",
+    "@carterlasalle/scc-linux-x64": "0.2.6"
+  }
+}

@@ -23,18 +23,30 @@ version = "0.2.6"
 edition = "2021"
 # trace:exempt reason=internal-detail
 license = "MIT"
+# trace:exempt reason=package-metadata
+authors = ["Carter LaSalle <carterlasalle@users.noreply.github.com>"]
+# trace:exempt reason=package-metadata
+repository = "https://github.com/carterlasalle/scc"
+# trace:exempt reason=package-metadata
+homepage = "https://github.com/carterlasalle/scc#readme"
+# trace:exempt reason=package-metadata
+keywords = ["ai-agents", "context-engineering", "code-intelligence", "mcp", "tree-sitter"]
+# trace:exempt reason=package-metadata
+categories = ["development-tools", "command-line-utilities"]
 
 [workspace.dependencies]
-# trace:exempt reason=internal-detail
-scc-core = { path = "crates/scc-core" }
-# trace:exempt reason=internal-detail
-scc-store = { path = "crates/scc-store" }
-# trace:exempt reason=internal-detail
-scc-indexer = { path = "crates/scc-indexer" }
-# trace:exempt reason=internal-detail
-scc-graph = { path = "crates/scc-graph" }
-# trace:exempt reason=internal-detail
-scc-context = { path = "crates/scc-context" }
+# `version` pins below are crates.io requirements (contrib/publish-crates.sh
+# asserts path deps carry the workspace version); new engine/plugin crates
+# stay path-only until published.
+scc-core = { path = "crates/scc-core", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-store = { path = "crates/scc-store", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-indexer = { path = "crates/scc-indexer", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-graph = { path = "crates/scc-graph", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-context = { path = "crates/scc-context", version = "0.2.6" }
 # trace:exempt reason=internal-detail
 scc-api = { path = "crates/scc-api" }
 # trace:exempt reason=internal-detail

@@ -327,3 +327,9 @@ title = "Web viewer, SCC-native diagram, and Snapcompact bitmap export"
 
 [work."WORK-SI-JQ5F6A01"]
 title = "SCC universal engine facade"
+[work."WORK-SCC-DISTRIBUTION"]
+title = "Distribution: working install path, honest install docs, detected license, community health"
+status = "active"
+origin.source = "new_feature"
+origin.intent = "Make SCC installable and legible to someone who has never heard of it: a checksum-verifying installer (scripts/install.sh) with CI coverage, install documentation that matches the published registries (the README previously told users to run `npm install -g scc`, which installs an unrelated 2013 SeaJS tool, and referenced an unpublished `@scc/sdk`), a LICENSE file GitHub can detect as MIT, and the community-health files (code of conduct, issue forms, PR template) that gate directory and contributor onboarding. No compiler behavior changes."
+origin.session = "default"

@@ -8,11 +8,16 @@ and benchmarks.
 
 ```bash
 git clone https://github.com/carterlasalle/scc.git
-cd system_ir
+cd scc
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace -- -D warnings   # CI runs this as a hard gate
 ```
+
+Contributors do not need the installer — a source build is the working
+checkout. The installer in `scripts/install.sh` exists for users; if you touch
+it, CI runs it end-to-end (see the `install-smoke` job), and
+[docs/INSTALL.md](docs/INSTALL.md) is the user-facing reference.
 
 Prerequisites:
 

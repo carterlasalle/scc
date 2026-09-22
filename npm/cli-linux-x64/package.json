@@ -1,0 +1,32 @@
+{
+  "name": "@carterlasalle/scc-linux-x64",
+  "version": "0.2.6",
+  "description": "The scc binary for Linux x64 — installed automatically by @carterlasalle/scc.",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/scc",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/carterlasalle/scc.git",
+    "directory": "npm/cli-linux-x64"
+  },
+  "homepage": "https://github.com/carterlasalle/scc#readme",
+  "keywords": [
+    "scc",
+    "system-context",
+    "coding-agents",
+    "mcp"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

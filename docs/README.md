@@ -1,3 +1,4 @@
+<!-- trace:v1 id=doc.scc-docs-index type=document work=WORK-SCC-DISTRIBUTION -->
 # System Context Compiler (SCC)
 
 **Status:** Product/engineering specification package  
@@ -43,6 +44,7 @@ source + config + infra + runtime + intent
 
 ## Repository contents
 
+- `docs/INSTALL.md`
 - `docs/PRD.md`
 - `docs/SYSTEM_DESIGN.md`
 - `docs/SYSTEM_IR_SCHEMA.md`

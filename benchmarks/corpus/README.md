@@ -1,3 +1,4 @@
+<!-- trace:v1 id=doc.scc-benchmark-corpus type=document work=WORK-SCC-DISTRIBUTION -->
 # SCC Wave 8 Corpus — 20 real repositories
 
 Real public repositories used for external validation of the SCC startup atlas.
@@ -50,7 +51,7 @@ Notes:
 ## Re-clone instructions
 
 ```bash
-# from the repo root (system_ir)
+# from the repo root (scc)
 mkdir -p benchmarks/corpus
 git clone --depth 1 https://github.com/fastapi/fastapi.git benchmarks/corpus/fastapi
 git clone --depth 1 https://github.com/pallets/flask.git benchmarks/corpus/flask
