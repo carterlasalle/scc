@@ -632,3 +632,62 @@ fn test_listen_addr() -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral");
     listener.local_addr().expect("local_addr").to_string()
 }
+
+// DoD 45: transports implement nothing. `httpd.rs` and `mcp.rs` must not
+// name engine implementation types or call store-write / ranking-math
+// entrypoints directly — they parse, dispatch into the operation registry
+// (`scc_engine::invoke`) or the typed engine namespaces via commands, and
+// render. `commands.rs` is the sanctioned CLI-client layer (typed engine
+// calls + invoke + terminal rendering), so it is out of scope here.
+#[test]
+// trace:v1 id=test.crates-scc-cli-tests-interfaces.transports-implement-nothing work=WORK-SI-MMMJA4G6 verifies=REQ-SI-503JSBGP
+fn transports_implement_nothing() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for file in ["src/httpd.rs", "src/mcp.rs"] {
+        let text = std::fs::read_to_string(root.join(file)).unwrap();
+        for banned in [
+            "ContextCompiler",
+            "SystemRanker",
+            "insert_entity",
+            "insert_relationship",
+            "insert_evidence",
+            "final_importance",
+            "build_surface",
+            "open_engine",
+            "inference::rankers",
+        ] {
+            assert!(
+                !text.contains(banned),
+                "{file} must not reference engine internals ({banned}): transports dispatch via invoke"
+            );
+        }
+    }
+    // Every invoke target named in the CLI crate must be a registered op.
+    let cli = std::fs::read_to_string(root.join("src/commands.rs")).unwrap()
+        + &std::fs::read_to_string(root.join("src/httpd.rs")).unwrap()
+        + &std::fs::read_to_string(root.join("src/mcp.rs")).unwrap();
+    let mut targets: Vec<String> = Vec::new();
+    let mut pos = 0;
+    while let Some(i) = cli[pos..].find("invoke(") {
+        let seg = &cli[pos + i..];
+        if let Some(q1) = seg.find('"') {
+            let rest = &seg[q1 + 1..];
+            if let Some(q2) = rest.find('"') {
+                let op: String = rest[..q2].to_string();
+                if op.contains('.') {
+                    targets.push(op);
+                }
+            }
+        }
+        pos += i + 7;
+    }
+    targets.sort();
+    targets.dedup();
+    assert!(!targets.is_empty(), "expected invoke targets in the CLI crate");
+    for op in &targets {
+        assert!(
+            scc_engine::ops::OPERATIONS.iter().any(|d| d.id == op),
+            "CLI invokes unregistered operation '{op}' (see `scc operations`)"
+        );
+    }
+}

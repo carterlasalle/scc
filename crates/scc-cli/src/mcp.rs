@@ -165,7 +165,7 @@ fn tools() -> Vec<Tool> {
                 "type": "object",
                 "properties": {
                     "files": {"type": "array", "items": {"type": "string"}, "description": "Repository-relative file paths or scc:// content handles"},
-                    "goal": {"type": "string", "description": "Task goal; resolves to the task-matched files (build_surface Task mode)"},
+                    "goal": {"type": "string", "description": "Task goal; resolves to the task-matched files"},
                     "token_budget": {"type": "integer", "description": "Optional token budget (default context.structural_source, 6000)"}
                 }
             }),
