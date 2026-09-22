@@ -13,6 +13,9 @@
 #   3. .dockerignore does not exclude it.
 #
 #   scripts/docker_context_test.sh
+#
+# Portable: awk + shell builtins only (no sed backrefs — the sandbox sed
+# shim rejects `"` in patterns; BSD sed wants BRE while GNU wants ERE).
 
 set -eu
 cd "$(dirname "$0")/.."
@@ -27,31 +30,45 @@ fail() {
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT INT TERM
 
-grep -rhn --include='*.rs' -o 'include_\(str\|bytes\)!("[^"]*")' crates/ |
-    sed -E 's/.*\("([^"]*)"\)/\1/' | sort -u > "$tmp"
+# Emit "source-file bare-path" pairs via awk: split each grep -H line at the
+# first ':' (source file), then strip to the quoted include path.
+grep -r --include='*.rs' -H -o 'include_\(str\|bytes\)!("[^"]*")' crates/ |
+    awk -F: '{ src=$1; sub(/^[^"]*"/, "", $0); sub(/".*$/, "", $0); if ($0 != "plugin_omp.rs") print src, $0 }' |
+    sort -u > "$tmp"
 
 [ -s "$tmp" ] || fail "found no include_str!/include_bytes! paths to check"
 
-builder=$(sed -n '/AS builder/,/^FROM /p' Dockerfile)
+builder=$(grep -A100 'AS builder' Dockerfile | grep -B100 '^FROM ' | grep '^COPY ' || true)
 [ -n "$builder" ] || fail "no builder stage found in Dockerfile"
 
 checked=0
-while IFS= read -r rel; do
-    case "$rel" in
-        plugin_omp.rs) continue ;; # a false positive from the grep above
+while read -r src_file rel; do
+
+    # Resolve the include against its own source file's directory: the path
+    # is relative to the file that contains it (e.g. plugin.wit from
+    # crates/scc-plugin-api/src/lib.rs). Upward-walk past any ../ segments.
+    dir=${src_file%/*}
+    while :; do
+        case "$rel" in
+            # %/* sticks at the top level (no slash left), so empty dir
+            # explicitly once dirname would return "." (the repo root).
+            ../*) rel=${rel#../}; case "$dir" in */*) dir=${dir%/*};; *) dir=;; esac ;;
+            *) break ;;
+        esac
+    done
+    full="$dir/$rel"; full=${full#/}
+    [ -f "$full" ] || fail "embedded path $rel (from $src_file) missing at $full"
+    # Resolved paths start at crates/ or plugins/ — COPYed as whole units.
+    top=${full%%/*}
+
+    # the builder stage copies that directory
+    case "$builder" in
+        *" $top"*|*" $top/"*) ;;
+        *) fail "Dockerfile builder stage does not COPY $top/ (needed by $rel from $src_file)" ;;
     esac
-    top=$(printf '%s' "$rel" | sed -E 's|^(\.\./)+||' | cut -d/ -f1)
 
-    # 1. exists somewhere under that top-level directory
-    found=$(find "$top" -type f -name "$(basename "$rel")" 2>/dev/null | head -1)
-    [ -n "$found" ] || fail "embedded path $rel does not exist under $top/"
-
-    # 2. the builder stage copies that directory
-    printf '%s' "$builder" | grep -qE "^COPY .*[[:space:]]${top}([[:space:]]|/|$)" ||
-        fail "Dockerfile builder stage does not COPY $top/ (needed by $rel)"
-
-    # 3. .dockerignore does not exclude it
-    if [ -f .dockerignore ] && grep -qE "^${top}/?$|^${top}/\*\*$" .dockerignore; then
+    # .dockerignore does not exclude it
+    if [ -f .dockerignore ] && { grep -qx "$top" .dockerignore || grep -qx "$top/" .dockerignore; }; then
         fail ".dockerignore excludes $top/, which $rel needs"
     fi
 

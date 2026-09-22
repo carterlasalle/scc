@@ -150,7 +150,7 @@ impl PluginManifest {
                     "wasm" => PluginRuntime::Wasm,
                     _ => PluginRuntime::Process,
                 },
-                ("extensions", k) => m.extensions.push(parse_extension(k, &v)?),
+                ("extensions", k) => m.extensions.push(parse_extension(k, v)?),
                 ("permissions", key) => {
                     let perm = match key {
                         "repo_read" => Permission::RepoRead,
@@ -241,6 +241,15 @@ fn parse_extension(key: &str, value: &str) -> Result<ExtensionRegistration, Stri
     Ok(reg)
 }
 
+/// WIT interface definition for the WASM Component Model host (spec §14).
+/// Checked in as the versioned ABI contract: any runtime implementing this
+/// world (wasmtime-based or otherwise) hosts `scc-plugin.wit` plugins.
+/// The JSON shapes (`PluginRequest`/`PluginResponse`) are identical to the
+/// process-plugin wire protocol, so a plugin written against these schemas
+/// runs on either runtime unchanged.
+// trace:exempt reason=internal-detail
+pub const PLUGIN_WIT: &str = include_str!("plugin.wit");
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -282,11 +291,3 @@ mod tests {
     }
 }
 
-/// WIT interface definition for the WASM Component Model host (spec §14).
-/// Checked in as the versioned ABI contract: any runtime implementing this
-/// world (wasmtime-based or otherwise) hosts `scc-plugin.wit` plugins.
-/// The JSON shapes (`PluginRequest`/`PluginResponse`) are identical to the
-/// process-plugin wire protocol, so a plugin written against these schemas
-/// runs on either runtime unchanged.
-// trace:exempt reason=internal-detail
-pub const PLUGIN_WIT: &str = include_str!("plugin.wit");
