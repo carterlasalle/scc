@@ -27,6 +27,7 @@ prod = calc.multiply(3, 4)
 """
 
 
+# trace:exempt reason=unit-test
 def resolve_scc_bin():
     from_env = os.environ.get("SCC_BIN")
     if from_env:
@@ -40,6 +41,7 @@ BIN = resolve_scc_bin()
 # trace:v1 id=test.scc.sdk.python verifies=REQ-SCC-IR exercises=impl.scc.sdk.python
 @unittest.skipUnless(BIN, "scc binary not found (set SCC_BIN or add scc to PATH)")
 class TestSCCSDK(unittest.TestCase):
+    # trace:exempt reason=unit-test
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp(prefix="scc-sdk-py-")
@@ -49,14 +51,21 @@ class TestSCCSDK(unittest.TestCase):
         cls.scc = SCC(bin=BIN, cwd=cls.tmp)
         cls.scc.index()
 
+    # trace:exempt reason=unit-test
     @classmethod
     def tearDownClass(cls):
+        try:
+            cls.scc.close()
+        except Exception:
+            pass
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
+    # trace:exempt reason=unit-test
     def test_index_returns_ok(self):
         result = self.scc.index()
         self.assertEqual(result, {"ok": True})
 
+    # trace:exempt reason=unit-test
     def test_system_overview_content_identifies_repository(self):
         pack = self.scc.systemOverview()
         self.assertEqual(pack["kind"], "overview")
@@ -83,23 +92,27 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("Explicit files: a.py, b.py", artifact["pack"]["content"])
         self.assertIn("Explicit symbols: add", artifact["pack"]["content"])
 
+    # trace:exempt reason=unit-test
     def test_component_context_resolves_component(self):
         pack = self.scc.componentContext("root")
         self.assertEqual(pack["kind"], "component")
         self.assertTrue(pack["entity_ids"])
         self.assertIn("RESPONSIBILITY", pack["content"])
 
+    # trace:exempt reason=unit-test
     def test_flow_context_resolves_flow(self):
         pack = self.scc.flowContext("architecture")
         self.assertEqual(pack["kind"], "flow")
         self.assertTrue(pack["entity_ids"])
         self.assertIn("STEPS", pack["content"])
 
+    # trace:exempt reason=unit-test
     def test_impact_context_returns_impact_pack(self):
         pack = self.scc.impactContext(files=["a.py"], symbols=["add"])
         self.assertEqual(pack["kind"], "impact")
         self.assertIn("RISK", pack["content"])
 
+    # trace:exempt reason=unit-test
     def test_verify_context_content_reports_freshness(self):
         pack = self.scc.verifyContext()
         self.assertEqual(pack["kind"], "verify")
@@ -161,6 +174,7 @@ class TestSCCSDK(unittest.TestCase):
         self.assertEqual(sdk_artifact["pack"]["kind"], "task")
         self.assertIn("Goal: transcript", sdk_artifact["pack"]["content"])
 
+    # trace:exempt reason=unit-test
     def test_nonzero_exit_raises_scc_error(self):
         fake_bin = Path(self.tmp) / "fake-scc"
         fake_bin.write_text("#!/bin/sh\necho 'boom: exploded' >&2\nexit 3\n")

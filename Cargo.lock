@@ -1619,6 +1619,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "scc-ffi"
+version = "0.2.6"
+dependencies = [
+ "scc-api",
+ "scc-engine",
+ "scc-indexer",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "scc-graph"
 version = "0.2.6"
 dependencies = [

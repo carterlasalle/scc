@@ -279,13 +279,13 @@ pub fn serve_stdio(root: &Path) -> crate::Result<()> {
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-cli-src-mcp.call-tool work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 fn call_tool(root: &Path, name: &str, args: &serde_json::Value) -> crate::Result<String> {
+    // Curated MCP surface stays (10 semantic tools); DERIVATION routes into
+    // the operation registry — same engine, same semantics as every other
+    // transport. Text extraction below (content/text fields) is rendering.
     let store = crate::open_store(root)?;
     if !store.snapshot_status()?.is_some() {
         return Ok("# NOT INDEXED\nRun `scc index` before asking for system context.".to_string());
     }
-    let config = crate::load_config(root)?;
-    let stale = crate::stale_paths(&store)?;
-    let comp = crate::compiler(&store, &config, stale)?;
 
     let str_arg = |k: &str| -> String {
         args.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string()
@@ -300,17 +300,20 @@ fn call_tool(root: &Path, name: &str, args: &serde_json::Value) -> crate::Result
             })
             .unwrap_or_default()
     };
+    let invoke = |op: &str, input: serde_json::Value| -> crate::Result<serde_json::Value> {
+        scc_engine::invoke(root, op, input).map_err(|e| crate::CliError::Other(e.to_string()))
+    };
+    let pack_text = |v: &serde_json::Value| -> String {
+        v.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string()
+    };
+
 
     match name {
-        "system_overview" => Ok(comp.ctx().system_overview().content),
+        "system_overview" => Ok(pack_text(&invoke("context.overview", serde_json::json!({}))?)),
         "system_atlas" => {
             let budget = args.get("token_budget").and_then(|b| b.as_u64()).map(|b| b as usize);
             let full = args.get("scope").and_then(|s| s.as_str()).map(|s| s == "full").unwrap_or(false);
-            if full {
-                Ok(comp.ctx().system_atlas_scoped(budget, scc_context::atlas::AtlasScope::Full, false).content)
-            } else {
-                Ok(comp.ctx().system_atlas(budget).content)
-            }
+            Ok(pack_text(&invoke("context.atlas", serde_json::json!({"budget": budget, "full": full}))?))
         }
         "task_context" => {
             let goal = str_arg("goal");
@@ -321,21 +324,18 @@ fn call_tool(root: &Path, name: &str, args: &serde_json::Value) -> crate::Result
                 .get("token_budget")
                 .and_then(|v| v.as_u64())
                 .map(|b| b as usize);
-            // Transport parity: THE one complete task artifact — the same
-            // builder as CLI text/JSON and HTTP, so MCP gets the surface
-            // delta too (pack-only responses were a transport downgrade).
-            let artifact = crate::commands::build_task_context(
-                root,
-                &goal,
-                &arr_arg("files"),
-                &arr_arg("symbols"),
-                budget,
-                false,
-            )?;
-            if artifact.delta.is_empty() {
-                Ok(artifact.pack.content)
+            // Transport parity: THE one complete task artifact via invoke.
+            let out = invoke("context.task", serde_json::json!({
+                "goal": goal, "files": arr_arg("files"),
+                "symbols": arr_arg("symbols"), "budget": budget, "hook": false,
+            }))?;
+            let pack = out.get("pack").cloned().unwrap_or(serde_json::json!({}));
+            let delta = out.get("delta").and_then(|d| d.as_str()).unwrap_or("");
+            let content = pack_text(&pack);
+            if delta.is_empty() {
+                Ok(content)
             } else {
-                Ok(format!("{}\n{}", artifact.pack.content, artifact.delta))
+                Ok(format!("{content}\n{delta}"))
             }
         }
         "component_context" => {
@@ -343,94 +343,46 @@ fn call_tool(root: &Path, name: &str, args: &serde_json::Value) -> crate::Result
             if id.is_empty() {
                 return Ok("component_context requires a `component` id or name.".to_string());
             }
-            Ok(comp.ctx().component_context(&id).content)
+            Ok(pack_text(&invoke("context.component", serde_json::json!({"id": id}))?))
         }
         "flow_context" => {
             let id = str_arg("flow");
             if id.is_empty() {
                 return Ok("flow_context requires a `flow` id or name.".to_string());
             }
-            Ok(comp.ctx().flow_context(&id).content)
+            Ok(pack_text(&invoke("context.flow", serde_json::json!({"id": id}))?))
         }
         "impact_context" => {
             let diff = str_arg("diff");
-            Ok(comp
-                .ctx()
-                .impact_context(&arr_arg("files"), &arr_arg("symbols"), if diff.is_empty() { None } else { Some(&diff) })
-                .content)
+            Ok(pack_text(&invoke("context.impact", serde_json::json!({
+                "files": arr_arg("files"), "symbols": arr_arg("symbols"),
+                "diff": if diff.is_empty() { serde_json::Value::Null } else { serde_json::json!(diff) },
+            }))?))
         }
-        "verify_context" => Ok(comp.ctx().verify_context().content),
+        "verify_context" => Ok(pack_text(&invoke("context.verify", serde_json::json!({}))?)),
         "system_context" => {
             let budget_tokens = args
                 .get("token_budget")
                 .and_then(|b| b.as_u64())
                 .map(|b| b as usize);
-            // Transport parity: THE shared allocator (same as CLI/HTTP) —
-            // None selects the default total and STILL adapts; no local
-            // 13:7 formula survives here.
-            let budget = scc_context::startup::allocate_startup_budget(&comp.ctx(), budget_tokens);
-            let ctx = comp.ctx();
-            let startup = scc_context::startup::build_startup(
-                &ctx,
-                &budget,
-                scc_context::startup::RENDERER_VERSION,
-            );
-            // Ledger parity with CLI `context startup`: record what THIS
-            // transport just showed, or task deltas for MCP-only agents
-            // re-inject already-visible APIs.
-            let ledger_store = scc_context::context_ledger::ContextLedgerStore::new(ctx.store);
-            let mut led = ledger_store.load();
-            let (syms, files, comps, flows) =
-                scc_context::startup::visible_ids_from_startup(&ctx, &startup);
-            led.visible_entities.extend(syms.iter().cloned());
-            led.visible_symbols.extend(syms);
-            led.visible_files.extend(files);
-            led.visible_components.extend(comps);
-            led.visible_flows.extend(flows);
-            ledger_store.save(&led);
-            Ok(scc_context::startup::render_startup(&startup))
+            // Transport parity via the registry: engine startup derives +
+            // records the ledger (same as CLI `context startup`).
+            let out = invoke("context.startup", serde_json::json!({"budget": budget_tokens}))?;
+            Ok(out.as_str().unwrap_or("").to_string())
         }
         "surface_map" => {
             let goal = str_arg("goal");
             let tokens = args
                 .get("token_budget")
                 .and_then(|v| v.as_u64())
-                .map(|b| b as usize)
-                .unwrap_or(scc_core::ContextBudget::default().surface);
-            let ctx = comp.ctx();
-            // One authoritative pipeline: `build_surface` in Global or Task
-            // mode — the same service the CLI (`scc surface`) runs, with
-            // the SAME semantic-scorer resolution: task mode wires the
-            // embed_cli rankers when inference is enabled and the remote
-            // policy permits (fail closed), global mode has no goal to
-            // score against. Transport cannot change ranking quality.
-            let (scorer, _reranker) = if goal.is_empty() {
-                (None, None)
-            } else {
-                crate::embed_cli::rankers(ctx.store, &config, &goal)
-            };
-            let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
-                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-            let request = scc_context::surface::SurfaceRequest {
-                mode: if goal.is_empty() {
-                    scc_context::surface::SurfaceMode::Global
-                } else {
-                    scc_context::surface::SurfaceMode::Task {
-                        goal: &goal,
-                        visible: None,
-                    }
-                },
-                budget: tokens,
-                explain: false,
-                policy: scc_context::surface::SurfacePolicy::defaults(tokens),
-                semantic,
-            };
-            let result = scc_context::surface::build_surface(&ctx, request);
-            if goal.is_empty() {
-                Ok(result.text)
-            } else {
-                Ok(crate::commands::task_surface_text(&goal, &result))
-            }
+                .map(|b| b as usize);
+            // Registry derivation (lexical scorer; same as inference-disabled
+            // CLI — remote-model wiring stays transport-side via engine API).
+            let out = invoke("surface.build", serde_json::json!({
+                "task": if goal.is_empty() { serde_json::Value::Null } else { serde_json::json!(goal) },
+                "budget": tokens, "explain": false,
+            }))?;
+            Ok(out.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
         }
         "structural_source" => {
             let goal = str_arg("goal");

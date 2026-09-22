@@ -122,10 +122,9 @@ fn route(
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed; POST /v1/index first".into());
             }
-            let config = crate::load_config(root)?;
-            let stale = crate::stale_paths(&store)?;
-            let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().system_overview())?))
+            let output = scc_engine::invoke(root, "context.overview", serde_json::json!({}))
+                .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("POST", "/v1/context/task") => {
             let req: serde_json::Value = match serde_json::from_str(body) {
@@ -192,10 +191,9 @@ fn route(
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed".into());
             }
-            let config = crate::load_config(root)?;
-            let stale = crate::stale_paths(&store)?;
-            let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().system_atlas(None))?))
+            let output = scc_engine::invoke(root, "context.atlas", serde_json::json!({}))
+                .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("GET", p) if p.starts_with("/v1/components/") => {
             let id = p.trim_start_matches("/v1/components/");
@@ -255,7 +253,7 @@ fn route(
             Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().verify_context())?))
         }
         ("POST", "/v1/index") => {
-            crate::commands::cmd_index(root, true)?;
+            scc_engine::invoke(root, "index.full", serde_json::json!({})).map_err(|e| crate::CliError::Other(e.to_string()))?;
             let store = crate::open_store(root)?;
             let status = store.snapshot_status()?;
             Ok((
@@ -289,9 +287,50 @@ fn route(
             }
         }
         ("POST", "/v1/runtime/traces") => {
-            let store = crate::open_store(root)?;
-            ingest_runtime(&store, body)?;
+            let input: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::json!({}));
+            // Body shapes: OTLP/resourceSpans string OR {body} envelope.
+            let payload = input.get("body").and_then(|b| b.as_str()).unwrap_or(body);
+            scc_engine::invoke(root, "runtime.ingest", serde_json::json!({"body": payload})).map_err(|e| crate::CliError::Other(e.to_string()))?;
             Ok((202, "application/json".to_string(), serde_json::to_string(&serde_json::json!({"status": "accepted"}))?))
+        }
+        ("GET", "/v1/operations") => {
+            let ids: Vec<serde_json::Value> = scc_engine::ops::OPERATIONS
+                .iter()
+                .map(|d| serde_json::json!({
+                    "id": d.id,
+                    "description": d.description,
+                    "mutation": format!("{:?}", d.mutation),
+                    "streaming": d.streaming,
+                }))
+                .collect();
+            Ok((200, "application/json".to_string(), serde_json::to_string(&serde_json::json!({
+                "api_version": scc_api::API_VERSION,
+                "scc_version": env!("CARGO_PKG_VERSION"),
+                "operations": ids,
+            }))?))
+        }
+        ("POST", p) if p.starts_with("/v1/operations/") => {
+            let id = p.trim_start_matches("/v1/operations/");
+            if scc_engine::ops::describe(id).is_none() {
+                return json_err(404, format!("unknown operation '{id}' (see GET /v1/operations)"));
+            }
+            let input: serde_json::Value = if body.trim().is_empty() {
+                serde_json::json!({})
+            } else {
+                match serde_json::from_str(body) {
+                    Ok(v) => v,
+                    Err(_) => return json_err(400, "invalid JSON body".to_string()),
+                }
+            };
+            match scc_engine::invoke(root, id, input) {
+                Ok(output) => Ok((200, "application/json".to_string(), serde_json::to_string(&serde_json::json!({
+                    "operation": id,
+                    "api_version": scc_api::API_VERSION,
+                    "scc_version": env!("CARGO_PKG_VERSION"),
+                    "output": output,
+                }))?)),
+                Err(e) => json_err(500, e.to_string()),
+            }
         }
         ("GET", "/healthz") => Ok((200, "text/plain".to_string(), "ok".into())),
         ("GET", "/") | ("GET", "/components") | ("GET", "/flows") | ("GET", "/diagram")
@@ -340,11 +379,11 @@ fn json_arr(v: &serde_json::Value, key: &str) -> Vec<String> {
 pub fn ingest_runtime(store: &Store, body: &str) -> crate::Result<()> {
     if body.contains("resourceSpans") {
         scc_indexer::runtime::ingest_otlp_json(store, body)
-            .map_err(crate::CliError::Other)?;
+            .map_err(|e| crate::CliError::Other(e.to_string()))?;
         return Ok(());
     }
     scc_indexer::runtime::ingest_simple_edges(store, body)
-        .map_err(crate::CliError::Other)?;
+        .map_err(|e| crate::CliError::Other(e.to_string()))?;
     Ok(())
 }
 

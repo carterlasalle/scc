@@ -1,12 +1,13 @@
 /**
- * @scc/sdk — thin TypeScript SDK for the `scc` (System Context Compiler) CLI.
+ * @scc/sdk — structured TypeScript SDK for the SCC engine (`scc rpc --stdio`).
  *
- * Every method shells out to the `scc` binary with `--root <cwd>` and `--json`,
- * and parses the emitted context pack. The binary is resolved from the `bin`
- * option, then the `SCC_BIN` environment variable, then `scc` on PATH.
+ * One persistent `scc rpc` child per `SCC` instance; every method speaks the
+ * operation registry (no CLI-text scraping). The binary is resolved from the
+ * `bin` option, then the `SCC_BIN` environment variable, then `scc` on PATH.
+ * `invoke()` reaches every registered operation, including plugin operations.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 // trace:v1 id=impl.scc.sdk.typescript work=WORK-SCC-014 satisfies=REQ-SCC-IR
 
@@ -79,63 +80,114 @@ export class SCC {
     return this.opts.cwd ?? process.cwd();
   }
 
+  private rpcProc: ChildProcess | null = null;
+  private rpcId = 1;
+  private rpcQueue: Promise<unknown> = Promise.resolve();
+
+  /** Lazily spawn the persistent `scc rpc --stdio` child. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.rpc work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
+  private rpc(): ChildProcess {
+    if (!this.rpcProc) {
+      const proc = spawn(this.bin, ["rpc", "--stdio"], {
+        cwd: this.cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      // Accumulate stderr for failure messages (the fake-bin test asserts
+      // the child's stderr surfaces on early exit).
+      const buf: string[] = [];
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        buf.push(chunk.toString());
+      });
+      (proc as unknown as { stderrBuf: string[] }).stderrBuf = buf;
+      // Don't hold the event loop: one-shot callers (and test runners)
+      // must exit without an explicit close().
+      proc.unref();
+      proc.on("error", () => {
+        this.rpcProc = null;
+      });
+      this.rpcProc = proc;
+    }
+    return this.rpcProc;
+  }
+
+  /** Terminate the RPC child. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.close work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
+  close(): void {
+    this.rpcProc?.kill();
+    this.rpcProc = null;
+  }
+
   /**
-   * Run `scc --root <cwd> <args>` and resolve with captured stdout/stderr.
-   * Rejects on spawn failure or non-zero exit (message = trimmed stderr).
+   * Call any registered engine operation (including plugin operations).
+   * Resolves with the operation's structured `output` verbatim.
    */
-  // trace:v1 id=impl.sdk-typescript-src-index-scc.run work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-  private run(args: string[]): Promise<{ stdout: string; stderr: string }> {
-    const { promise, resolve, reject } = Promise.withResolvers<{
-      stdout: string;
-      stderr: string;
-    }>();
-    const proc = spawn(this.bin, ["--root", this.cwd, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    proc.on("error", (err) => {
-      reject(new Error(`failed to spawn ${this.bin}: ${err.message}`));
-    });
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(new Error(stderr.trim() || `${this.bin} exited with code ${code}`));
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.invoke work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
+  async invoke<T = unknown>(operation: string, input: Record<string, unknown> = {}): Promise<T> {
+    // Serialize requests: one in-flight frame per process (line-delimited).
+    // trace:exempt reason=internal-detail
+    const run = async (): Promise<T> => {
+      const proc = this.rpc();
+      const id = this.rpcId++;
+      const frame = JSON.stringify({ id, operation, input }) + "\n";
+      const stdout = proc.stdout!;
+      const line: string = await new Promise((resolve, reject) => {
+        let buf = "";
+        // trace:exempt reason=internal-detail
+        const onData = (chunk: Buffer) => {
+          buf += chunk.toString();
+          const nl = buf.indexOf("\n");
+          if (nl >= 0) {
+            cleanup();
+            resolve(buf.slice(0, nl));
+          }
+        };
+        // trace:exempt reason=internal-detail
+        const onError = (err: Error) => {
+          cleanup();
+          reject(new Error(`failed to spawn ${this.bin}: ${err.message}`));
+        };
+        // trace:exempt reason=internal-detail
+        const onClose = () => {
+          cleanup();
+          const err = ((proc as unknown as { stderrBuf?: string[] }).stderrBuf ?? []).join("");
+          reject(new Error(err.trim() || `${this.bin} rpc exited`));
+        };
+        // trace:exempt reason=internal-detail
+        const cleanup = () => {
+          stdout.off("data", onData);
+          proc.off("error", onError);
+          proc.off("close", onClose);
+        };
+        stdout.on("data", onData);
+        proc.on("error", onError);
+        proc.on("close", onClose);
+        proc.stdin!.write(frame, (err) => {
+          if (err) {
+            cleanup();
+            reject(new Error(`${this.bin} rpc write failed: ${err.message}`));
+          }
+        });
+      });
+      let msg: { id: number; output?: T; error?: string };
+      try {
+        msg = JSON.parse(line) as typeof msg;
+      } catch {
+        throw new Error(`${this.bin} rpc invalid JSON: ${line.slice(0, 200)}`);
       }
-    });
-    return promise;
-  }
-
-  /** Run a command that emits a JSON context pack on stdout. */
-  // trace:v1 id=impl.sdk-typescript-src-index-scc.run-pack work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-  private async runPack(args: string[]): Promise<ContextPack> {
-    const { stdout } = await this.run(args);
-    return JSON.parse(stdout) as ContextPack;
-  }
-
-  /**
-   * Run a command that emits arbitrary JSON on stdout and resolve it as `T`.
-   * Used for commands whose JSON shape is not a flat ContextPack (e.g. the
-   * task artifact `{pack, delta, delta_ids}`) — never casts the artifact to
-   * a ContextPack.
-   */
-  // trace:v1 id=impl.sdk-typescript-src-index-scc.run-json work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-  private async runJson<T>(args: string[]): Promise<T> {
-    const { stdout } = await this.run(args);
-    return JSON.parse(stdout) as T;
+      if (msg.id !== id) throw new Error(`${this.bin} rpc id mismatch`);
+      if (msg.error !== undefined) throw new Error(msg.error);
+      return msg.output as T;
+    };
+    // Chain onto the queue so concurrent invoke() calls serialize frames.
+    const chained = this.rpcQueue.then(run, run);
+    this.rpcQueue = chained.then(() => undefined, () => undefined);
+    return chained;
   }
 
   /** Compile the system overview capsule. */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.system-overview work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async systemOverview(): Promise<ContextPack> {
-    return this.runPack(["overview", "--json"]);
+    return this.invoke<ContextPack>("context.overview", {});
   }
 
   /**
@@ -144,44 +196,34 @@ export class SCC {
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.task-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async taskContext(goal: string, opts?: TaskContextOptions): Promise<TaskContextArtifact> {
-    const args = ["context", "task", goal];
-    if (opts?.files && opts.files.length > 0) {
-      args.push("--files", opts.files.join(" "));
-    }
-    if (opts?.symbols && opts.symbols.length > 0) {
-      args.push("--symbols", opts.symbols.join(" "));
-    }
-    if (opts?.tokenBudget !== undefined) {
-      args.push("--budget", String(opts.tokenBudget));
-    }
-    args.push("--json");
-    return this.runJson<TaskContextArtifact>(args);
+    return this.invoke<TaskContextArtifact>("context.task", {
+      goal,
+      files: opts?.files ?? [],
+      symbols: opts?.symbols ?? [],
+      budget: opts?.tokenBudget,
+      hook: false,
+    });
   }
 
   /** Compile the context pack for one component (by id or name). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.component-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async componentContext(id: string): Promise<ContextPack> {
-    return this.runPack(["context", "component", id, "--json"]);
+    return this.invoke<ContextPack>("context.component", { id });
   }
 
   /** Compile the context pack for one flow (by id or name). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.flow-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async flowContext(id: string): Promise<ContextPack> {
-    return this.runPack(["context", "flow", id, "--json"]);
+    return this.invoke<ContextPack>("context.flow", { id });
   }
 
   /** Compile an impact analysis pack for a set of files/symbols. */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.impact-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async impactContext(files?: string[], symbols?: string[]): Promise<ContextPack> {
-    const args: string[] = ["impact"];
-    if (files && files.length > 0) {
-      args.push(...files);
-    }
-    if (symbols && symbols.length > 0) {
-      args.push("--symbols", symbols.join(" "));
-    }
-    args.push("--json");
-    return this.runPack(args);
+    return this.invoke<ContextPack>("context.impact", {
+      files: files ?? [],
+      symbols: symbols ?? [],
+    });
   }
 
   /**
@@ -190,19 +232,7 @@ export class SCC {
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.verify-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async verifyContext(): Promise<ContextPack> {
-    const { stdout } = await this.run(["verify"]);
-    const revision = stdout.match(/^Revision:\s*(.+)$/m)?.[1]?.trim() ?? "";
-    return {
-      kind: "verify",
-      repository_revision: revision,
-      content: stdout,
-      entity_ids: [],
-      evidence_summary: {},
-      warnings: [],
-      tokens: 0,
-      budget: 0,
-      truncated: false,
-    };
+    return this.invoke<ContextPack>("context.verify", {});
   }
 
   /**
@@ -212,22 +242,10 @@ export class SCC {
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.context-startup work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async contextStartup(budget?: number): Promise<ContextPack> {
-    const args = ["context", "startup"];
-    if (budget !== undefined) {
-      args.push("--budget", String(budget));
-    }
-    const { stdout } = await this.run(args);
-    return {
-      kind: "startup",
-      repository_revision: "",
-      content: stdout,
-      entity_ids: [],
-      evidence_summary: {},
-      warnings: [],
-      tokens: 0,
-      budget: budget ?? 0,
-      truncated: false,
-    };
+    const text = await this.invoke<string>("context.startup", { budget });
+    return { kind: "startup", repository_revision: "", content: text,
+      entity_ids: [], evidence_summary: {}, warnings: [],
+      tokens: 0, budget: budget ?? 0, truncated: false };
   }
 
   /**
@@ -237,25 +255,11 @@ export class SCC {
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.surface-map work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async surfaceMap(goal?: string, budget?: number): Promise<ContextPack> {
-    const args: string[] = ["surface"];
-    if (goal) {
-      args.push("--task", goal);
-    }
-    if (budget !== undefined) {
-      args.push("--budget", String(budget));
-    }
-    const { stdout } = await this.run(args);
-    return {
-      kind: "surface",
-      repository_revision: "",
-      content: stdout,
-      entity_ids: [],
-      evidence_summary: {},
-      warnings: [],
-      tokens: 0,
-      budget: budget ?? 0,
-      truncated: false,
-    };
+    const out = await this.invoke<{ text: string; result: { rendered_ids: string[]; token_count: number } }>(
+      "surface.build", { task: goal ?? null, budget, explain: false });
+    return { kind: "surface", repository_revision: "", content: out.text,
+      entity_ids: out.result.rendered_ids, evidence_summary: {}, warnings: [],
+      tokens: out.result.token_count, budget: budget ?? 0, truncated: false };
   }
 
   /**
@@ -267,34 +271,18 @@ export class SCC {
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async structuralSource(files?: string[], goal?: string, budget?: number): Promise<ContextPack> {
-    const args: string[] = ["context", "structural"];
-    if (files && files.length > 0) {
-      args.push("--files", files.join(" "));
-    }
-    if (goal) {
-      args.push("--task", goal);
-    }
-    if (budget !== undefined) {
-      args.push("--budget", String(budget));
-    }
-    const { stdout } = await this.run(args);
-    return {
-      kind: "structural",
-      repository_revision: "",
-      content: stdout,
-      entity_ids: [],
-      evidence_summary: {},
-      warnings: [],
-      tokens: 0,
-      budget: budget ?? 0,
-      truncated: false,
-    };
+    const text = await this.invoke<string>("context.structural", {
+      files: files ?? [], task: goal ?? null, budget,
+    });
+    return { kind: "structural", repository_revision: "", content: text,
+      entity_ids: [], evidence_summary: {}, warnings: [],
+      tokens: 0, budget: budget ?? 0, truncated: false };
   }
 
   /** Index the repository (idempotent; incremental after the first run). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.index work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async index(): Promise<IndexResult> {
-    await this.run(["index"]);
+    await this.invoke("index.full", {});
     return { ok: true };
   }
 }

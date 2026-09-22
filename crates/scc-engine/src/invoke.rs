@@ -77,9 +77,120 @@ pub fn invoke(
             let req: scc_api::ExportRequest = serde_json::from_value(input).unwrap_or(scc_api::ExportRequest { format: "system-ir.json".into() });
             export_value(&store, root, &req.format)?
         }
-        "architecture.drift" => serde_json::to_value(drift_value(&store)?)?,
-        "integrity.invariants" | "architecture.invariants" => serde_json::to_value(invariants_value(&store)?)?,
+        "workspace.init" => {
+            let dir = crate::workspace::scc_dir(root);
+            std::fs::create_dir_all(&dir)?;
+            let cfg_path = crate::workspace::config_path(root);
+            if !cfg_path.exists() {
+                std::fs::write(&cfg_path, scc_indexer::Config::default_yaml())?;
+            }
+            crate::workspace::ensure_scc_ignored(root);
+            serde_json::json!({"initialized": dir.to_string_lossy(), "config": cfg_path.to_string_lossy()})
+        }
+        "workspace.state_path" => Value::String(crate::workspace::state_dir(root).to_string_lossy().into()),
+        "index.status" => {
+            let s = status_value(&store)?;
+            serde_json::to_value(&s)?
+        }
+        "resolution.run" => serde_json::to_value(crate::index::resolve_and_recompile(root)?)?,
+        "graph.recompile" => {
+            let r = crate::index::recompile(&store)?;
+            serde_json::json!({
+                "components": r.components,
+                "flows": r.flows,
+                "invariants": r.invariants,
+                "drift": r.drift,
+                "boundaries": r.boundaries,
+            })
+        },
+        "graph.entity.get" => {
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let all = store.all_entities()?;
+            serde_json::to_value(all.into_iter().find(|e| e.id == id))?
+        }
+        "architecture.drift" => serde_json::to_value(crate::misc::drift(&store)?)?,
+        "architecture.cochange" => {
+            let min = input.get("min_commits").and_then(|v| v.as_u64()).unwrap_or(2) as u32;
+            let (pairs, enriched) = crate::misc::cochange(root, min)?;
+            serde_json::json!({"pairs": pairs, "enriched": enriched})
+        }
+        "integrity.invariants" | "architecture.invariants" => serde_json::to_value(crate::misc::check_invariants(&store)?)?,
+        "integrity.ci" => {
+            let max = input.get("max_severity").and_then(|v| v.as_str()).unwrap_or("medium");
+            let violations = crate::misc::check_invariants(&store)?;
+            let (ok, lines) = crate::misc::ci_check(&store, &violations, max)?;
+            serde_json::json!({"ok": ok, "lines": lines})
+        }
         "integrations.list" => serde_json::to_value(crate::integrations::list(root)?)?,
+        "integrations.doctor" => {
+            let deep = input.get("deep").and_then(|v| v.as_bool()).unwrap_or(false);
+            let network = input.get("network").and_then(|v| v.as_bool()).unwrap_or(false);
+            serde_json::to_value(crate::integrations::doctor_report(&store, &config, root, deep, network)?)?
+        }
+        "lessons.add" => {
+            let text = input.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let (id, path) = crate::state::lessons_add(root, text)?;
+            serde_json::json!({"id": id, "path": path.to_string_lossy()})
+        }
+        "lessons.list" => {
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+            serde_json::to_value(crate::state::lessons_list(root, limit)?)?
+        }
+        "beads.list" => serde_json::to_value(crate::state::beads(root, 20)?)?,
+        "setup.claude" | "setup.detected" | "setup.codex" | "setup.opencode" | "setup.hermes" | "setup.omp" | "setup.pi" => {
+            serde_json::json!({"ok": false, "reason": "setup operations are CLI-local (file installation); no engine state involved"})
+        }
+        "snapshot.save" => {
+            let req: scc_api::SnapshotSaveRequest = serde_json::from_value(input)?;
+            serde_json::to_value(crate::misc::snapshot_save(root, &req.task, req.budget)?)?
+        }
+        "snapshot.get" => {
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::to_value(crate::snapshots::get(&store, id)?)?
+        }
+        "snapshot.diff" => {
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::to_value(crate::snapshots::diff(&store, id)?)?
+        }
+        "checkpoint.save" => serde_json::to_value(crate::checkpoint::capture(root)?)?,
+        "checkpoint.load" => serde_json::to_value(crate::checkpoint::load(root)?)?,
+        "system.stitch" => {
+            let members: Vec<std::path::PathBuf> = input.get("members")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|s| s.as_str().map(std::path::PathBuf::from)).collect())
+                .unwrap_or_default();
+            let (members, stitches) = crate::systems::stitch(&members)?;
+            serde_json::json!({"members": members.iter().map(|m| &m.repo_id).collect::<Vec<_>>(), "stitches": stitches})
+        }
+        "import.scip" | "import.ccg" | "import.gitnexus" | "import.tracelayer" | "import.beads" | "import.hindsight" | "import.cbm" => {
+            let format = operation.trim_start_matches("import.");
+            let file = input.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            let r = crate::state::import_evidence(root, format, file)?;
+            serde_json::json!({
+                "symbols": r.symbols,
+                "calls": r.calls,
+                "imports": r.imports,
+                "errors": r.errors,
+            })
+        }
+        "export.diagram" => serde_json::json!({"ok": false, "reason": "diagram rendering is CLI-local (viewer); use export.system_ir + render client-side"}),
+        "runtime.ingest" => {
+            let body = input.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            crate::state::ingest_runtime(root, body)?;
+            serde_json::json!({"status": "accepted"})
+        }
+        "runtime.status" => serde_json::to_value(crate::state::runtime_edges(root)?)?,
+        "runtime.reconcile" => serde_json::to_value(crate::state::reconcile(root)?)?,
+        "ranking.important" => {
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+            let task = input.get("task").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let component = input.get("component").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let (entries, tasked) = ctx.important(limit, component.as_deref(), task.as_deref())?;
+            serde_json::json!({"entries": entries, "tasked": tasked})
+        }
+        "ranking.global" | "ranking.task" | "ranking.symbols" | "ranking.entities" | "ranking.candidates" | "ranking.explain" => {
+            serde_json::json!({"ok": false, "reason": "fine-grained ranking stages land with the ranking-pipeline milestone; use surface.build + ranking.important today"})
+        }
         _ => return Err(crate::EngineError::Other(format!("unknown operation '{operation}' (see operations.list)"))),
     };
     Ok(out)
@@ -146,26 +257,7 @@ fn status_value(store: &scc_store::Store) -> crate::Result<Value> {
 }
 
 // trace:exempt reason=internal-detail
-fn drift_value(store: &scc_store::Store) -> crate::Result<Value> {
-    let findings = store.drift_findings(false)?;
-    Ok(findings.iter().map(|(id, kind, sev, msg, at)| {
-        serde_json::json!({"id": id, "kind": kind, "severity": sev, "message": msg, "created_at": at})
-    }).collect())
-}
-
 // trace:exempt reason=internal-detail
-fn invariants_value(store: &scc_store::Store) -> crate::Result<Value> {
-    let graph = scc_graph::RealityGraph::load(store)?;
-    let mut dangling = 0usize;
-    for r in graph.all_rels() {
-        let known = |id: &str| graph.entities.contains_key(id) || id.contains("/external_api/");
-        if !known(&r.subject) || !known(&r.object) {
-            dangling += 1;
-        }
-    }
-    Ok(serde_json::json!({ "dangling_relationships": dangling, "ok": dangling == 0 }))
-}
-
 // trace:exempt reason=internal-detail
 fn export_value(store: &scc_store::Store, root: &std::path::Path, format: &str) -> crate::Result<Value> {
     let ir = crate::exports::system_ir(store)?;

@@ -246,6 +246,20 @@ enum Commands {
     /// Run the MCP server on stdio
     Mcp,
 
+    /// Structured JSON-RPC over stdio (SDK subprocess mode; never CLI text)
+    Rpc {
+        /// Force stdio mode (today the only mode)
+        #[arg(long)]
+        stdio: bool,
+    },
+
+    /// List registered engine operations (introspection)
+    Operations {
+        /// Describe one operation in detail
+        #[arg(long)]
+        describe: Option<String>,
+    },
+
     /// Ingest runtime observations (POST /v1/runtime/traces body)
     Ingest {
         body: String,
@@ -881,6 +895,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Serve => commands::cmd_serve(&root),
         Commands::Mcp => commands::cmd_mcp(&root),
+        Commands::Rpc { stdio } => commands::cmd_rpc(&root, stdio),
+        Commands::Operations { describe } => commands::cmd_operations(describe.as_deref()),
         Commands::Ingest { body } => commands::cmd_ingest_runtime(&root, &body),
         Commands::Embed => scc_cli::embed_cli::cmd_embed(&root),
         Commands::Important { limit, component, task, json } => {

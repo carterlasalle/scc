@@ -250,20 +250,6 @@ pub fn cmd_important(
     Ok(())
 }
 
-/// Task-mode surface framing: replace the generic surface header with the
-/// task-personalized marker. `build_surface` renders the standard
-/// `SCC SYSTEM SURFACE MAP` header; the goal framing lives at the transport
-/// boundary (CLI + MCP emit the same text for the same request).
-// trace:exempt reason=internal-detail
-// trace:v1 id=impl.crates-scc-cli-src-commands.task-surface-text work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
-pub(crate) fn task_surface_text(goal: &str, result: &scc_core::SurfaceRenderResult) -> String {
-    let body = result
-        .text
-        .strip_prefix("SCC SYSTEM SURFACE MAP")
-        .unwrap_or(result.text.as_str());
-    format!("# SYSTEM SURFACE MAP (task-personalized: {goal}){body}")
-}
-
 /// `scc context structural --files <paths...> | --task "<goal>" [--budget N]` —
 /// the Structural Source product surface (fixwave Item 7): the per-file
 /// signature/structural representation of the requested files, or of the
@@ -1453,6 +1439,29 @@ pub fn cmd_view(root: &Path, port: Option<u16>, no_open: bool) -> crate::Result<
     Ok(())
 }
 
+/// `scc rpc --stdio`: structured JSON-RPC (SDK subprocess mode).
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-rpc work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_rpc(root: &Path, _stdio: bool) -> crate::Result<()> {
+    scc_engine::rpc::serve_stdio(root).map_err(engine_err)
+}
+
+/// `scc operations [--describe ID]`: introspection over the registry.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-operations work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_operations(describe: Option<&str>) -> crate::Result<()> {
+    if let Some(id) = describe {
+        match scc_engine::ops::describe(id) {
+            Some(d) => println!("{}", serde_json::to_string_pretty(&d)?),
+            None => println!("unknown operation '{id}' (see `scc operations`)"),
+        }
+        return Ok(());
+    }
+    println!("Operation                 Mutation  Stream  Description");
+    println!("----------------------------------------------------------------");
+    for d in scc_engine::ops::OPERATIONS {
+        println!("{:<26} {:<9} {:<7} {}", d.id, format!("{:?}", d.mutation), d.streaming, d.description);
+    }
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
 
@@ -1581,3 +1590,4 @@ mod tests {
         assert!(cmd_doctor(&root, true, false, false, false).unwrap(), "doctor --json must pass clean");
     }
 }
+

@@ -10,6 +10,7 @@ members = [
     "crates/scc-context",
     "crates/scc-api",
     "crates/scc-engine",
+    "crates/scc-ffi",
     "crates/scc-cli",
 ]
 
@@ -36,6 +37,8 @@ scc-context = { path = "crates/scc-context" }
 scc-api = { path = "crates/scc-api" }
 # trace:exempt reason=internal-detail
 scc-engine = { path = "crates/scc-engine" }
+# trace:exempt reason=internal-detail
+scc-ffi = { path = "crates/scc-ffi" }
 
 # trace:exempt reason=internal-detail
 serde = { version = "1", features = ["derive"] }

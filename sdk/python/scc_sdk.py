@@ -1,17 +1,21 @@
-"""Thin Python SDK for the ``scc`` (System Context Compiler) CLI.
+"""Structured Python SDK for the SCC engine (``scc rpc --stdio``).
 
-Every method shells out to the ``scc`` binary with ``--root <cwd>`` and
-``--json``, and parses the emitted context pack. The binary is resolved from
-the ``bin`` constructor argument, then the ``SCC_BIN`` environment variable,
-then ``scc`` on PATH. A non-zero exit raises :class:`SCCError` with the
-process's stderr.
+One persistent ``scc rpc`` child per :class:`SCC` instance; every method
+speaks the operation registry (no CLI-text scraping). The binary is resolved
+from the ``bin`` constructor argument, then the ``SCC_BIN`` environment
+variable, then ``scc`` on PATH. Transport errors raise :class:`SCCError`.
+
+``invoke(operation, input)`` reaches every registered operation — including
+plugin operations — without a typed wrapper.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import subprocess
+import threading
 from typing import Any
 
 # trace:v1 id=impl.scc.sdk.python work=WORK-SCC-014 satisfies=REQ-SCC-IR
@@ -29,31 +33,81 @@ class SCC:
     def __init__(self, bin: str | None = None, cwd: str | None = None) -> None:
         self._bin = bin or os.environ.get("SCC_BIN") or "scc"
         self._cwd = cwd or os.getcwd()
+        self._ids = itertools.count(1)
+        self._lock = threading.Lock()
+        self._proc: subprocess.Popen | None = None
 
-    # trace:v1 id=impl.sdk-python-scc-sdk-scc.run work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-    def _run(self, args: list[str]) -> subprocess.CompletedProcess:
-        proc = subprocess.run(
-            [self._bin, "--root", self._cwd, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            message = (
-                proc.stderr.strip() or f"{self._bin} exited with code {proc.returncode}"
-            )
-            raise SCCError(message)
-        return proc
+    # trace:exempt reason=internal-detail
+    def _rpc(self) -> subprocess.Popen:
+        """Lazily spawn the persistent ``scc rpc --stdio`` child."""
+        if self._proc is None:
+            try:
+                self._proc = subprocess.Popen(
+                    [self._bin, "rpc", "--stdio"],
+                    cwd=self._cwd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
+            except OSError as e:
+                raise SCCError(f"failed to spawn {self._bin}: {e}")
+        assert self._proc is not None
+        return self._proc
 
-    # trace:v1 id=impl.sdk-python-scc-sdk-scc.run-json work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-    def _run_json(self, args: list[str]) -> dict[str, Any]:
-        proc = self._run(args)
-        return json.loads(proc.stdout)
+    # trace:exempt reason=internal-detail
+    def close(self) -> None:
+        """Terminate the RPC child (also runs via :meth:`__del__`)."""
+        proc, self._proc = self._proc, None
+        if proc is not None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+
+    # trace:exempt reason=internal-detail
+    def __del__(self) -> None:  # pragma: no cover - GC timing
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.invoke work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
+    def invoke(self, operation: str, input: dict[str, Any] | None = None) -> Any:
+        """Call any registered engine operation (including plugin ops).
+
+        Returns the operation's structured ``output`` verbatim — real token
+        counts, real ids, never synthesized placeholders.
+        """
+        proc = self._rpc()
+        assert proc.stdin is not None and proc.stdout is not None
+        rid = next(self._ids)
+        frame = json.dumps({"id": rid, "operation": operation, "input": input or {}})
+        with self._lock:
+            try:
+                proc.stdin.write(frame + "\n")
+                proc.stdin.flush()
+            except (OSError, ValueError) as e:
+                raise SCCError(f"{self._bin} rpc write failed: {e}")
+            line = proc.stdout.readline()
+        if not line:
+            err = (proc.stderr.read() if proc.stderr else "") or f"{self._bin} rpc exited"
+            raise SCCError(err.strip())
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError as e:
+            raise SCCError(f"{self._bin} rpc invalid JSON: {e}")
+        if msg.get("id") != rid:
+            raise SCCError(f"{self._bin} rpc id mismatch: {line.strip()[:200]}")
+        if "error" in msg:
+            raise SCCError(str(msg["error"]))
+        return msg.get("output")
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.system-overview work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def systemOverview(self) -> dict[str, Any]:
         """Compile the system overview capsule."""
-        return self._run_json(["overview", "--json"])
+        return self.invoke("context.overview", {})
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.task-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def taskContext(
@@ -74,113 +128,63 @@ class SCC:
         rendered entry ids. Never flattened: consumers read
         ``result["pack"]["content"]``, not ``result["content"]``.
         """
-        args = ["context", "task", goal]
-        if files:
-            args.extend(["--files", " ".join(files)])
-        if symbols:
-            args.extend(["--symbols", " ".join(symbols)])
-        if tokenBudget is not None:
-            args.extend(["--budget", str(tokenBudget)])
-        args.append("--json")
-        return self._run_json(args)
+        return self.invoke("context.task", {
+            "goal": goal,
+            "files": files or [],
+            "symbols": symbols or [],
+            "budget": tokenBudget,
+            "hook": False,
+        })
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.component-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def componentContext(self, id: str) -> dict[str, Any]:
         """Compile the context pack for one component (by id or name)."""
-        return self._run_json(["context", "component", id, "--json"])
+        return self.invoke("context.component", {"id": id})
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.flow-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def flowContext(self, id: str) -> dict[str, Any]:
         """Compile the context pack for one flow (by id or name)."""
-        return self._run_json(["context", "flow", id, "--json"])
+        return self.invoke("context.flow", {"id": id})
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.impact-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def impactContext(
         self, files: list[str] | None = None, symbols: list[str] | None = None
     ) -> dict[str, Any]:
         """Compile an impact analysis pack for a set of files/symbols."""
-        args = ["impact"]
-        if files:
-            args.extend(files)
-        if symbols:
-            args.extend(["--symbols", " ".join(symbols)])
-        args.append("--json")
-        return self._run_json(args)
+        return self.invoke("context.impact", {
+            "files": files or [],
+            "symbols": symbols or [],
+        })
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.verify-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def verifyContext(self) -> dict[str, Any]:
-        """Run the freshness/evidence verification.
-
-        ``scc verify`` has no JSON mode, so the pack is synthesized from its
-        markdown output.
-        """
-        proc = self._run(["verify"])
-        revision = ""
-        for line in proc.stdout.splitlines():
-            if line.startswith("Revision:"):
-                revision = line.split(":", 1)[1].strip()
-                break
-        return {
-            "kind": "verify",
-            "repository_revision": revision,
-            "content": proc.stdout,
-            "entity_ids": [],
-            "evidence_summary": {},
-            "warnings": [],
-            "tokens": 0,
-            "budget": 0,
-            "truncated": False,
-        }
+        """Run the freshness/evidence verification (structured pack)."""
+        return self.invoke("context.verify", {})
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.context-startup work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def contextStartup(self, budget: int | None = None) -> dict[str, Any]:
-        """Compile the fused session-startup artifact (Atlas + Surface +
-        coverage + omissions).
-
-        ``scc context startup`` has no JSON mode, so the pack is synthesized
-        from its markdown output.
-        """
-        args = ["context", "startup"]
-        if budget is not None:
-            args.extend(["--budget", str(budget)])
-        proc = self._run(args)
-        return {
-            "kind": "startup",
-            "repository_revision": "",
-            "content": proc.stdout,
-            "entity_ids": [],
-            "evidence_summary": {},
-            "warnings": [],
-            "tokens": 0,
-            "budget": budget or 0,
-            "truncated": False,
-        }
+        """Compile the fused session-startup artifact (rendered text)."""
+        text = self.invoke("context.startup", {"budget": budget})
+        return {"kind": "startup", "content": text, "budget": budget or 0}
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.surface-map work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def surfaceMap(
         self, goal: str | None = None, budget: int | None = None
     ) -> dict[str, Any]:
-        """Compile the System Surface Map, global or task-personalized.
-
-        ``scc surface`` has no JSON mode, so the pack is synthesized from
-        its markdown output.
-        """
-        args = ["surface"]
-        if goal:
-            args.extend(["--task", goal])
-        if budget is not None:
-            args.extend(["--budget", str(budget)])
-        proc = self._run(args)
+        """Compile the System Surface Map (structured result + text)."""
+        out = self.invoke("surface.build", {
+            "task": goal,
+            "budget": budget,
+            "explain": False,
+        })
+        result = out.get("result", {})
         return {
             "kind": "surface",
-            "repository_revision": "",
-            "content": proc.stdout,
-            "entity_ids": [],
-            "evidence_summary": {},
-            "warnings": [],
-            "tokens": 0,
+            "content": out.get("text", ""),
+            "result": result,
+            "entity_ids": result.get("rendered_ids", []),
+            "token_count": result.get("token_count", 0),
             "budget": budget or 0,
-            "truncated": False,
         }
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
@@ -194,31 +198,34 @@ class SCC:
         ``files`` or the files matched to a ``goal`` via the PPR->Surface
         pipeline).
 
-        ``scc context structural`` has no JSON mode, so the pack is
-        synthesized from its markdown output.
+        Returns the rendered structural text.
         """
-        args = ["context", "structural"]
-        if files:
-            args.extend(["--files", " ".join(files)])
-        if goal:
-            args.extend(["--task", goal])
-        if budget is not None:
-            args.extend(["--budget", str(budget)])
-        proc = self._run(args)
-        return {
-            "kind": "structural",
-            "repository_revision": "",
-            "content": proc.stdout,
-            "entity_ids": [],
-            "evidence_summary": {},
-            "warnings": [],
-            "tokens": 0,
-            "budget": budget or 0,
-            "truncated": False,
-        }
+        text = self.invoke("context.structural", {
+            "files": files or [],
+            "task": goal,
+            "budget": budget,
+        })
+        return {"kind": "structural", "content": text}
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.index work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def index(self) -> dict[str, bool]:
         """Index the repository (idempotent; incremental after the first run)."""
-        self._run(["index"])
+        self.invoke("index.full", {})
         return {"ok": True}
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.operations work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
+    def operations(self) -> Any:
+        """List registered engine operations (introspection)."""
+        proc_close = False
+        import subprocess as _sp
+
+        out = _sp.run(
+            [self._bin, "operations"],
+            cwd=self._cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if out.returncode != 0:
+            raise SCCError(out.stderr.strip() or "scc operations failed")
+        return out.stdout

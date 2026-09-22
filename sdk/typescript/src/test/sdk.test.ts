@@ -47,11 +47,15 @@ if (!skip) {
 }
 
 after(() => {
+  for (const c of clients) c.close();
   if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
 });
 
+const clients: SCC[] = [];
 function scc(cwd?: string): SCC {
-  return new SCC({ bin: sccBin ?? undefined, cwd: cwd ?? fixtureDir ?? undefined });
+  const c = new SCC({ bin: sccBin ?? undefined, cwd: cwd ?? fixtureDir ?? undefined });
+  clients.push(c);
+  return c;
 }
 
 test("index() builds the index and reports ok", { skip: skip ? skipReason : false }, async () => {

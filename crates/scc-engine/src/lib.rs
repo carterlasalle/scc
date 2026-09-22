@@ -26,6 +26,8 @@ pub mod index;
 // trace:exempt reason=module-facade
 pub mod ops;
 // trace:exempt reason=module-facade
+pub mod rpc;
+// trace:exempt reason=module-facade
 pub mod snapshots;
 // trace:exempt reason=module-facade
 pub mod state;

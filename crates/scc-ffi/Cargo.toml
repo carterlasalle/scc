@@ -1,0 +1,33 @@
+[package]
+# trace:exempt reason=internal-detail
+name = "scc-ffi"
+# trace:exempt reason=internal-detail
+version.workspace = true
+# trace:exempt reason=internal-detail
+edition.workspace = true
+# trace:exempt reason=internal-detail
+license.workspace = true
+# trace:exempt reason=internal-detail
+description = "Minimal stable C ABI over the SCC operation registry (scc_invoke_json)"
+
+[lib]
+# trace:exempt reason=internal-detail
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+# trace:exempt reason=internal-detail
+scc-engine.workspace = true
+# trace:exempt reason=internal-detail
+scc-api.workspace = true
+# trace:exempt reason=internal-detail
+serde_json.workspace = true
+
+[dev-dependencies]
+# trace:exempt reason=internal-detail
+tempfile = "3"
+# trace:exempt reason=internal-detail
+serde_json.workspace = true
+# trace:exempt reason=internal-detail
+scc-engine.workspace = true
+# trace:exempt reason=internal-detail
+scc-indexer.workspace = true
