@@ -154,12 +154,18 @@ pub struct Engine<'a> {
 }
 
 // trace:exempt reason=internal-detail
+pub use crate::plugins::cache_key_fragment;
+// trace:exempt reason=internal-detail
 pub fn open_engine<'a>(
     store: &'a Store,
     config: &Config,
     stale: Vec<String>,
 ) -> crate::Result<Engine<'a>> {
     let graph = RealityGraph::load(store)?;
+    // Plugin lock folds into the salt: task/atlas pack caches key on
+    // rank_salt, so a plugin install/upgrade/removal must change the key
+    // (spec 27 — an unkeyed cache would serve pre-plugin packs as fresh).
+    let plugin_salt = cache_key_fragment(&crate::plugins::active(&store.root, config));
     let settings = scc_context::ContextSettings {
         startup_tokens: config.context.startup_tokens,
         task_tokens: config.context.task_tokens,
@@ -167,10 +173,11 @@ pub fn open_engine<'a>(
         detail_tokens: config.context.detail_tokens,
         include_low_confidence_inference: config.context.include_low_confidence_inference,
         rank_salt: format!(
-            "{}:{}:{}",
+            "{}:{}:{}:{}",
             config.inference.enabled,
             config.inference.embedding_model,
-            config.inference.rerank_model
+            config.inference.rerank_model,
+            plugin_salt,
         ),
         pack_allocator: scc_context::PackAllocator::AdaptivePriority,
     };

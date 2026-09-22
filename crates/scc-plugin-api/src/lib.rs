@@ -58,7 +58,52 @@ pub struct PluginManifest {
     pub deterministic: bool,
     #[serde(skip)]
     pub command: Vec<String>,
+    #[serde(default = "default_runtime")]
+    pub runtime: PluginRuntime,
+    /// Declared extension registrations (spec §17): (extension-type, id,
+    /// priority, after, before). Process plugins declare these in
+    /// `[extensions] "rank-feature:acme.id" = {priority=10, after=[...]}`.
+    #[serde(default)]
+    pub extensions: Vec<ExtensionRegistration>,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct ExtensionRegistration {
+    #[serde(rename = "type")]
+    pub extension_type: String,
+    pub id: String,
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default)]
+    pub after: Vec<String>,
+    #[serde(default)]
+    pub before: Vec<String>,
+}
+
+// trace:exempt reason=internal-detail
+impl ExtensionRegistration {
+    /// Canonical id `type:id` (e.g. `rank-feature:acme.risk`).
+// trace:exempt reason=internal-detail
+    pub fn canonical_id(&self) -> String { format!("{}:{}", self.extension_type, self.id) }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+// trace:exempt reason=internal-detail
+pub enum PluginRuntime {
+    /// External process over stdio (spec §15). The only supported runtime
+    /// today; `command` carries the argv.
+    #[default]
+    Process,
+    /// WASM Component Model (spec §14): declared via the checked-in WIT.
+    /// Loading is a loud `UnsupportedRuntime` diagnostic until the wasmtime
+    /// host lands — never silent misloading.
+    Wasm,
+}
+
+// trace:exempt reason=internal-detail
+fn default_runtime() -> PluginRuntime { PluginRuntime::Process }
 
 // trace:exempt reason=internal-detail
 fn default_api() -> String { "1".into() }
@@ -77,7 +122,7 @@ impl PluginManifest {
             id: String::new(), name: String::new(), version: String::new(),
             api: default_api(), operations: Vec::new(), permissions: Vec::new(),
             timeout_ms: default_timeout(), failure_policy: default_policy(),
-            deterministic: true, command: Vec::new(),
+            deterministic: true, command: Vec::new(), runtime: PluginRuntime::Process, extensions: Vec::new(),
         };
         let mut section = String::new();
         for (ln, raw) in text.lines().enumerate() {
@@ -101,6 +146,11 @@ impl PluginManifest {
                 ("plugin", "failure_policy") => m.failure_policy = unq(v),
                 ("plugin", "deterministic") => m.deterministic = flag,
                 ("runtime", "command") => m.command = parse_str_array(v)?,
+                ("runtime", "type") => m.runtime = match unq(v).as_str() {
+                    "wasm" => PluginRuntime::Wasm,
+                    _ => PluginRuntime::Process,
+                },
+                ("extensions", k) => m.extensions.push(parse_extension(k, &v)?),
                 ("permissions", key) => {
                     let perm = match key {
                         "repo_read" => Permission::RepoRead,
@@ -162,6 +212,35 @@ pub struct PluginResponse {
     pub error: Option<String>,
 }
 
+// trace:v1 id=impl.crates-scc-plugin-api-src-lib.plugin-manifest-extension work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
+fn parse_extension(key: &str, value: &str) -> Result<ExtensionRegistration, String> {
+    // Key: `"rank-feature:acme.id"` (quotes stripped). Value: inline table
+    // `{priority=10, after=[...], before=[...]}`; bare values default.
+    let key = key.trim_matches('"').trim_matches('\'');
+    let (extension_type, id) = key.split_once(':').ok_or(format!("bad extension key {key:?} (want \"type:id\")"))?;
+    let mut reg = ExtensionRegistration {
+        extension_type: extension_type.trim().into(),
+        id: id.trim().into(),
+        ..Default::default()
+    };
+    let body = value.trim().trim_matches(|c| c == '{' || c == '}');
+    for part in body.split(',') {
+        let part = part.trim();
+        if part.is_empty() { continue; }
+        let (k, v) = part.split_once('=').ok_or(format!("bad extension field {part:?}"))?;
+        match k.trim() {
+            "priority" => reg.priority = v.trim().parse().unwrap_or(0),
+            "after" => reg.after = parse_str_array(v)?,
+            "before" => reg.before = parse_str_array(v)?,
+            _ => {}
+        }
+    }
+    if reg.extension_type.is_empty() || reg.id.is_empty() {
+        return Err(format!("bad extension key {key:?}"));
+    }
+    Ok(reg)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -179,4 +258,35 @@ mod tests {
         let m = super::PluginManifest::from_toml("[plugin]\nid = \"x\"\napi = \"2\"\n[runtime]\ncommand = [\"a\"]\n").unwrap();
         assert!(m.check_api_compatible().is_err());
     }
+
+    #[test]
+// trace:exempt reason=unit-test
+    fn extensions_parse_with_ordering() {
+        let m = super::PluginManifest::from_toml("[plugin]\nid = \"x\"\n[runtime]\ncommand = [\"a\"]\n[extensions]\n\"rank-feature:acme.risk\" = {priority=10, after=[\"core.lex\"], before=[]}\n").unwrap();
+        assert_eq!(m.extensions.len(), 1);
+        let e = &m.extensions[0];
+        assert_eq!(e.canonical_id(), "rank-feature:acme.risk");
+        assert_eq!(e.priority, 10);
+        assert_eq!(e.after, vec!["core.lex"]);
+    }
+
+    #[test]
+// trace:exempt reason=unit-test
+    fn wit_contract_declares_plugin_world() {
+        // The checked-in WIT is the versioned ABI: world, host imports,
+        // and the three plugin exports must all be present.
+        assert!(super::PLUGIN_WIT.contains("world scc-plugin"));
+        assert!(super::PLUGIN_WIT.contains("invoke-hook"));
+        assert!(super::PLUGIN_WIT.contains("manifest: func()"));
+        assert!(super::PLUGIN_WIT.contains("register: func()"));
+    }
 }
+
+/// WIT interface definition for the WASM Component Model host (spec §14).
+/// Checked in as the versioned ABI contract: any runtime implementing this
+/// world (wasmtime-based or otherwise) hosts `scc-plugin.wit` plugins.
+/// The JSON shapes (`PluginRequest`/`PluginResponse`) are identical to the
+/// process-plugin wire protocol, so a plugin written against these schemas
+/// runs on either runtime unchanged.
+// trace:exempt reason=internal-detail
+pub const PLUGIN_WIT: &str = include_str!("plugin.wit");

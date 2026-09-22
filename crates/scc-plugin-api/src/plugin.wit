@@ -1,0 +1,84 @@
+// trace:v1 id=impl.crates-scc-plugin-api-src-plugin-wit work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
+//! WIT interface for SCC WASM Component Model plugins (spec §14).
+//!
+//! This file is the versioned ABI contract. A conforming host exposes the
+//! `scc:host/*` imports; a conforming plugin exports `manifest`, `register`,
+//! and `invoke-hook`. The JSON schemas for request/response are the same
+//! `PluginRequest`/`PluginResponse` shapes the process-plugin transport
+//! speaks over stdio, so one plugin implementation targets both runtimes.
+
+package scc:plugin@1.0.0;
+
+/// Host capabilities offered to every plugin. A call fails with
+/// `permission-denied` unless the plugin's manifest grants the matching
+/// permission (spec §21); grants are checked by the host, never the guest.
+interface host {
+    /// Invoke a registered engine operation from inside a plugin.
+    /// `operation` is any operation id (`ranking.seed`, `graph.query`,
+    /// `acme.other-plugin-op`, …); `input` is the operation's JSON input.
+    invoke-operation: func(operation: string, input: string) -> result<string, string>;
+
+    /// Namespaced plugin state (spec §23). Keys are scoped to the calling
+    /// plugin id; blobs address large values by content hash.
+    state-get: func(key: string) -> result<option<string>, string>;
+    state-put: func(key: string, value: string) -> result<_, string>;
+    state-delete: func(key: string) -> result<_, string>;
+    state-scan: func(prefix: string) -> result<list<string>, string>;
+
+    /// Append-only diagnostic log (surfaced via `plugins.doctor`).
+    log-diagnostic: func(level: string, message: string);
+}
+
+/// What a plugin contributes: operation hooks and custom operations.
+interface types {
+    /// A single extension registration.
+    record extension-registration {
+        /// Extension-point id: `rank-feature`, `reranker`, `seed-provider`,
+        /// `edge-weight`, `context-section`, `renderer`, `exporter`,
+        /// `evidence-provider`, `resolver`, `operation`, …
+        extension-type: string,
+        /// Extension instance id, namespaced by the plugin
+        /// (e.g. `acme.security-risk`).
+        id: string,
+        /// Numeric priority: lower runs first; ties break by plugin id.
+        priority: s32,
+        /// Run after these extension ids (DAG edges; cycles are startup errors).
+        after: list<string>,
+        /// Run before these extension ids.
+        before: list<string>,
+    }
+
+    record plugin-manifest {
+        id: string,
+        name: string,
+        version: string,
+        api: string,
+        operations: list<string>,
+        /// Declared extension registrations (spec §17).
+        extensions: list<extension-registration>,
+        deterministic: bool,
+    }
+
+    record hook-request {
+        /// Extension-point id being invoked.
+        extension-type: string,
+        /// Extension instance id.
+        extension-id: string,
+        /// JSON operation input (schema depends on the extension point).
+        input: string,
+    }
+
+    record hook-response {
+        /// JSON output; absent on error.
+        output: option<string>,
+        /// Error message; absent on success.
+        error: option<string>,
+    }
+}
+
+world scc-plugin {
+    import host;
+    export manifest: func() -> types::plugin-manifest;
+    export register: func() -> list<types::extension-registration>;
+    export invoke-hook: func(request: types::hook-request) -> types::hook-response;
+}

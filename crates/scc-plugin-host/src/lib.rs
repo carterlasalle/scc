@@ -44,6 +44,8 @@ pub enum HostError {
     Ambiguous(String),
     #[error("io: {0}")]
     Io(String),
+    #[error("plugin {0} declares runtime wasm: no WASM host yet (see scc-plugin-api PLUGIN_WIT); use runtime.command process plugin instead")]
+    UnsupportedRuntime(String),
 }
 
 // trace:v1 id=impl.crates-scc-plugin-host-src-lib.discover work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
@@ -108,6 +110,12 @@ pub fn provider_for<'a>(plugins: &'a [LoadedPlugin], operation: &str) -> Result<
 // trace:exempt reason=internal-detail
 pub fn call(plugin: &LoadedPlugin, operation: &str, input: serde_json::Value, timeout_override_ms: Option<u64>) -> Result<serde_json::Value, HostError> {
     require_grant(plugin, operation)?;
+    // WASM runtime: declared via the checked-in WIT (spec §14) but not yet
+    // hosted — fail loudly with an actionable diagnostic, never silently
+    // misload a .wasm artifact as a process command.
+    if plugin.manifest.runtime == scc_plugin_api::PluginRuntime::Wasm {
+        return Err(HostError::UnsupportedRuntime(plugin.manifest.id.clone()));
+    }
     let req = PluginRequest { operation: operation.into(), input, config: plugin.config.clone() };
     let body = serde_json::to_string(&req).map_err(|e| HostError::Failed(plugin.manifest.id.clone(), e.to_string()))?;
     let timeout = std::time::Duration::from_millis(timeout_override_ms.unwrap_or(plugin.manifest.timeout_ms));
@@ -180,6 +188,13 @@ pub fn lock_entry(p: &LoadedPlugin) -> serde_json::Value {
     h.update(p.manifest.id.as_bytes());
     h.update(p.manifest.version.as_bytes());
     h.update(p.manifest.api.as_bytes());
+    h.update(format!("{:?}", p.manifest.runtime).as_bytes());
+    let extensions: Vec<serde_json::Value> = p.manifest.extensions.iter().map(|e| {
+        h.update(e.canonical_id().as_bytes());
+        h.update(e.priority.to_string().as_bytes());
+        for x in e.after.iter().chain(e.before.iter()) { h.update(x.as_bytes()); }
+        serde_json::json!({"type": e.extension_type, "id": e.id, "priority": e.priority, "after": e.after, "before": e.before})
+    }).collect();
     serde_json::json!({
         "id": p.manifest.id,
         "version": p.manifest.version,
@@ -187,6 +202,8 @@ pub fn lock_entry(p: &LoadedPlugin) -> serde_json::Value {
         "artifact_hash": format!("{}", h.finalize().to_hex()),
         "operations": p.manifest.operations,
         "permissions": p.manifest.permissions.iter().map(|x| x.as_str()).collect::<Vec<_>>(),
+        "runtime": format!("{:?}", p.manifest.runtime).to_lowercase(),
+        "extensions": extensions,
     })
 }
 
@@ -205,8 +222,8 @@ mod tests {
         let p = super::LoadedPlugin {
             manifest: scc_plugin_api::PluginManifest {
                 id: "x".into(), name: "X".into(), version: "1".into(), api: "1".into(),
-                operations: vec![], permissions: vec![], timeout_ms: 50,
-                failure_policy: "warn".into(), deterministic: true, command: vec!["true".into()],
+                operations: vec![], permissions: vec![], timeout_ms: 50, runtime: Default::default(),
+                failure_policy: "warn".into(), deterministic: true, command: vec!["true".into()], extensions: vec![],
             },
             dir: std::path::PathBuf::from("."),
             config: serde_json::json!({}),

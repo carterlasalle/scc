@@ -280,7 +280,7 @@ pub fn invoke(
             let ap = crate::plugins::active(root, &config);
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             match ap.plugins.iter().find(|p| p.manifest.id == id) {
-                Some(p) => serde_json::json!({"manifest": {"id": p.manifest.id, "name": p.manifest.name, "version": p.manifest.version, "api": p.manifest.api, "operations": p.manifest.operations, "timeout_ms": p.manifest.timeout_ms, "failure_policy": p.manifest.failure_policy, "deterministic": p.manifest.deterministic}, "lock": scc_plugin_host::lock_entry(p)}),
+                Some(p) => serde_json::json!({"manifest": {"id": p.manifest.id, "name": p.manifest.name, "version": p.manifest.version, "api": p.manifest.api, "operations": p.manifest.operations, "timeout_ms": p.manifest.timeout_ms, "failure_policy": p.manifest.failure_policy, "deterministic": p.manifest.deterministic, "runtime": format!("{:?}", p.manifest.runtime).to_lowercase(), "extensions": p.manifest.extensions}, "lock": scc_plugin_host::lock_entry(p)}),
                 None => serde_json::json!({"error": format!("unknown plugin '{id}'")}),
             }
         }
