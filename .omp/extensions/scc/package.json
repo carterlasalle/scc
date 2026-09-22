@@ -1,12 +1,37 @@
 {
-  "name": "scc",
-  "version": "0.2.1",
-  "description": "System Context Compiler (SCC): injects evidence-backed system context into OMP sessions — startup architecture once per session, task context per prompt, post-edit incremental index, and compaction checkpoint/rehydration.",
-  "license": "Apache-2.0",
+  "name": "@carterlasalle/omp-scc",
+  "version": "0.2.6",
+  "description": "System Context Compiler (SCC): injects evidence-backed system context into Oh My Pi sessions — startup architecture once per session, task context per prompt, post-edit incremental index, and compaction checkpoint/rehydration.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/carterlasalle/scc.git",
+    "directory": "plugins/omp/scc"
+  },
+  "homepage": "https://github.com/carterlasalle/scc#readme",
+  "bugs": {
+    "url": "https://github.com/carterlasalle/scc/issues"
+  },
+  "keywords": [
+    "scc",
+    "system-context",
+    "context-engineering",
+    "coding-agents",
+    "oh-my-pi"
+  ],
+  "files": [
+    "index.ts",
+    "update-check.ts",
+    "skills"
+  ],
   "pi": {
     "extensions": ["./index.ts"]
   },
   "omp": {
     "extensions": ["./index.ts"]
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

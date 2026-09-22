@@ -117,7 +117,15 @@ OpenAI-compatible embedding endpoint (semantic ranking), `zstd` (CBM adapter),
 
 ## Docker
 
-No image is published to a registry yet; build the checked-in `Dockerfile`:
+A published image exists — `ghcr.io/carterlasalle/scc:latest` is built from
+`main`, and each `v*` tag adds `:vX.Y.Z`:
+
+```bash
+docker pull ghcr.io/carterlasalle/scc:latest
+docker run --rm ghcr.io/carterlasalle/scc:latest --version
+```
+
+To build it yourself instead, use the checked-in `Dockerfile`:
 
 ```bash
 docker build -t scc .
@@ -194,12 +202,21 @@ This project ships as:
 
 | Artifact | Registry | Install |
 |---|---|---|
-| `scc` CLI | GitHub Releases (via `scripts/install.sh`) | see above |
-| TypeScript SDK `scc-sdk` | [npm](https://www.npmjs.com/package/scc-sdk) | `npm install scc-sdk` |
-| Python SDK `scc-sdk` | [PyPI](https://pypi.org/project/scc-sdk/) | `pip install scc-sdk` |
+| `scc` CLI | GitHub Releases (via `scripts/install.sh`) | the pinned flow above |
+| `@carterlasalle/scc` | [npm](https://www.npmjs.com/org/carterlasalle) (scoped — bare `scc` is taken) | `npm install -g @carterlasalle/scc` |
+| `scc-cli` (+ 5 library crates) | crates.io | `cargo install scc-cli` |
+| `system-context-compiler` | [Homebrew tap](https://github.com/carterlasalle/homebrew-tap) (formula name differs; installs the `scc` binary) | `brew install carterlasalle/tap/system-context-compiler` |
+| `ghcr.io/carterlasalle/scc` | GitHub Container Registry | `docker run --rm ghcr.io/carterlasalle/scc --version` |
+| `scc-sdk` | npm / [PyPI](https://pypi.org/project/scc-sdk/) (SDKs) | `npm install scc-sdk` / `pip install scc-sdk` |
+| `@carterlasalle/omp-scc` | npm (Oh My Pi extension; `scc setup omp` needs no npm) | `omp install @carterlasalle/omp-scc` |
 
-A crates.io / npm / Homebrew formula for the CLI itself is not published yet;
-the installer is the supported path.
+The npm and crates.io packages are produced by the release workflow, so they
+appear with the next tagged release. How each channel publishes, and the command
+that verifies it: [PUBLISHING.md](PUBLISHING.md).
+
+The CLI's own package-manager entries are produced by the release workflow
+(`crates` and `npm-cli` jobs) and the Homebrew tap is updated by hand, so the
+installer remains the path that always works.
 
 ## Harness integrations
 
@@ -212,7 +229,7 @@ harness — each command is idempotent and only touches that harness's config:
 | Codex | `scc setup codex` | `AGENTS.md` with the capsule and authority ordering |
 | OpenCode | `scc setup opencode` | `AGENTS.md` + `.opencode/opencode.json` wiring the SCC MCP server |
 | Hermes | `scc setup hermes` | Native plugin (10 tools) + bundled skill |
-| Oh My Pi (OMP) | `scc setup omp` | Native extension, MCP, skill, `AGENTS.md` |
+| Oh My Pi (OMP) | `scc setup omp` (or `omp install @carterlasalle/omp-scc`) | Native extension, MCP, skill, `AGENTS.md` |
 | Pi | `scc setup pi` | Project-local `.pi/extensions/scc` |
 | All detected | `scc setup` | Auto-detects installed harnesses; `scc setup all` skips detection |
 

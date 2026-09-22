@@ -1,0 +1,107 @@
+<!-- trace:v1 id=doc.scc-publishing type=document work=WORK-SCC-DISTRIBUTION documents=REQ-SCC-API -->
+# Publishing SCC
+
+Every channel SCC ships on, who publishes it, and what credential it needs.
+
+The bare name `scc` is taken on npm, crates.io, PyPI and Homebrew by unrelated
+projects (`npm install -g scc` is a 2013 SeaJS bundler, `brew install scc` is
+[boyter/scc](https://github.com/boyter/scc), a Go line counter), so every
+channel below publishes under a scoped or qualified name.
+
+| Channel | Artifact | Published by | Credential |
+|---|---|---|---|
+| GitHub Releases | `scc-<v>-<os>-<arch>`, `install.sh`, `sbom-<v>.txt`, `sha256-<v>-<os>-<arch>.txt` | `release.yml` (`dist` + `release` jobs) on a `v*` tag | workflow token |
+| crates.io | `scc-core`, `scc-store`, `scc-indexer`, `scc-graph`, `scc-context`, `scc-cli` | `release.yml` `crates` job | `CARGO_REGISTRY_TOKEN` secret + `CRATES_PUBLISH` variable |
+| npm | `@carterlasalle/scc` + `@carterlasalle/scc-linux-x64` + `@carterlasalle/scc-darwin-arm64` | `release.yml` `npm-cli` job | `NPM_TOKEN` secret |
+| npm | `scc-sdk` (TypeScript SDK) | `release.yml` `npm` job | `NPM_TOKEN` secret |
+| npm | `@carterlasalle/omp-scc` (Oh My Pi extension) | `release.yml` `npm-omp` job | `NPM_TOKEN` secret |
+| PyPI | `scc-sdk` (Python SDK) | `release.yml` `pypi` job | trusted publishing, no token |
+| GHCR | `ghcr.io/carterlasalle/scc` | `publish-image.yml` | workflow token |
+| Homebrew tap | `carterlasalle/tap/system-context-compiler` | manual — see below | a PAT that can push to the tap repo |
+| MCP registry | `io.github.carterlasalle/scc` | manual — see below | GitHub login via `mcp-publisher` |
+
+<!-- trace:v1 id=doc.scc-publishing.one-time-setup work=WORK-SCC-DISTRIBUTION -->
+## One-time setup
+
+The crates.io token comes from <https://crates.io/settings/tokens>; the npm
+token is an automation (classic) token. `CRATES_PUBLISH` is the `if:` gate:
+
+```bash
+gh secret set CARGO_REGISTRY_TOKEN -R carterlasalle/scc
+gh variable set CRATES_PUBLISH --body true -R carterlasalle/scc
+gh secret set NPM_TOKEN -R carterlasalle/scc
+curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" | tar xz mcp-publisher
+```
+
+(The last line installs the MCP registry publisher.)
+
+`CRATES_PUBLISH` is a **variable**, not a secret, on purpose: `secrets` is not
+allowed in `if:` expressions, and a workflow that references it there fails at
+0 seconds with no job log.
+
+<!-- trace:v1 id=doc.scc-publishing.cutting-a-release work=WORK-SCC-DISTRIBUTION -->
+## Cutting a release
+
+1. Bump every version that is not stamped by CI:
+
+   | File | Field |
+   |---|---|
+   | `Cargo.toml` | `[workspace.package] version` **and** the five internal dependency versions in `[workspace.dependencies]` |
+   | `sdk/python/pyproject.toml` | `version` |
+   | `sdk/typescript/package.json` | `version` |
+   | `plugins/omp/scc/package.json` | `version` (also embedded in the binary by `scc setup omp`) |
+   | `plugins/hermes/scc/plugin.yaml` | `version` |
+   | `server.json` | `version` |
+
+   The npm CLI packages and the Oh My Pi extension are stamped from the tag by
+   `npm/stamp-version.sh` inside the release workflow, so they cannot drift.
+
+2. Validate the crates locally: `./contrib/publish-crates.sh` (dry run — checks
+   the version agreement and packages every crate).
+3. Tag and push: `git tag v0.2.7 && git push origin v0.2.7`. The workflow builds
+   both platforms, creates the release, and publishes to crates.io / npm / PyPI.
+4. Post-release, per channel:
+   - **Homebrew**: `./contrib/brew/bump.sh 0.2.7`, then copy
+     `contrib/brew/system-context-compiler.rb` into
+     `carterlasalle/homebrew-tap` as `Formula/system-context-compiler.rb`.
+   - **MCP registry**: `./mcp-publisher login github && ./mcp-publisher publish`
+     (reads `server.json`).
+   - **Container image**: published automatically by `publish-image.yml` on the
+     tag; verify with the pull check below.
+
+<!-- trace:v1 id=doc.scc-publishing.verify-each-channel work=WORK-SCC-DISTRIBUTION -->
+## Verify each channel
+
+A green job is not proof a package is installable. These are the checks that
+read the registry back:
+
+```bash
+for c in scc-core scc-store scc-indexer scc-graph scc-context scc-cli; do
+  curl -sS -H 'User-Agent: scc-release-check' \
+    "https://crates.io/api/v1/crates/$c/0.2.7" -o /dev/null -w "$c %{http_code}\n"
+done
+
+for p in @carterlasalle/scc @carterlasalle/scc-linux-x64 @carterlasalle/scc-darwin-arm64 @carterlasalle/omp-scc scc-sdk; do
+  printf '%s ' "$p"; npm view "$p" version 2>&1 | tail -1
+done
+
+curl -sS https://pypi.org/pypi/scc-sdk/json | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])'
+
+gh release view v0.2.7 -R carterlasalle/scc --json assets --jq '.assets[].name'
+
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u carterlasalle --password-stdin
+docker pull ghcr.io/carterlasalle/scc:v0.2.7 && docker run --rm ghcr.io/carterlasalle/scc:v0.2.7 --version
+
+curl -sS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.carterlasalle" | python3 -m json.tool | head -40
+
+brew update && brew info carterlasalle/tap/system-context-compiler
+```
+
+<!-- trace:v1 id=doc.scc-publishing.installer-asset-contract work=WORK-SCC-DISTRIBUTION -->
+## Installer asset contract
+
+`scripts/install.sh` resolves exactly the names
+`scripts/package_release.sh` produces. That contract is tested offline by
+`scripts/install_contract_test.sh` (local fixture, no network) and against the
+published release by the `install-smoke` canary in `ci.yml`, so a rename on
+either side fails CI instead of breaking users after a publish.

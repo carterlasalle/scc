@@ -14,13 +14,30 @@ members = [
 version = "0.2.6"
 edition = "2021"
 license = "MIT"
+# trace:exempt reason=package-metadata
+authors = ["Carter LaSalle <carterlasalle@users.noreply.github.com>"]
+# trace:exempt reason=package-metadata
+repository = "https://github.com/carterlasalle/scc"
+# trace:exempt reason=package-metadata
+homepage = "https://github.com/carterlasalle/scc#readme"
+# trace:exempt reason=package-metadata
+keywords = ["ai-agents", "context-engineering", "code-intelligence", "mcp", "tree-sitter"]
+# trace:exempt reason=package-metadata
+categories = ["development-tools", "command-line-utilities"]
 
 [workspace.dependencies]
-scc-core = { path = "crates/scc-core" }
-scc-store = { path = "crates/scc-store" }
-scc-indexer = { path = "crates/scc-indexer" }
-scc-graph = { path = "crates/scc-graph" }
-scc-context = { path = "crates/scc-context" }
+# `version` must match [workspace.package] version: crates.io cannot resolve a
+# path-only dependency. contrib/publish-crates.sh asserts they agree.
+# trace:exempt reason=package-metadata
+scc-core = { path = "crates/scc-core", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-store = { path = "crates/scc-store", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-indexer = { path = "crates/scc-indexer", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-graph = { path = "crates/scc-graph", version = "0.2.6" }
+# trace:exempt reason=package-metadata
+scc-context = { path = "crates/scc-context", version = "0.2.6" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

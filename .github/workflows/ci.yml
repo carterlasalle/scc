@@ -118,6 +118,17 @@ jobs:
           sh -n scripts/install_contract_test.sh
       - name: Install contract test (local fixture, no network)
         run: ./scripts/install_contract_test.sh
+      - name: npm launcher contract test
+        # The npm package is a JS launcher around the platform binary; this
+        # exercises resolution, argv/exit-code forwarding and the missing-package
+        # error path without touching the network.
+        run: node npm/test-launcher.js
+      - name: npm package manifests
+        run: |
+          for pkg in cli cli-linux-x64 cli-darwin-arm64; do
+            (cd "npm/$pkg" && npm pack --dry-run > /dev/null && echo "npm/$pkg packs")
+          done
+          (cd plugins/omp/scc && npm pack --dry-run > /dev/null && echo "plugins/omp/scc packs")
       - name: Canary — dry run against the published release
         env:
           SCC_GITHUB_TOKEN: ${{ github.token }}
