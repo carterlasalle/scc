@@ -151,3 +151,26 @@ fn surface_stages_toggle_changes_render() {
         "all-true stages == build_surface"
     );
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.registry-parity verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.model-get
+fn registry_covers_every_invoke_arm() {
+    // DoD 36/39: every callable op is discoverable. `scc operations`,
+    // RPC operations.list, and HTTP GET /v1/operations all read OPERATIONS —
+    // an invoke arm without a descriptor is reachable but invisible.
+    let (_dir, root) = fixture();
+    // Import aliases route through the shared importer.
+    for op in ["import.ccg", "import.gitnexus", "import.tracelayer", "import.beads", "import.hindsight", "import.cbm"] {
+        assert!(scc_engine::ops::describe(op).is_some(), "descriptor missing for {op}");
+    }
+    // Legacy ranking aliases resolve with hooks like ranking.symbols.
+    for op in ["ranking.global", "ranking.task", "ranking.entities"] {
+        assert!(scc_engine::ops::describe(op).is_some(), "descriptor missing for {op}");
+        let v = scc_engine::invoke(&root, op, json!({"goal": "hello", "limit": 5})).unwrap();
+        assert!(v.get("items").and_then(|i| i.as_array()).is_some(), "{op} must return items: {v}");
+    }
+    // Every descriptor resolves (no dangling registry entries).
+    for id in scc_engine::ops::ids() {
+        assert!(scc_engine::ops::describe(id).is_some(), "describe missing for {id}");
+    }
+}
