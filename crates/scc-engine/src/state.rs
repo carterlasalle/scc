@@ -168,3 +168,81 @@ pub fn external_docs(root: &Path, dependency: &str) -> crate::Result<String> {
         .map_err(crate::EngineError::Other)?;
     client.docs_for(dependency).map_err(crate::EngineError::Other)
 }
+
+/// Namespaced plugin state (§23): get one key. Requires the calling
+/// plugin's StateRead grant (checked by the host before dispatch; the
+/// engine re-checks here so direct invoke() callers are gated too).
+// trace:exempt reason=internal-detail
+pub fn plugin_state_get(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    key: &str,
+) -> crate::Result<serde_json::Value> {
+    require_state_grant(plugin_id, grants, false)?;
+    Ok(store.plugin_state_get(plugin_id, key)?.into())
+}
+
+/// Put one key (JSON text). Requires StateWrite.
+// trace:exempt reason=internal-detail
+pub fn plugin_state_put(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    key: &str,
+    value: &str,
+) -> crate::Result<serde_json::Value> {
+    require_state_grant(plugin_id, grants, true)?;
+    store.plugin_state_put(plugin_id, key, value)?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+/// Delete one key. Requires StateWrite.
+// trace:exempt reason=internal-detail
+pub fn plugin_state_delete(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    key: &str,
+) -> crate::Result<serde_json::Value> {
+    require_state_grant(plugin_id, grants, true)?;
+    store.plugin_state_delete(plugin_id, key)?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+/// Scan keys by prefix (ordered, bounded). Requires StateRead.
+// trace:exempt reason=internal-detail
+pub fn plugin_state_scan(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    prefix: &str,
+    limit: usize,
+) -> crate::Result<serde_json::Value> {
+    require_state_grant(plugin_id, grants, false)?;
+    let rows = store.plugin_state_scan(plugin_id, prefix, limit)?;
+    Ok(serde_json::json!({
+        "keys": rows.iter().map(|(k, v)| serde_json::json!({"key": k, "value": v})).collect::<Vec<_>>(),
+    }))
+}
+
+// trace:exempt reason=internal-detail
+fn require_state_grant(
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    write: bool,
+) -> crate::Result<()> {
+    let need = if write {
+        scc_plugin_api::Permission::StateWrite
+    } else {
+        scc_plugin_api::Permission::StateRead
+    };
+    if grants.contains(&need) {
+        Ok(())
+    } else {
+        Err(crate::EngineError::Other(format!(
+            "permission denied: plugin {plugin_id} lacks {}",
+            need.as_str()
+        )))
+    }
+}

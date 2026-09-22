@@ -408,6 +408,33 @@ pub fn invoke(
                 Err(drift) => serde_json::json!({"ok": false, "drift": drift}),
             }
         }
+        "plugin_state.get" | "plugin_state.put" | "plugin_state.delete" | "plugin_state.scan" => {
+            let pid = input.get("plugin").and_then(|v| v.as_str()).unwrap_or("");
+            let ap = crate::plugins::active(root, &config);
+            let plug = ap.plugins.iter().find(|p| p.manifest.id == pid).ok_or_else(|| {
+                crate::EngineError::Other(format!("unknown plugin '{pid}' (not active)"))
+            })?;
+            match operation {
+                "plugin_state.get" => {
+                    let key = input.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    crate::state::plugin_state_get(&store, pid, &plug.grants, key)?
+                }
+                "plugin_state.put" => {
+                    let key = input.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    let value = input.get("value").map(|v| v.to_string()).unwrap_or_default();
+                    crate::state::plugin_state_put(&store, pid, &plug.grants, key, &value)?
+                }
+                "plugin_state.delete" => {
+                    let key = input.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    crate::state::plugin_state_delete(&store, pid, &plug.grants, key)?
+                }
+                _ => {
+                    let prefix = input.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
+                    let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+                    crate::state::plugin_state_scan(&store, pid, &plug.grants, prefix, limit)?
+                }
+            }
+        }
         "plugins.invoke" => {
             let op = input.get("operation").and_then(|v| v.as_str()).unwrap_or(operation);
             let inner = input.get("input").cloned().unwrap_or(serde_json::json!({}));

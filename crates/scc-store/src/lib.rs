@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 // trace:exempt reason=internal-detail
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 // trace:exempt reason=internal-detail
 pub const FTS_ESCAPE: &str = "\"";
 // trace:exempt reason=internal-detail
@@ -40,6 +40,7 @@ const MIGRATIONS: &[&str] = &[
     MIGRATION_6,
     MIGRATION_7,
     MIGRATION_8,
+    MIGRATION_9,
 ];
 
 /// v4: model epoch. `context_cache.revision` becomes `epoch` — the cache is
@@ -118,6 +119,21 @@ ALTER TABLE context_snapshots ADD COLUMN contract_fp TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE context_snapshots ADD COLUMN state_fp TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE context_snapshots ADD COLUMN flow_names TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE context_snapshots ADD COLUMN artifact_hash TEXT NOT NULL DEFAULT '';
+"#;
+
+/// v9: namespaced plugin state (§23) — key/value pairs scoped to
+/// `(plugin_id, key)`. Plugins never create their own tables; the host
+/// owns storage, the plugin id owns the namespace.
+// trace:exempt reason=internal-detail
+const MIGRATION_9: &str = r#"
+CREATE TABLE IF NOT EXISTS plugin_state (
+  plugin_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (plugin_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_plugin_state_plugin ON plugin_state(plugin_id);
 "#;
 
 /// v6: observed trace-path signatures (Wave 6) — canonical root-to-leaf
@@ -816,6 +832,57 @@ impl Store {
                 .flatten()
                 .filter(|s| !s.is_empty()),
         }
+    }
+
+    // ------------------------------------------------------------------
+    // plugin state (§23): namespaced key/value storage. The host owns the
+    // table; the plugin id owns the namespace. Keys are opaque strings;
+    // values are JSON text (small config/cursor blobs, not artifacts).
+    // ------------------------------------------------------------------
+
+    // trace:exempt reason=internal-detail
+    pub fn plugin_state_put(&self, plugin_id: &str, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO plugin_state (plugin_id, key, value, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(plugin_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![plugin_id, key, value, scc_core::now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn plugin_state_get(&self, plugin_id: &str, key: &str) -> Result<Option<String>> {
+        let v = self
+            .conn
+            .query_row(
+                "SELECT value FROM plugin_state WHERE plugin_id = ?1 AND key = ?2",
+                params![plugin_id, key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(v)
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn plugin_state_delete(&self, plugin_id: &str, key: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM plugin_state WHERE plugin_id = ?1 AND key = ?2",
+            params![plugin_id, key],
+        )?;
+        Ok(())
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn plugin_state_scan(&self, plugin_id: &str, prefix: &str, limit: usize) -> Result<Vec<(String, String)>> {
+        let esc = prefix.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let like = format!("{esc}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM plugin_state WHERE plugin_id = ?1 AND key LIKE ?2 ESCAPE '\\' ORDER BY key LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![plugin_id, like, limit.max(1) as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
     // ------------------------------------------------------------------

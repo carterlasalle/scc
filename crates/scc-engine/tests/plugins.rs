@@ -253,3 +253,59 @@ fn edge_weight_contributor_alters_rank() {
     // Sanity: alpha still ranks (near-starve, not disconnect).
     assert!(base_alpha < items.len(), "alpha present: {base}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.state-crud verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn plugin_state_crud_is_namespaced_and_gated() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = write_plugin(dir.path());
+    // The echo fixture grants repo_read only: state.get must be denied.
+    let denied = scc_engine::invoke(
+        &root, "plugin_state.get",
+        serde_json::json!({"plugin": "acme.echo", "key": "k"}),
+    );
+    assert!(denied.is_err(), "state without grant must fail: {denied:?}");
+    // Grant state.read + state.write via project config file.
+    std::fs::create_dir_all(root.join(".scc")).unwrap();
+    std::fs::write(
+        root.join(".scc").join("config.yaml"),
+        "schema: 1\nplugins:\n  grants:\n    acme.echo: [state.read, state.write]\n",
+    )
+    .unwrap();
+    let put = scc_engine::invoke(
+        &root, "plugin_state.put",
+        serde_json::json!({"plugin": "acme.echo", "key": "cursor", "value": {"n": 1}}),
+    )
+    .unwrap();
+    assert_eq!(put.get("ok"), Some(&serde_json::json!(true)), "{put}");
+    let got = scc_engine::invoke(
+        &root, "plugin_state.get",
+        serde_json::json!({"plugin": "acme.echo", "key": "cursor"}),
+    )
+    .unwrap();
+    assert!(got.as_str().is_some_and(|s| s.contains('1')), "{got}");
+    // Namespace isolation: another plugin id cannot see this key.
+    let other = scc_engine::invoke(
+        &root, "plugin_state.get",
+        serde_json::json!({"plugin": "acme.other", "key": "cursor"}),
+    );
+    assert!(other.is_err(), "unknown plugin must fail: {other:?}");
+    let scan = scc_engine::invoke(
+        &root, "plugin_state.scan",
+        serde_json::json!({"plugin": "acme.echo", "prefix": "cur", "limit": 10}),
+    )
+    .unwrap();
+    assert_eq!(scan["keys"].as_array().map(|a| a.len()), Some(1), "{scan}");
+    let del = scc_engine::invoke(
+        &root, "plugin_state.delete",
+        serde_json::json!({"plugin": "acme.echo", "key": "cursor"}),
+    )
+    .unwrap();
+    assert_eq!(del.get("ok"), Some(&serde_json::json!(true)), "{del}");
+    let gone = scc_engine::invoke(
+        &root, "plugin_state.get",
+        serde_json::json!({"plugin": "acme.echo", "key": "cursor"}),
+    )
+    .unwrap();
+    assert!(gone.is_null(), "deleted key reads null: {gone}");
+}
