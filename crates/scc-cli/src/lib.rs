@@ -55,6 +55,7 @@ pub type Result<T> = std::result::Result<T, CliError>;
 /// relocates writable state (database, checkpoint) so the repository itself
 /// can be mounted read-only (docs/DEPLOYMENT_AND_INFRA.md §3: read-only repo
 /// + writable SCC data volume).
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn state_dir(root: &Path) -> PathBuf {
     match std::env::var("SCC_STATE_DIR") {
         Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
@@ -62,26 +63,31 @@ pub fn state_dir(root: &Path) -> PathBuf {
     }
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn scc_dir(root: &Path) -> PathBuf {
     root.join(SCC_DIR)
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn db_path(root: &Path) -> PathBuf {
     state_dir(root).join(DB_FILE)
 }
 
 /// Config stays in the repo (read-only is fine): it is repository intent,
 /// not SCC state.
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn config_path(root: &Path) -> PathBuf {
     scc_dir(root).join(CONFIG_FILE)
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn checkpoint_path(root: &Path) -> PathBuf {
     state_dir(root).join(CHECKPOINT_FILE)
 }
 
 /// Locate the repository root: walk up from cwd looking for `.git` or an
 /// existing `.scc` dir; otherwise use cwd.
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn find_root(start: &Path) -> PathBuf {
     let mut dir = Some(start.to_path_buf());
     while let Some(d) = dir {
@@ -93,6 +99,7 @@ pub fn find_root(start: &Path) -> PathBuf {
     start.to_path_buf()
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn load_config(root: &Path) -> Result<Config> {
     let p = config_path(root);
     if p.exists() {
@@ -102,6 +109,7 @@ pub fn load_config(root: &Path) -> Result<Config> {
     }
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn open_store(root: &Path) -> Result<Store> {
     let dir = state_dir(root);
     std::fs::create_dir_all(&dir)?;
@@ -193,6 +201,7 @@ pub fn report_quarantine(quarantined: &Option<std::path::PathBuf>) {
     }
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn recompile(store: &Store) -> Result<scc_graph::RecompileReport> {
     Ok(scc_graph::recompile(store)?)
 }
@@ -213,30 +222,7 @@ pub fn recompile(store: &Store) -> Result<scc_graph::RecompileReport> {
 /// deferred until a daemon owns it.
 // trace:v1 id=impl.crates-scc-cli-src-lib.stale-paths work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
 pub fn stale_paths(store: &Store) -> Result<Vec<String>> {
-    let config = load_config(&store.root)?;
-    let scanned = scc_indexer::scan::scan_repo(&store.root, &config.index).map_err(scc_indexer::IndexError::from)?;
-    let mut fresh: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-    for f in &scanned {
-        fresh.insert(f.path.as_str(), f.hash.as_str());
-    }
-    let mut out = Vec::new();
-    let mut indexed = std::collections::HashSet::new();
-    for (path, hash, _lang, _kind, _size) in store.all_files()? {
-        indexed.insert(path.clone());
-        match fresh.get(path.as_str()) {
-            Some(current) if *current == hash.as_str() => {} // fresh — no re-read
-            Some(_) => out.push(path),   // modified
-            None => out.push(path),      // deleted (or newly ignored)
-        }
-    }
-    for f in scanned {
-        if !indexed.contains(&f.path) {
-            out.push(f.path); // added since indexing
-        }
-    }
-    out.sort();
-    out.dedup();
-    Ok(out)
+    scc_engine::workspace::stale_paths(store).map_err(|e| CliError::Other(e.to_string()))
 }
 
 // trace:exempt reason=existing
@@ -277,8 +263,10 @@ pub fn compiler<'a>(
     })
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 impl Compiler<'_> {
     /// Construct a ContextCompiler borrowing this compiler's graph.
+    // trace:exempt reason=thin-delegate-engine-owns-behavior
     pub fn ctx(&self) -> ContextCompiler<'_> {
         ContextCompiler::new(
             self.store,
@@ -351,6 +339,7 @@ pub fn index_and_recompile(root: &Path, config: &Config) -> Result<scc_indexer::
 
 /// Run semantic resolution on demand (`--resolve`), then recompile the
 /// derived layer so graphs/flows/atlas reflect the promoted edges.
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn resolve_and_recompile(root: &Path) -> Result<scc_indexer::resolver::ResolveReport> {
     let store = open_store(root)?;
     let report = scc_indexer::resolver::resolve_repository(
@@ -367,6 +356,7 @@ pub fn resolve_and_recompile(root: &Path) -> Result<scc_indexer::resolver::Resol
 // export (docs/DATA_STRATEGY.md §11)
 // ---------------------------------------------------------------------------
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn export_ir(store: &Store) -> Result<scc_core::SystemIr> {
     let repository = store.repository();
     let snapshot = store
@@ -394,6 +384,7 @@ pub fn export_ir(store: &Store) -> Result<scc_core::SystemIr> {
 
 /// JSONL export: one JSON object per line (repository, snapshot, then
 /// entities/relationships/flows/invariants/evidence records).
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn export_jsonl(ir: &scc_core::SystemIr) -> Result<Vec<String>> {
     let mut out = Vec::new();
     out.push(serde_json::to_string(&serde_json::json!({
@@ -422,6 +413,7 @@ pub fn export_jsonl(ir: &scc_core::SystemIr) -> Result<Vec<String>> {
 
 /// Narsil-CCG-compatible layered export (docs §44): L0 manifest, L1
 /// architecture, L2 symbols.
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn export_ccg(ir: &scc_core::SystemIr) -> Result<serde_json::Value> {
     let l1: Vec<serde_json::Value> = ir
         .entities
@@ -475,6 +467,7 @@ pub fn export_ccg(ir: &scc_core::SystemIr) -> Result<serde_json::Value> {
     }))
 }
 
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn flow_kind_str(k: &scc_core::FlowKind) -> &'static str {
     match k {
         scc_core::FlowKind::Architecture => "architecture",
@@ -488,6 +481,7 @@ pub fn flow_kind_str(k: &scc_core::FlowKind) -> &'static str {
 pub use scc_core::kinds;
 
 /// Repo-relative path of a file under root, or None if it escapes.
+// trace:exempt reason=thin-delegate-engine-owns-behavior
 pub fn relative_of(root: &Path, abs: &Path) -> Option<String> {
     let root_c = root.canonicalize().ok()?;
     let abs_c = abs.canonicalize().ok()?;

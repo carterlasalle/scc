@@ -1543,6 +1543,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "scc-api"
+version = "0.2.6"
+dependencies = [
+ "scc-context",
+ "scc-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "scc-cli"
 version = "0.2.6"
 dependencies = [
@@ -1552,8 +1563,10 @@ dependencies = [
  "libc",
  "notify",
  "parking_lot",
+ "scc-api",
  "scc-context",
  "scc-core",
+ "scc-engine",
  "scc-graph",
  "scc-indexer",
  "scc-store",
@@ -1586,6 +1599,22 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "scc-engine"
+version = "0.2.6"
+dependencies = [
+ "scc-api",
+ "scc-context",
+ "scc-core",
+ "scc-graph",
+ "scc-indexer",
+ "scc-store",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

@@ -1,6 +1,11 @@
 //! Command implementations for the `scc` CLI (docs/API_AND_INTEGRATIONS.md §4).
 
 use crate::{checkpoint, compiler, config_path, load_config, open_store, recompile, scc_dir};
+
+// trace:exempt reason=internal-detail
+fn engine_err(e: scc_engine::EngineError) -> crate::CliError {
+    crate::CliError::Other(e.to_string())
+}
 use scc_core::kinds;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -147,8 +152,8 @@ pub fn cmd_overview(root: &Path, json: bool) -> crate::Result<()> {
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let pack = comp.ctx().system_overview();
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let pack = engine.context().overview().map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&pack)?);
     } else {
@@ -170,22 +175,8 @@ pub fn cmd_atlas(
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let pack = if full {
-        comp.ctx().system_atlas_scoped(
-            budget,
-            scc_context::atlas::AtlasScope::Full,
-            unbounded,
-        )
-    } else if unbounded {
-        comp.ctx().system_atlas_scoped(
-            budget,
-            scc_context::atlas::AtlasScope::Production,
-            true,
-        )
-    } else {
-        comp.ctx().system_atlas(budget)
-    };
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let pack = engine.context().atlas(budget, full, unbounded).map_err(engine_err)?;
     if json {
         println!("{}", serde_json::to_string(&pack)?);
     } else {
@@ -204,41 +195,10 @@ pub fn cmd_context_startup(root: &Path, budget_tokens: Option<usize>) -> crate::
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let ctx = comp.ctx();
-    let budget = startup_budget(budget_tokens, &ctx);
-    let startup =
-        scc_context::startup::build_startup(&ctx, &budget, scc_context::startup::RENDERER_VERSION);
-    print!("{}", scc_context::startup::render_startup(&startup));
-
-    // Record what the session just showed (novelty-suppression source):
-    // the visible ids derive from the SAME render the artifact printed —
-    // the surface is never rebuilt for the ledger.
-    let ledger_store = scc_context::context_ledger::ContextLedgerStore::new(&store);
-    let mut led = ledger_store.load();
-    let (syms, files, comps, flows) = scc_context::startup::visible_ids_from_startup(&ctx, &startup);
-    led.visible_entities.extend(syms.iter().cloned());
-    led.visible_symbols.extend(syms);
-    led.visible_files.extend(files);
-    led.visible_components.extend(comps);
-    led.visible_flows.extend(flows);
-    ledger_store.save(&led);
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let (_startup, text) = engine.context().startup(&scc_api::StartupRequest { budget: budget_tokens }).map_err(engine_err)?;
+    print!("{text}");
     Ok(())
-}
-
-/// Wave 15.2 adaptive startup budgets — the transport-parity shim over THE
-/// one allocator ([`scc_context::startup::allocate_startup_budget`]): no
-/// `--budget` selects the configured default total and STILL runs the
-/// adaptive complexity split (None never bypasses adaptation); an explicit
-/// `--budget N` scales the total through the same allocator. MCP, HTTP,
-/// Hermes, the SDKs and the hooks all resolve budgets through the same
-/// function — no transport keeps its own 13:7 formula.
-// trace:v1 id=impl.crates-scc-cli-src-commands.startup-budget work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching satisfies=REQ-adaptive-startup-budgets
-fn startup_budget(
-    tokens: Option<usize>,
-    ctx: &scc_context::ContextCompiler,
-) -> scc_core::ContextBudget {
-    scc_context::startup::allocate_startup_budget(ctx, tokens)
 }
 
 /// `scc surface [--task "<goal>"] [--budget N] [--explain]` — the System
@@ -258,8 +218,7 @@ pub fn cmd_surface(
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    let ctx = comp.ctx();
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
     let tokens = budget.unwrap_or(scc_core::ContextBudget::default().surface);
     // Semantic scorer (SCC-071): wired in when the embed_cli rankers are
     // available (inference.enabled + remote-model policy) and the surface
@@ -275,30 +234,9 @@ pub fn cmd_surface(
     };
     let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
         scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-    let request = scc_context::surface::SurfaceRequest {
-        mode: match task {
-            Some(goal) => scc_context::surface::SurfaceMode::Task { goal, visible: None },
-            None => scc_context::surface::SurfaceMode::Global,
-        },
-        budget: tokens,
-        explain,
-        policy: scc_context::surface::SurfacePolicy::defaults(tokens),
-        semantic,
-    };
-    let result = scc_context::surface::build_surface(&ctx, request);
-    let text = match task {
-        Some(goal) => task_surface_text(goal, &result),
-        None => result.text,
-    };
+    let req = scc_api::SurfaceRequest { task: task.map(|s| s.to_string()), budget: Some(tokens), explain };
+    let (_result, text) = engine.context().surface(&req, semantic).map_err(engine_err)?;
     print!("{text}");
-
-    // Record what the session just showed (novelty-suppression source):
-    // rendered entry ids resolve to logical symbol ids/files/components.
-    if !result.rendered_ids.is_empty() {
-        let mut led = scc_context::context_ledger::ContextLedgerStore::new(&store).load();
-        record_rendered_entries(&mut led, &result.rendered_entries, &result.rendered_ids);
-        scc_context::context_ledger::ContextLedgerStore::new(&store).save(&led);
-    }
     Ok(())
 }
 
@@ -352,135 +290,6 @@ pub(crate) fn task_surface_text(goal: &str, result: &scc_core::SurfaceRenderResu
         .strip_prefix("SCC SYSTEM SURFACE MAP")
         .unwrap_or(result.text.as_str());
     format!("# SYSTEM SURFACE MAP (task-personalized: {goal}){body}")
-}
-
-/// Mark entity ids as visible, classifying them into the ledger's
-/// kind-scoped sets by entity kind.
-// trace:exempt reason=internal-detail
-// trace:v1 id=impl.crates-scc-cli-src-commands.record-visible-ids work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
-fn record_visible_ids(
-    led: &mut scc_core::ContextLedger,
-    ctx: &scc_context::ContextCompiler,
-    ids: &[String],
-) {
-    for id in ids {
-        led.visible_entities.insert(id.clone());
-        if let Some(e) = ctx.view.entity(id) {
-            match e.kind.as_str() {
-                kinds::SYMBOL => {
-                    led.visible_symbols.insert(id.clone());
-                }
-                kinds::COMPONENT => {
-                    led.visible_components.insert(id.clone());
-                }
-                kinds::FLOW => {
-                    led.visible_flows.insert(id.clone());
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-/// Truncate `content` so its estimated token count fits `cap`. Used as the
-/// LAST-RESORT trim step in [`build_task_context`] when dropping Hindsight,
-/// Beads, and the Surface delta still leaves the artifact over the caller's
-/// explicit hard cap (the pack builder only drops whole sections). Prefers a
-/// line boundary that does NOT exceed the cap (backs off to the previous
-/// newline); extending forward to the next newline is only allowed when
-/// the result plus footer still fits. Returns the original if it already
-/// fits.
-// trace:v1 id=impl.crates-scc-cli-src-commands.truncate-to work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
-pub(crate) fn truncate_to(content: &str, cap: usize) -> String {
-    if scc_core::estimate_tokens(content) <= cap {
-        return content.to_string();
-    }
-    const FOOTER: &str = "\n\n… [task hard cap: content truncated to fit budget]\n";
-    let footer_tokens = scc_core::estimate_tokens(FOOTER);
-    if footer_tokens > cap {
-        return String::new();
-    }
-    let target = cap.saturating_sub(footer_tokens);
-    let mut lo = 0usize;
-    let mut hi = content.len();
-    // Binary search the largest prefix whose estimated tokens fit the
-    // target (which reserves the footer's tokens so the final artifact
-    // still satisfies the cap).
-    while lo < hi {
-        let mid = (lo + hi).div_ceil(2);
-        let prefix = &content[..content.floor_char_boundary(mid)];
-        if scc_core::estimate_tokens(prefix) <= target {
-            lo = mid;
-        } else {
-            hi = mid.saturating_sub(1);
-        }
-    }
-    let mut cut = content.floor_char_boundary(lo);
-    // Back off to the previous newline so we never split mid-line AND
-    // never blow past the cap (extending FORWARD to the next newline can
-    // include a line that is far past the budget).
-    let min_chars = content[..cut].chars().count() / 2;
-    if let Some(nl) = content[..cut].rfind('\n') {
-        let prefix_chars = content[..nl].chars().count();
-        if prefix_chars >= min_chars {
-            cut = nl;
-        }
-    }
-    // Extending to the next newline is allowed only when the candidate
-    // still fits the hard cap after the footer is appended.
-    if let Some(rest) = content.get(cut..) {
-        if let Some(nl) = rest.find('\n') {
-            let extended = cut + nl;
-            let mut candidate = content[..extended].to_string();
-            candidate.push_str(FOOTER);
-            if scc_core::estimate_tokens(&candidate) <= cap {
-                cut = extended;
-            }
-        }
-    }
-    let mut out = content[..cut].to_string();
-    out.push_str(FOOTER);
-    // Final belt: if still over (footer + tiny prefix), shrink without
-    // requiring a newline.
-    while scc_core::estimate_tokens(&out) > cap && cut > 0 {
-        cut = content.floor_char_boundary(cut.saturating_sub(1));
-        if let Some(nl) = content[..cut].rfind('\n') {
-            cut = nl;
-        }
-        out = content[..cut].to_string();
-        out.push_str(FOOTER);
-        if cut == 0 {
-            break;
-        }
-    }
-    out
-}
-
-/// Mark the RENDERED surface entries visible (symbols, files, components),
-/// resolving overload-sensitive entry ids (`{symbol}#overload{N}`) through
-/// the compiled map so the ledger always records the logical symbol id.
-// trace:exempt reason=internal-detail
-// trace:v1 id=impl.crates-scc-cli-src-commands.record-rendered-surface work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
-fn record_rendered_entries(
-    led: &mut scc_core::ContextLedger,
-    entries: &[scc_core::SurfaceEntry],
-    rendered_ids: &[String],
-) {
-    if !entries.is_empty() {
-        for e in entries {
-            led.visible_entities.insert(e.symbol_id.clone());
-            led.visible_symbols.insert(e.symbol_id.clone());
-            led.visible_files.insert(e.path.clone());
-            if let Some(c) = &e.component {
-                led.visible_components.insert(c.clone());
-            }
-        }
-        return;
-    }
-    // Legacy renders (no entries attached): record ids as entities.
-    for id in rendered_ids {
-        led.visible_entities.insert(id.clone());
-    }
 }
 
 /// `scc context structural --files <paths...> | --task "<goal>" [--budget N]` —
@@ -641,117 +450,34 @@ pub fn build_task_context(
     budget: Option<usize>,
     hook: bool,
 ) -> crate::Result<TaskContextArtifact> {
-    let store = open_store(root)?;
-    let config = load_config(root)?;
-    let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
-    // Semantic services resolved ONCE per operation (transport parity):
-    // the same scorer instance backs the pack's candidate fusion and the
-    // delta's SurfaceRequest.semantic. Fails closed on remote policy.
+    build_task_context_engine(root, goal, files, symbols, budget, hook).map_err(engine_err).map(from_engine_artifact)
+}
+
+// trace:exempt reason=internal-detail
+fn from_engine_artifact(a: scc_engine::TaskContextArtifact) -> TaskContextArtifact {
+    TaskContextArtifact { pack: a.pack, delta: a.delta, delta_ids: a.delta_ids, token_count: a.token_count }
+}
+
+// trace:exempt reason=internal-detail
+fn build_task_context_engine(
+    root: &Path,
+    goal: &str,
+    files: &[String],
+    symbols: &[String],
+    budget: Option<usize>,
+    hook: bool,
+) -> scc_engine::Result<scc_engine::TaskContextArtifact> {
+    let store = scc_engine::workspace::open_store(root)?;
+    let config = scc_engine::workspace::load_config(root)?;
+    let stale = scc_engine::workspace::stale_paths(&store)?;
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale)?;
     let (scorer, reranker) = crate::embed_cli::rankers(&store, &config, goal);
     let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
         scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
     let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
         reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
-    let mut ep = enrich_task_pack(
-        &comp,
-        &store,
-        &config,
-        root,
-        goal,
-        files,
-        symbols,
-        budget,
-        hook,
-        scorer_trait,
-        reranker_trait,
-    );
-    // ONE hard cap (fixwave Item 25): hook mode always caps at 1500 (or an
-    // explicit budget, whichever is smaller); explicit mode uses the budget;
-    // neither -> the delta gets its own task_delta slice (no total cap).
-    let hard_cap: Option<usize> = if hook {
-        Some(budget.unwrap_or(1500).min(1500))
-    } else {
-        budget
-    };
-    let ctx = comp.ctx();
-    let ledger_store = scc_context::context_ledger::ContextLedgerStore::new(&store);
-    let visible = ledger_store.load();
-    // The delta gets what the fully-enriched pack leaves of the cap.
-    let delta_budget = match hard_cap {
-        Some(c) => c.saturating_sub(ep.pack.tokens),
-        None => scc_core::ContextBudget::default().task_delta,
-    };
-    let (mut delta, mut delta_ids) =
-        scc_context::startup::task_delta_with_ids(&ctx, goal, &visible, delta_budget, scorer_trait);
-    // Trim order when the FINAL rendered artifact exceeds the hard cap:
-    // Hindsight -> Beads -> lower-ranked Surface delta -> task-pack content
-    // (fixwave Item 26).
-    let mut include_hindsight = true;
-    let mut include_beads = true;
-    let mut dropped: Vec<&str> = Vec::new();
-    if let Some(cap) = hard_cap {
-        let full = ep.tokens_including(true, true) + scc_core::estimate_tokens(&delta);
-        if full > cap && include_hindsight && !ep.hindsight.is_empty() {
-            include_hindsight = false;
-            dropped.push("hindsight");
-        }
-        let no_h = ep.tokens_including(include_hindsight, true) + scc_core::estimate_tokens(&delta);
-        if no_h > cap && include_beads && !ep.beads.is_empty() {
-            include_beads = false;
-            dropped.push("beads");
-        }
-        let no_e = ep.tokens_including(include_hindsight, include_beads)
-            + scc_core::estimate_tokens(&delta);
-        if no_e > cap && !delta.is_empty() {
-            delta = String::new();
-            delta_ids.clear();
-            dropped.push("surface-delta");
-        }
-    }
-    ep.assemble(include_hindsight, include_beads);
-    if let Some(cap) = hard_cap {
-        let total = scc_core::estimate_tokens(&ep.pack.content) + scc_core::estimate_tokens(&delta);
-        if total > cap {
-            // Last resort: hard-truncate the task-pack content to fit the
-            // caller's explicit cap (the pack builder only drops whole
-            // sections; this is the caller's cap enforcement).
-            ep.pack.content = truncate_to(&ep.pack.content, cap);
-            ep.pack.tokens = scc_core::estimate_tokens(&ep.pack.content);
-            ep.pack.hard_truncated = true;
-            dropped.push("task-pack");
-        }
-    }
-    // The ledger records ONLY the FINAL delta ids — after the cap and trim
-    // have decided what is actually shown (fixwave Item 24). Never record
-    // ids whose delta was dropped.
-    if !delta_ids.is_empty() {
-        let mut led = visible;
-        record_visible_ids(&mut led, &ctx, &delta_ids);
-        ledger_store.save(&led);
-    }
-    // Final accounting from the ACTUAL rendered artifact (enriched pack +
-    // delta), not stale component estimates.
-    let token_count = scc_core::estimate_tokens(&ep.pack.content) + scc_core::estimate_tokens(&delta);
-    let mut artifact = TaskContextArtifact {
-        pack: ep.pack,
-        delta,
-        delta_ids,
-        token_count,
-    };
-    if let Some(cap) = hard_cap {
-        assert!(
-            artifact.token_count <= cap,
-            "task artifact {token_count} exceeded hard cap {cap}"
-        );
-    }
-    if !dropped.is_empty() {
-        artifact.pack.warnings.push(format!(
-            "task cap enforced: dropped [{}]",
-            dropped.join(", ")
-        ));
-    }
-    Ok(artifact)
+    let req = scc_api::TaskContextRequest { goal: goal.to_string(), files: files.to_vec(), symbols: symbols.to_vec(), budget, hook };
+    scc_engine::task::build_task_context(&engine, &config, root, &req, scorer_trait, reranker_trait)
 }
 
 /// pack with scorer + beads + hindsight and its post-enrichment token
@@ -770,10 +496,10 @@ pub fn build_enriched_task_pack(
     budget: Option<usize>,
     hook: bool,
 ) -> crate::Result<scc_context::ContextPack> {
-    let store = open_store(root)?;
-    let config = load_config(root)?;
-    let stale = crate::stale_paths(&store)?;
-    let comp = compiler(&store, &config, stale)?;
+    let store = scc_engine::workspace::open_store(root).map_err(engine_err)?;
+    let config = scc_engine::workspace::load_config(root).map_err(engine_err)?;
+    let stale = scc_engine::workspace::stale_paths(&store).map_err(engine_err)?;
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
     // No delta, no ledger: pack-only, pure. Scorer resolved for the pack's
     // candidate fusion (same fallback-closed semantics as the full builder).
     let (scorer, reranker) = crate::embed_cli::rankers(&store, &config, goal);
@@ -781,128 +507,8 @@ pub fn build_enriched_task_pack(
         scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
     let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
         reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
-    let ep = enrich_task_pack(
-        &comp, &store, &config, root, goal, files, symbols, budget, hook, scorer_trait, reranker_trait,
-    );
-    Ok(ep.pack)
-}
-
-/// The enriched task pack + its post-enrichment token recompute (the one
-/// place enrichment happens). Shared by [`build_task_context`] (which then
-/// layers the delta + ledger on top) and the pure
-/// [`build_enriched_task_pack`]. Pure: no delta, no ledger, no side
-/// effects.
-#[allow(clippy::too_many_arguments)] // one shared enrichment seam: every arg is a distinct input axis
-// trace:v1 id=impl.crates-scc-cli-src-commands.enrich-task-pack work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching satisfies=REQ-complete-task-context-identical-across-transports
-fn enrich_task_pack(
-    comp: &crate::Compiler,
-    store: &scc_store::Store,
-    config: &scc_indexer::Config,
-    root: &Path,
-    goal: &str,
-    files: &[String],
-    symbols: &[String],
-    budget: Option<usize>,
-    hook: bool,
-    scorer: Option<&dyn scc_context::rank::SemanticScorer>,
-    reranker: Option<&dyn scc_context::rank::Reranker>,
-) -> EnrichedPack {
-    let mut pack = comp.ctx().task_context_with_rankers(
-        goal,
-        files,
-        symbols,
-        if hook {
-            Some(budget.unwrap_or(1500).min(1500))
-        } else {
-            budget
-        },
-        scorer,
-        reranker,
-    );
-    // task-state + memory enrichment (below the System IR authority line)
-    let mut beads = String::new();
-    let beads_active = scc_indexer::adapters::beads::active_beads(root, 5);
-    if !beads_active.is_empty() {
-        beads.push_str(
-            "\n# ACTIVE TASK STATE (from .beads/issues.jsonl — task state, not system facts)\n",
-        );
-        for t in beads_active {
-            beads.push_str("- ");
-            beads.push_str(&t);
-            beads.push('\n');
-        }
-    }
-    let mut hindsight = String::new();
-    if config.integrations.hindsight {
-        let lessons = scc_indexer::adapters::hindsight::lessons(store, 5);
-        if !lessons.is_empty() {
-            hindsight.push_str(
-                "\n# HINDSIGHT LESSONS (memory, below System IR authority — not verified facts)\n",
-            );
-            for (content, tags) in lessons {
-                let tag_str = if tags.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", tags.join(", "))
-                };
-                hindsight.push_str(&format!("- {content}{tag_str}\n"));
-            }
-        }
-    }
-    let base = pack.content.clone();
-    pack.content.push_str(&beads);
-    pack.content.push_str(&hindsight);
-    // Part 2 accounting fix: recompute AFTER ALL enrichment so `pack.tokens`
-    // reflects the ACTUAL rendered content (the pre-enrichment count hid
-    // beads+hindsight, so the surface-delta budget overallocated by the
-    // enrichment size and could blow the documented task cap).
-    pack.tokens = scc_core::estimate_tokens(&pack.content);
-    EnrichedPack {
-        pack,
-        base,
-        beads,
-        hindsight,
-    }
-}
-
-/// The result of [`enrich_task_pack`]: the fully-enriched pack plus the
-/// separable enrichment sections, so [`build_task_context`] can trim
-/// low-authority enrichment (Hindsight -> Beads) when the final artifact
-/// exceeds the hard cap. `pack.content` is `base + beads + hindsight`;
-/// `pack.tokens` is its estimate.
-// trace:exempt reason=internal-helper
-struct EnrichedPack {
-    pack: scc_context::ContextPack,
-    base: String,
-    beads: String,
-    hindsight: String,
-}
-// trace:exempt reason=internal-helper
-impl EnrichedPack {
-    /// Token count of the pack content with the requested enrichment
-    /// sections included (Hindsight/Beads are dropped in that order when
-    /// the artifact exceeds the cap).
-    // trace:exempt reason=internal-helper
-    fn tokens_including(&self, hindsight: bool, beads: bool) -> usize {
-        scc_core::estimate_tokens(&self.base)
-            + if beads { scc_core::estimate_tokens(&self.beads) } else { 0 }
-            + if hindsight { scc_core::estimate_tokens(&self.hindsight) } else { 0 }
-    }
-
-    /// Rebuild `pack.content` from the retained sections and refresh its
-    /// token count.
-    // trace:exempt reason=internal-helper
-    fn assemble(&mut self, hindsight: bool, beads: bool) {
-        self.pack.content = String::new();
-        self.pack.content.push_str(&self.base);
-        if beads {
-            self.pack.content.push_str(&self.beads);
-        }
-        if hindsight {
-            self.pack.content.push_str(&self.hindsight);
-        }
-        self.pack.tokens = scc_core::estimate_tokens(&self.pack.content);
-    }
+    let req = scc_api::TaskContextRequest { goal: goal.to_string(), files: files.to_vec(), symbols: symbols.to_vec(), budget, hook };
+    scc_engine::task::build_enriched_task_pack(&engine, &config, root, &req, scorer_trait, reranker_trait).map_err(engine_err)
 }
 
 /// `scc context task <goal> [--budget N] [--json] [--hook]` — the complete
@@ -2415,52 +2021,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    // trace:v1 id=test.scc-cli-commands.truncate-to-hard-cap work=WORK-task-context-transport-parity verifies=REQ-complete-task-context-identical-across-transports,REQ-implement-p0-omp-integration-correctness-and-writable-benchmark-scient exercises=impl.crates-scc-cli-src-commands.truncate-to
-    fn truncate_to_never_exceeds_hard_cap_when_next_newline_is_far_past() {
-        // Binary search finds a fitting prefix, then the old implementation
-        // extended FORWARD to the next newline (`cut += nl`), which blew
-        // past the cap when that newline was far away. A true hard cap
-        // must back off (or re-check after extending).
-        let mut body = String::from("HEADER\n");
-        body.push_str(&"x".repeat(400)); // ~100 tokens before the next newline
-        body.push('\n');
-        body.push_str("TAIL\n");
-        let cap = 40; // far below the long line
-        let out = truncate_to(&body, cap);
-        let tokens = scc_core::estimate_tokens(&out);
-        assert!(
-            tokens <= cap,
-            "truncate_to must honor the hard cap: {tokens} > {cap}\n{out:?}"
-        );
-        assert!(
-            out.contains("task hard cap"),
-            "footer must be present: {out}"
-        );
-        assert!(
-            !out.contains(&"x".repeat(400)),
-            "must not include the line that sits far past the cap"
-        );
-    }
-
-    #[test]
-    // trace:v1 id=test.scc-cli-commands.truncate-to-fits-already work=WORK-task-context-transport-parity verifies=REQ-complete-task-context-identical-across-transports
-    fn truncate_to_returns_original_when_under_cap() {
-        let content = "short\n";
-        assert_eq!(truncate_to(content, 1000), content);
-    }
-
-    #[test]
-    // trace:v1 id=test.scc-cli-commands.truncate-to-footer-exceeds-cap work=WORK-task-context-transport-parity verifies=REQ-complete-task-context-identical-across-transports,REQ-implement-p0-omp-integration-correctness-and-writable-benchmark-scient exercises=impl.crates-scc-cli-src-commands.truncate-to
-    fn truncate_to_returns_empty_when_footer_exceeds_cap() {
-        let content = "HEADER\nbody that does not fit\n";
-        let out = truncate_to(content, 1);
-        assert!(
-            out.is_empty(),
-            "footer larger than the cap must not be returned: {out:?} tokens={}",
-            scc_core::estimate_tokens(&out)
-        );
-    }
 
     #[test]
 // trace:v1 id=impl.crates-scc-cli-src-commands.lessons-add-appends-jsonl-lines work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching

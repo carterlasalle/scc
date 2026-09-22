@@ -1,6 +1,6 @@
 [package]
 # trace:exempt reason=internal-detail
-name = "scc-cli"
+name = "scc-engine"
 # trace:exempt reason=internal-detail
 version.workspace = true
 # trace:exempt reason=internal-detail
@@ -8,13 +8,7 @@ edition.workspace = true
 # trace:exempt reason=internal-detail
 license.workspace = true
 # trace:exempt reason=internal-detail
-description = "System Context Compiler CLI, daemon, MCP server, and Claude Code plugin"
-
-[[bin]]
-# trace:exempt reason=internal-detail
-name = "scc"
-# trace:exempt reason=internal-detail
-path = "src/main.rs"
+description = "SCC engine facade: one orchestration seam for CLI, HTTP, MCP, SDKs, RPC, FFI"
 
 [dependencies]
 # trace:exempt reason=internal-detail
@@ -28,32 +22,14 @@ scc-graph.workspace = true
 # trace:exempt reason=internal-detail
 scc-context.workspace = true
 # trace:exempt reason=internal-detail
-scc-engine.workspace = true
-# trace:exempt reason=internal-detail
 scc-api.workspace = true
-# trace:exempt reason=internal-detail
-clap = { version = "4", features = ["derive"] }
 # trace:exempt reason=internal-detail
 serde.workspace = true
 # trace:exempt reason=internal-detail
 serde_json.workspace = true
 # trace:exempt reason=internal-detail
-serde_yaml.workspace = true
-# trace:exempt reason=internal-detail
 thiserror.workspace = true
-# trace:exempt reason=internal-detail
-tiny_http = "0.12"
-# trace:exempt reason=internal-detail
-notify = "6"
-# trace:exempt reason=internal-detail
-libc = "0.2"
-# trace:exempt reason=internal-detail
-tempfile = "3"
-# trace:exempt reason=internal-detail
-chrono.workspace = true
 
 [dev-dependencies]
 # trace:exempt reason=internal-detail
-jsonschema = "0.26"
-# trace:v1 id=ops.scc-cli-cargo-test-deps work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-parking_lot = "0.12.5"
+tempfile = "3"

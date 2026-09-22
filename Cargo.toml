@@ -1,34 +1,55 @@
 [workspace]
+# trace:exempt reason=internal-detail
 resolver = "2"
+# trace:exempt reason=internal-detail
 members = [
     "crates/scc-core",
     "crates/scc-store",
     "crates/scc-indexer",
     "crates/scc-graph",
     "crates/scc-context",
+    "crates/scc-api",
+    "crates/scc-engine",
     "crates/scc-cli",
 ]
 
 [workspace.package]
 # trace:v1 id=ops.release-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 version = "0.2.6"
+# trace:exempt reason=internal-detail
 edition = "2021"
+# trace:exempt reason=internal-detail
 license = "MIT"
 
 [workspace.dependencies]
+# trace:exempt reason=internal-detail
 scc-core = { path = "crates/scc-core" }
+# trace:exempt reason=internal-detail
 scc-store = { path = "crates/scc-store" }
+# trace:exempt reason=internal-detail
 scc-indexer = { path = "crates/scc-indexer" }
+# trace:exempt reason=internal-detail
 scc-graph = { path = "crates/scc-graph" }
+# trace:exempt reason=internal-detail
 scc-context = { path = "crates/scc-context" }
+# trace:exempt reason=internal-detail
+scc-api = { path = "crates/scc-api" }
+# trace:exempt reason=internal-detail
+scc-engine = { path = "crates/scc-engine" }
 
+# trace:exempt reason=internal-detail
 serde = { version = "1", features = ["derive"] }
+# trace:exempt reason=internal-detail
 serde_json = "1"
+# trace:exempt reason=internal-detail
 serde_yaml = "0.9"
+# trace:exempt reason=internal-detail
 thiserror = "2"
+# trace:exempt reason=internal-detail
 chrono = { version = "0.4", features = ["serde"] }
 
 [profile.release]
+# trace:exempt reason=internal-detail
 lto = "thin"
 
 [profile.profiling]
@@ -46,4 +67,5 @@ strip = false
 # the gap. Primary recipe stays cargo-flamegraph; retry samply on upgrade.
 
 [profile.dev]
+# trace:exempt reason=internal-detail
 opt-level = 1

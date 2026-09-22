@@ -1,0 +1,23 @@
+[package]
+# trace:exempt reason=internal-detail
+name = "scc-api"
+# trace:exempt reason=internal-detail
+version.workspace = true
+# trace:exempt reason=internal-detail
+edition.workspace = true
+# trace:exempt reason=internal-detail
+license.workspace = true
+# trace:exempt reason=internal-detail
+description = "SCC versioned request/response contracts (schema source for HTTP, SDKs, plugins)"
+
+[dependencies]
+# trace:exempt reason=internal-detail
+scc-core.workspace = true
+# trace:exempt reason=internal-detail
+scc-context.workspace = true
+# trace:exempt reason=internal-detail
+serde.workspace = true
+# trace:exempt reason=internal-detail
+serde_json.workspace = true
+# trace:exempt reason=internal-detail
+thiserror.workspace = true
