@@ -436,3 +436,35 @@ fn blend_profile_plugin_rescales_rank() {
     );
     assert!(err.is_err(), "unknown profile must fail: {err:?}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.mmr-similarity verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn mmr_similarity_hook_diversifies() {
+    // Default: same-group items are similar=1.0, so MMR with lambda=0
+    // (pure diversity) picks across groups, not the top-two of one group.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let ranked = serde_json::json!({"ranked": [
+        {"id": "a1", "value": 0.9, "group": "g1"},
+        {"id": "a2", "value": 0.8, "group": "g1"},
+        {"id": "b1", "value": 0.7, "group": "g2"}
+    ], "budget": 3, "lambda": 0.0});
+    // budget = full list length; MMR order must interleave groups.
+    let out = scc_engine::invoke(&root, "selection.mmr", ranked).unwrap();
+    let sel = out["selected"].as_array().unwrap();
+    let ids: Vec<&str> = sel.iter().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(ids[0], "a1", "highest value first: {ids:?}");
+    assert_eq!(ids[1], "b1", "diversity picks the other group second: {ids:?}");
+    // Pure unit checks for the fold: plugin value wins, default last.
+    assert_eq!(scc_engine::ranking::default_similarity(Some("x"), Some("x")), 1.0);
+    assert_eq!(scc_engine::ranking::default_similarity(Some("x"), Some("y")), 0.0);
+    assert_eq!(scc_engine::ranking::default_similarity(None, Some("x")), 0.0);
+    assert_eq!(scc_engine::ranking::default_similarity(Some(""), Some("")), 0.0);
+    let plug: scc_engine::ranking::SimilarityFn =
+        std::sync::Arc::new(|_a, _b, _ga, _gb| 0.42);
+    assert!((scc_engine::ranking::fold_similarity(&[plug], "a", "b", None, None) - 0.42).abs() < 1e-12);
+    assert!((scc_engine::ranking::fold_similarity(&[], "a", "b", Some("g"), Some("g")) - 1.0).abs() < 1e-12);
+}

@@ -360,8 +360,23 @@ pub fn invoke(
         "selection.mmr" => {
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
             let ranked: Vec<(String, f64)> = req.ranked.iter().map(|e| (e.id.clone(), e.value)).collect();
-            // Similarity hook op: ranking.similarity.<plugin> — default: same-component/path grouping is caller-side.
-            let out = crate::ranking::mmr_select(&ranked, &|_a: &str, _b: &str| 0.0, req.lambda.unwrap_or(0.5), ranked.len());
+            let groups: Vec<Option<String>> = req.ranked.iter().map(|e| e.group.clone()).collect();
+            // Similarity hook chain (DoD 27): `similarity` extensions fire
+            // first; the same-group default runs last. Groups ride the
+            // request's `group` field (component/path supplied by caller).
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, "");
+            let sims = std::sync::Arc::new(hooks.similarities);
+            let out = scc_context::selector::mmr_diversify(
+                &ranked,
+                |a: &str, b: &str| {
+                    let (ga, gb) = (group_of(&ranked, &groups, a), group_of(&ranked, &groups, b));
+                    crate::ranking::fold_similarity(&sims, a, b, ga, gb)
+                },
+                req.lambda.unwrap_or(0.5),
+                ranked.len(),
+            );
             serde_json::json!({"selected": out})
         }
         "selection.quotas" => {
@@ -456,6 +471,11 @@ pub fn invoke(
         }
     };
     Ok(out)
+}
+
+// trace:exempt reason=internal-detail
+fn group_of<'a>(ranked: &[(String, f64)], groups: &'a [Option<String>], id: &str) -> Option<&'a str> {
+    ranked.iter().position(|(rid, _)| rid == id).and_then(|i| groups.get(i).and_then(|g| g.as_deref()))
 }
 
 // trace:exempt reason=internal-detail
@@ -573,6 +593,16 @@ fn ranking_hooks_from_plugins(
                 }
                 hooks.profiles.insert(name, bw);
             }
+        }
+        if wants("similarity", "ranking.similarity") {
+            let plug = Arc::clone(&plug);
+            hooks.similarities.push(std::sync::Arc::new(move |a, b, ga, gb| {
+                let input = serde_json::json!({"a": a, "b": b, "group_a": ga, "group_b": gb});
+                match scc_plugin_host::call(&plug, "ranking.similarity", input, None) {
+                    Ok(v) => v.get("similarity").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                    Err(_) => 0.0,
+                }
+            }));
         }
         if wants("reranker", "ranking.rerank") {
             let plug = Arc::clone(&plug);

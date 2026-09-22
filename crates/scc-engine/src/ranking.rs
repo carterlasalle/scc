@@ -306,6 +306,9 @@ pub struct BlendWeights {
     pub novelty: Option<f64>,
 }
 
+// trace:exempt reason=internal-detail
+pub type SimilarityFn = std::sync::Arc<dyn Fn(&str, &str, Option<&str>, Option<&str>) -> f64 + Send + Sync>;
+
 #[derive(Default)]
 // trace:exempt reason=internal-detail
 pub struct RankHooks {
@@ -313,6 +316,10 @@ pub struct RankHooks {
     pub features: Vec<RankFeatureFn>,
     pub rerankers: Vec<RerankerFn>,
     pub edge_weights: Vec<EdgeWeightFn>,
+    /// Pairwise item similarity for MMR diversification. First provider
+    /// returning a nonzero value wins (deterministic chain order);
+    /// the built-in default (same-group => 1.0) runs last.
+    pub similarities: Vec<SimilarityFn>,
     /// Named blend profiles: profile name -> per-feature weight
     /// overrides for the linear blend (feature keys: task_ppr,
     /// global_ppr, lexical, semantic, confidence, criticality,
@@ -336,6 +343,35 @@ pub fn apply_edge_weight(base: f64, mode: &str, value: f64) -> f64 {
 // trace:exempt reason=internal-detail
 pub fn mmr_select(ranked: &[(String, f64)], similar: &dyn Fn(&str, &str) -> f64, lambda: f64, budget: usize) -> Vec<String> {
     scc_context::selector::mmr_diversify(ranked, similar, lambda, budget.max(1))
+}
+
+/// Default MMR similarity: same non-empty group => 1.0, else 0.0.
+/// Groups are caller-supplied (component/path); `None`/empty never match.
+// trace:exempt reason=internal-detail
+pub fn default_similarity(a_group: Option<&str>, b_group: Option<&str>) -> f64 {
+    match (a_group, b_group) {
+        (Some(g1), Some(g2)) if !g1.is_empty() && g1 == g2 => 1.0,
+        _ => 0.0,
+    }
+}
+
+/// Fold chained similarity providers over one pair: first nonzero wins.
+/// Falls back to [`default_similarity`] when no provider fires.
+// trace:exempt reason=internal-detail
+pub fn fold_similarity(
+    providers: &[SimilarityFn],
+    a: &str,
+    b: &str,
+    a_group: Option<&str>,
+    b_group: Option<&str>,
+) -> f64 {
+    for p in providers {
+        let v = p(a, b, a_group, b_group);
+        if v != 0.0 {
+            return v.clamp(0.0, 1.0);
+        }
+    }
+    default_similarity(a_group, b_group)
 }
 
 // trace:exempt reason=internal-detail
