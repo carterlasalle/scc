@@ -105,6 +105,65 @@ fn cold_index_50k_loc_under_30s() {
     );
 }
 
+
+/// Entrypoint timings audit (perf close-out 2026-09-21): times every fast
+/// read entry point on ONE warm synthetic repo (50 files x 100 lines, cold
+/// indexed once up front) and prints a JSON line per command to stderr.
+/// AUDIT, not gate: no time bound — GHA runner variance makes hard bounds a
+/// lottery (see cold_index_50k above). The bench-250k job uploads the log;
+/// the tripwires live in docs/CAPABILITY_LEDGER.md (warm medians on the
+/// self repo, not CI gates). Manual run:
+///   cargo test -p scc-cli --release --test perf entrypoint_timings_audit -- --nocapture
+#[test]
+// trace:v1 id=test.scc-cli.perf.entrypoint-timings-audit verifies=REQ-SCC-TEST
+fn entrypoint_timings_audit() {
+    let repo = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(workdir(repo.path())).unwrap();
+    generate(&workdir(repo.path()), 50, 100);
+    let dir = workdir(repo.path());
+    // Cold index once (not timed); everything below runs warm.
+    run_ok(&dir, &["index", "--quiet"]);
+    // Second index exercises the no-change fast path.
+    let cmds: &[&[&str]] = &[
+        &["index", "--quiet"],
+        &["status"],
+        &["important"],
+        &["surface"],
+        &["surface", "--task", "rename the helper"],
+        &["context", "task", "rename the helper"],
+        &["context", "startup"],
+        &["atlas"],
+        &["components"],
+        &["flows"],
+        &["verify"],
+        &["query", "helper"],
+        &["impact", "mod_0000.py"],
+        &["export", "system-ir.json"],
+        &["diff", "--help"],
+        &["history"],
+    ];
+    for cmd in cmds {
+        let start = Instant::now();
+        let out = std::process::Command::new(scc())
+            .args(*cmd)
+            .current_dir(&dir)
+            .output()
+            .unwrap_or_else(|e| panic!("{cmd:?} failed to spawn: {e}"));
+        let elapsed = start.elapsed();
+        assert!(
+            out.status.success(),
+            "{cmd:?} exited {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        eprintln!(
+            "PERF-AUDIT cmd={:?} ms={}",
+            cmd.join(" "),
+            elapsed.as_millis()
+        );
+    }
+}
+
 /// 250k LOC cold index (SCC-241): 1000 files x 250 lines, 120s bound.
 /// Manual run:
 ///   cargo test -p scc-cli --test perf cold_index_250k -- --ignored --nocapture
