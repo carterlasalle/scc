@@ -381,6 +381,18 @@ pub fn invoke(
             }
             crate::plugins::commit_contribution(&store, plugin, &batch)?
         }
+        "plugins.lock" => {
+            let ap = crate::plugins::active(root, &config);
+            let path = scc_plugin_host::write_lockfile(root, &ap.plugins).map_err(crate::EngineError::Other)?;
+            serde_json::json!({"ok": true, "path": path.to_string_lossy(), "plugins": crate::plugins::lock_entries(&ap)})
+        }
+        "plugins.check" => {
+            let ap = crate::plugins::active(root, &config);
+            match scc_plugin_host::check_lockfile(root, &ap.plugins) {
+                Ok(()) => serde_json::json!({"ok": true}),
+                Err(drift) => serde_json::json!({"ok": false, "drift": drift}),
+            }
+        }
         "plugins.invoke" => {
             let op = input.get("operation").and_then(|v| v.as_str()).unwrap_or(operation);
             let inner = input.get("input").cloned().unwrap_or(serde_json::json!({}));

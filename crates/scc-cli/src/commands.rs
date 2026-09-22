@@ -1477,6 +1477,28 @@ pub fn cmd_plugin_doctor(root: &Path) -> crate::Result<()> {
     Ok(())
 }
 
+/// `scc plugin lock`: write .scc/plugins.lock from the live set.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-lock work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_lock(root: &Path) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.lock", serde_json::json!({})).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// `scc plugin check`: verify live plugins against .scc/plugins.lock.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-check work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_check(root: &Path) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.check", serde_json::json!({})).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    if out.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        return Err(crate::CliError::Other(format!(
+            "plugin lock drift: {}",
+            out.get("drift").map(|v| v.to_string()).unwrap_or_default()
+        )));
+    }
+    Ok(())
+}
+
 /// `scc plugin invoke <operation> [json-input]`.
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-invoke work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_plugin_invoke(root: &Path, operation: &str, input: &str) -> crate::Result<()> {

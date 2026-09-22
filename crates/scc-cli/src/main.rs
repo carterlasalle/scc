@@ -36,6 +36,10 @@ enum PluginSub {
     },
     /// Plugin environment + failure diagnostics
     Doctor,
+    /// Write .scc/plugins.lock from the live plugin set (reproducible installs)
+    Lock,
+    /// Verify the live plugin set against .scc/plugins.lock (fail on drift)
+    Check,
     /// Invoke a plugin operation: scc plugin invoke <operation> [json-input]
     Invoke {
         /// Operation id (e.g. acme.echo)
@@ -928,6 +932,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             PluginSub::List => commands::cmd_plugin_list(&root),
             PluginSub::Describe { id } => commands::cmd_plugin_describe(&root, id.as_str()),
             PluginSub::Doctor => commands::cmd_plugin_doctor(&root),
+            PluginSub::Lock => commands::cmd_plugin_lock(&root),
+            PluginSub::Check => commands::cmd_plugin_check(&root),
             PluginSub::Invoke { operation, input } => commands::cmd_plugin_invoke(&root, operation.as_str(), input.as_str()),
         },
         Commands::Ingest { body } => commands::cmd_ingest_runtime(&root, &body),

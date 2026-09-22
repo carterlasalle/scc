@@ -125,6 +125,8 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "plugins.describe", description: "Describe one plugin manifest", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "plugins.doctor", description: "Plugin environment + failure diagnostics", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "plugins.invoke", description: "Invoke any plugin operation explicitly", mutation: MutationClass::Write, streaming: false },
+    OperationDescriptor { id: "plugins.lock", description: "Write .scc/plugins.lock from the live plugin set", mutation: MutationClass::Write, streaming: false },
+    OperationDescriptor { id: "plugins.check", description: "Verify live plugins against .scc/plugins.lock", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "plugins.contribute", description: "Validate and commit a plugin contribution batch (entities, relationships, evidence)", mutation: MutationClass::Write, streaming: false },
 ];
 

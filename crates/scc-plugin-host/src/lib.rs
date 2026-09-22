@@ -232,3 +232,72 @@ mod tests {
         assert!(super::call(&p, "state.get", serde_json::json!({}), None).is_err());
     }
 }
+
+/// Project plugin lockfile (§29): `.scc/plugins.lock` records the resolved
+/// plugin set so behavior reproduces across machines.
+///
+/// Each entry carries id, version, source dir, artifact hash, API version,
+/// and granted permissions — the fields `lock_entry` already emits. Write
+/// is atomic (temp + rename); read returns an empty set when absent (fresh
+/// checkout, no plugins pinned yet).
+// trace:v1 id=impl.scc-plugin-host.lockfile work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn lockfile_path(repo_root: &std::path::Path) -> PathBuf {
+    repo_root.join(".scc").join("plugins.lock")
+}
+
+// trace:exempt reason=internal-detail
+pub fn write_lockfile(repo_root: &std::path::Path, plugins: &[LoadedPlugin]) -> Result<PathBuf, String> {
+    let path = lockfile_path(repo_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let entries: Vec<serde_json::Value> = plugins.iter().map(lock_entry).collect();
+    let doc = serde_json::json!({"version": 1, "plugins": entries});
+    let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("lock.tmp");
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+// trace:exempt reason=internal-detail
+pub fn read_lockfile(repo_root: &std::path::Path) -> Result<Vec<serde_json::Value>, String> {
+    let path = lockfile_path(repo_root);
+    let Ok(text) = std::fs::read_to_string(&path) else { return Ok(Vec::new()); };
+    let doc: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(doc.get("plugins").and_then(|v| v.as_array()).cloned().unwrap_or_default())
+}
+
+/// Verify the live plugin set against the lockfile: version or artifact
+/// drift fails loudly with the drifted ids named — never silently answers
+/// from a moved plugin set.
+// trace:v1 id=impl.scc-plugin-host.lockfile-check work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn check_lockfile(repo_root: &std::path::Path, plugins: &[LoadedPlugin]) -> Result<(), String> {
+    let locked = read_lockfile(repo_root)?;
+    if locked.is_empty() {
+        return Ok(());
+    }
+    let live: std::collections::BTreeMap<String, serde_json::Value> = plugins
+        .iter()
+        .map(|p| (p.manifest.id.clone(), lock_entry(p)))
+        .collect();
+    let mut drifted = Vec::new();
+    for entry in &locked {
+        let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        match live.get(id) {
+            None => drifted.push(format!("{id} (missing)")),
+            Some(cur) => {
+                let same = cur.get("version") == entry.get("version")
+                    && cur.get("artifact_hash") == entry.get("artifact_hash");
+                if !same {
+                    drifted.push(id.to_string());
+                }
+            }
+        }
+    }
+    if drifted.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("plugin set drifted from .scc/plugins.lock: {}", drifted.join(", ")))
+    }
+}

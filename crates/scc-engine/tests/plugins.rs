@@ -179,3 +179,36 @@ fn context_section_plugin_appends_provenance_section() {
     assert!(content.contains("# PLUGIN SECTION acme.impact (from acme.sec"), "{content}");
     assert!(content.contains("risk: hello"), "{content}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.lockfile-round-trip verifies=REQ-SI-503JSBGP exercises=impl.scc-plugin-host.lockfile
+fn plugin_lockfile_round_trip_and_drift() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = write_plugin(dir.path());
+    // No lockfile yet: check passes vacuously.
+    let ap = scc_engine::plugins::active(&root, &scc_indexer::Config::default());
+    assert!(scc_plugin_host::check_lockfile(&root, &ap.plugins).is_ok());
+    // Write then verify: current.
+    scc_plugin_host::write_lockfile(&root, &ap.plugins).unwrap();
+    assert!(root.join(".scc").join("plugins.lock").is_file());
+    let ap2 = scc_engine::plugins::active(&root, &scc_indexer::Config::default());
+    assert!(scc_plugin_host::check_lockfile(&root, &ap2.plugins).is_ok());
+    // Tamper the manifest version: drift names the plugin.
+    let manifest = root.join(".scc").join("plugins").join("acme.echo").join("scc-plugin.toml");
+    let text = std::fs::read_to_string(&manifest).unwrap().replace("1.0.0", "9.9.9");
+    std::fs::write(&manifest, text).unwrap();
+    let ap3 = scc_engine::plugins::active(&root, &scc_indexer::Config::default());
+    let err = scc_plugin_host::check_lockfile(&root, &ap3.plugins).unwrap_err();
+    assert!(err.contains("acme.echo"), "{err}");
+}
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.lock-check-ops verifies=REQ-SI-503JSBGP exercises=impl.scc-plugin-host.lockfile-check
+fn plugin_lock_and_check_ops_round_trip() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = write_plugin(dir.path());
+    let out = scc_engine::invoke(&root, "plugins.lock", serde_json::json!({})).unwrap();
+    assert_eq!(out.get("ok"), Some(&serde_json::json!(true)), "{out}");
+    let check = scc_engine::invoke(&root, "plugins.check", serde_json::json!({})).unwrap();
+    assert_eq!(check.get("ok"), Some(&serde_json::json!(true)), "{check}");
+}
