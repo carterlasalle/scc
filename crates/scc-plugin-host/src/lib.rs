@@ -195,6 +195,18 @@ pub fn lock_entry(p: &LoadedPlugin) -> serde_json::Value {
         for x in e.after.iter().chain(e.before.iter()) { h.update(x.as_bytes()); }
         serde_json::json!({"type": e.extension_type, "id": e.id, "priority": e.priority, "after": e.after, "before": e.before})
     }).collect();
+    // Spec 27: effective per-instance config and grants change behavior, so
+    // they fold into the artifact hash — otherwise a config-only change
+    // (e.g. risk_weight) or grant narrowing serves stale cached packs.
+    // serde_json::Map is BTree-backed, so to_string is canonical.
+    let config_str = serde_json::to_string(&p.config).unwrap_or_default();
+    h.update(config_str.as_bytes());
+    let mut grants: Vec<&str> = p.grants.iter().map(|x| x.as_str()).collect();
+    grants.sort();
+    for g in &grants {
+        h.update(g.as_bytes());
+        h.update(b"\0");
+    }
     serde_json::json!({
         "id": p.manifest.id,
         "version": p.manifest.version,
@@ -202,6 +214,8 @@ pub fn lock_entry(p: &LoadedPlugin) -> serde_json::Value {
         "artifact_hash": format!("{}", h.finalize().to_hex()),
         "operations": p.manifest.operations,
         "permissions": p.manifest.permissions.iter().map(|x| x.as_str()).collect::<Vec<_>>(),
+        "grants": grants,
+        "config": p.config,
         "runtime": format!("{:?}", p.manifest.runtime).to_lowercase(),
         "extensions": extensions,
     })

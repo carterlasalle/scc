@@ -53,6 +53,42 @@ fn lock_changes_cache_key() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.config-grants-invalidate verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.cache-key-fragment
+fn plugin_config_and_grants_invalidate_cache_key() {
+    // Spec 27: per-instance config and effective grants change behavior,
+    // so they must change the cache key — otherwise a config-only change
+    // serves stale cached packs as fresh.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = write_plugin(dir.path());
+    let base_cfg = scc_indexer::Config::default();
+    let ap0 = scc_engine::plugins::active(&root, &base_cfg);
+    let k0 = scc_engine::plugins::cache_key_fragment(&ap0);
+    // Config change: same manifest, different risk_weight.
+    let mut cfg1 = scc_indexer::Config::default();
+    cfg1.plugins.config.insert(
+        "acme.echo".into(),
+        serde_json::json!({"risk_weight": 0.9}),
+    );
+    let ap1 = scc_engine::plugins::active(&root, &cfg1);
+    let k1 = scc_engine::plugins::cache_key_fragment(&ap1);
+    assert_ne!(k0, k1, "config change must invalidate the cache key");
+    // lock_entry carries the config for lockfile reproducibility.
+    let e1 = scc_plugin_host::lock_entry(&ap1.plugins[0]);
+    assert_eq!(e1.get("config"), Some(&serde_json::json!({"risk_weight": 0.9})), "{e1}");
+    // Grant narrowing: same manifest, fewer effective grants.
+    let mut cfg2 = scc_indexer::Config::default();
+    cfg2.plugins.grants.insert("acme.echo".into(), vec!["state.read".into()]);
+    let ap2 = scc_engine::plugins::active(&root, &cfg2);
+    let k2 = scc_engine::plugins::cache_key_fragment(&ap2);
+    assert_ne!(k0, k2, "grant change must invalidate the cache key");
+    let e2 = scc_plugin_host::lock_entry(&ap2.plugins[0]);
+    assert_eq!(e2.get("grants"), Some(&serde_json::json!(["state.read"])), "{e2}");
+    // Determinism: same inputs, same key.
+    let ap0b = scc_engine::plugins::active(&root, &base_cfg);
+    assert_eq!(k0, scc_engine::plugins::cache_key_fragment(&ap0b));
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.extension-wires-feature verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
 fn extension_registration_wires_rank_feature() {
     use std::io::Write;
