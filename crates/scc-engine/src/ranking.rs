@@ -27,8 +27,19 @@ impl<'a> Ranker<'a> {
     /// heterogeneous universe, id-sorted. No projection, no blending.
     // trace:exempt reason=internal-detail
     pub fn pagerank_global(&self) -> crate::Result<Vec<(String, f64)>> {
+        self.pagerank_global_with(&[])
+    }
+
+    /// Global vector with edge-weight contributors applied.
+    // trace:exempt reason=internal-detail
+    pub fn pagerank_global_with(
+        &self,
+        contributors: &[EdgeWeightFn],
+    ) -> crate::Result<Vec<(String, f64)>> {
         let ctx = self.ctx();
-        let ranker = scc_context::pagerank::SystemRanker::new(&ctx.view);
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(&ctx.view, &|s, p, o, b| {
+            Self::fold_edge_contributors(contributors, s, p, o, b).0
+        });
         let v = ranker.global_vector();
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
     }
@@ -36,11 +47,55 @@ impl<'a> Ranker<'a> {
     /// Raw task-personalized PPR vector for goal.
     // trace:exempt reason=internal-detail
     pub fn pagerank_task(&self, goal: &str) -> crate::Result<Vec<(String, f64)>> {
+        self.pagerank_task_with(goal, &[])
+    }
+
+    /// Task vector with edge-weight contributors applied.
+    // trace:exempt reason=internal-detail
+    pub fn pagerank_task_with(
+        &self,
+        goal: &str,
+        contributors: &[EdgeWeightFn],
+    ) -> crate::Result<Vec<(String, f64)>> {
         let ctx = self.ctx();
-        let ranker = scc_context::pagerank::SystemRanker::new(&ctx.view);
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(&ctx.view, &|s, p, o, b| {
+            Self::fold_edge_contributors(contributors, s, p, o, b).0
+        });
         let seeds = lexical_seeds(&ctx, goal);
         let v = ranker.task_vector(&seeds);
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
+    }
+
+    /// Fold chained edge-weight contributors over one base weight.
+    /// Returns (adjustment for the ranker, applied modes for reasons).
+    /// Unknown modes are no-change (never silent corruption).
+    // trace:exempt reason=internal-detail
+    fn fold_edge_contributors(
+        contributors: &[EdgeWeightFn],
+        subject: &str,
+        predicate: &str,
+        object: &str,
+        base: f64,
+    ) -> (Option<(String, f64)>, Vec<String>) {
+        let mut acc: Option<(String, f64)> = None;
+        let mut applied = Vec::new();
+        for c in contributors {
+            // Chain over the running value: re-resolve base through acc.
+            let current = match &acc {
+                None => base,
+                Some((m, v)) => apply_edge_weight(base, m, *v),
+            };
+            if let Some((mode, value)) = c(subject, predicate, object, current) {
+                match mode.as_str() {
+                    "add" | "multiply" | "replace" | "veto" => {
+                        applied.push(mode.clone());
+                        acc = Some((mode, value));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        (acc, applied)
     }
 
     /// Lexical candidate generation for goal (stage 1).
@@ -89,7 +144,10 @@ impl<'a> Ranker<'a> {
         }
         let seed_ids: std::collections::BTreeSet<&str> =
             seeds.iter().map(|s| s.id.as_str()).collect();
-        let ranker = scc_context::pagerank::SystemRanker::new(&ctx.view);
+        let edge_contributors: &[EdgeWeightFn] = &hooks.edge_weights;
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(&ctx.view, &|s, p, o, b| {
+            Self::fold_edge_contributors(edge_contributors, s, p, o, b).0
+        });
         let global_of: std::collections::BTreeMap<String, f64> =
             ranker.project_to_symbols(&ranker.global_vector()).into_iter().collect();
         let task_of: std::collections::BTreeMap<String, f64> =
@@ -129,11 +187,23 @@ impl<'a> Ranker<'a> {
             }
         }
         let mut items: Vec<RankItem> = best.into_values().collect();
+        if !hooks.edge_weights.is_empty() {
+            for it in items.iter_mut() {
+                it.reasons.push(format!("edge-weights({})", hooks.edge_weights.len()));
+            }
+        }
         for r in &hooks.rerankers { r(&mut items, goal); }
         items.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
         items.truncate(req.limit.max(1));
         for (i, it) in items.iter_mut().enumerate() { it.position = i + 1; }
-        Ok(RankResult { items, omitted_ids: Vec::new(), warnings: Vec::new() })
+        let mut warnings = Vec::new();
+        if !hooks.edge_weights.is_empty() {
+            warnings.push(format!(
+                "{} edge-weight contributor(s) applied to the rank graph",
+                hooks.edge_weights.len()
+            ));
+        }
+        Ok(RankResult { items, omitted_ids: Vec::new(), warnings })
     }
 }
 
@@ -185,12 +255,31 @@ pub type SeedProvider = Box<dyn Fn(&str) -> Vec<scc_core::TaskSeed> + Send + Syn
 pub type RankFeatureFn = Box<dyn Fn(&str, &str) -> RankFeatureValue + Send + Sync>;
 // trace:exempt reason=internal-detail
 pub type RerankerFn = Box<dyn Fn(&mut Vec<scc_api::RankItem>, &str) + Send + Sync>;
+/// Edge-weight contributor: per-edge (subject, predicate, object, base)
+/// adjustment. Return `Some((mode, value))` to alter the weight, `None`
+/// for no change. Modes: add | multiply | replace | veto. Every applied
+/// contribution is recorded on the affected rank items' reasons.
+// trace:exempt reason=internal-detail
+pub type EdgeWeightFn =
+    Box<dyn Fn(&str, &str, &str, f64) -> Option<(String, f64)> + Send + Sync>;
 #[derive(Default)]
 // trace:exempt reason=internal-detail
 pub struct RankHooks {
     pub seed_providers: Vec<SeedProvider>,
     pub features: Vec<RankFeatureFn>,
     pub rerankers: Vec<RerankerFn>,
+    pub edge_weights: Vec<EdgeWeightFn>,
+}
+
+// trace:exempt reason=internal-detail
+pub fn apply_edge_weight(base: f64, mode: &str, value: f64) -> f64 {
+    match mode {
+        "add" => base + value,
+        "multiply" => base * value,
+        "replace" => value,
+        "veto" => 0.0,
+        _ => base,
+    }
 }
 
 

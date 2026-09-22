@@ -212,3 +212,44 @@ fn plugin_lock_and_check_ops_round_trip() {
     let check = scc_engine::invoke(&root, "plugins.check", serde_json::json!({})).unwrap();
     assert_eq!(check.get("ok"), Some(&serde_json::json!(true)), "{check}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.edge-weight verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn edge_weight_contributor_alters_rank() {
+    use std::io::Write;
+    // zeta calls alpha: veto on the zeta->alpha edge starves alpha of flow.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\ndef zeta():\n    return alpha()\n").unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.edge");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.edge\"\nname = \"Edge\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.edge_weight\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"edge-weight:acme.edge\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    // Multiply every edge into alpha by 0.001 (near-starve, not veto: veto
+    // would also drop reverse transitions and could disconnect the graph).
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nobj = req[\"input\"].get(\"object\", \"\")\nmode = \"multiply\" if \"alpha\" in obj else \"none\"\nprint(json.dumps({\"output\": {\"mode\": mode, \"value\": 0.001}}))\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let base = scc_engine::invoke(
+        &root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10}),
+    )
+    .unwrap();
+    let items = base["items"].as_array().unwrap();
+    let pos = |sub: &str| items.iter().position(|i| i["id"].as_str().unwrap_or("").contains(sub)).unwrap();
+    let base_alpha = pos("alpha");
+    // Edge contributions are recorded: reasons + warning.
+    assert!(
+        items.iter().all(|i| i["reasons"].as_array().unwrap().iter().any(|r| r.as_str().unwrap_or("").starts_with("edge-weights("))),
+        "edge-weight reasons recorded: {base}"
+    );
+    assert!(
+        base["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap_or("").contains("edge-weight")),
+        "edge-weight warning recorded: {base}"
+    );
+    // Sanity: alpha still ranks (near-starve, not disconnect).
+    assert!(base_alpha < items.len(), "alpha present: {base}");
+}

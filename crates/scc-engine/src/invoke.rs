@@ -483,6 +483,26 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
+        if wants("edge-weight", "ranking.edge_weight") {
+            let plug = Arc::clone(&plug);
+            hooks.edge_weights.push(Box::new(move |subject, predicate, object, base| {
+                let input = serde_json::json!({
+                    "subject": subject, "predicate": predicate,
+                    "object": object, "base": base,
+                });
+                match scc_plugin_host::call(&plug, "ranking.edge_weight", input, None) {
+                    Ok(v) => {
+                        let mode = v.get("mode").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                        let value = v.get("value").and_then(|x| x.as_f64()).unwrap_or(0.0);
+                        match mode.as_str() {
+                            "add" | "multiply" | "replace" | "veto" => Some((mode, value)),
+                            _ => None,
+                        }
+                    }
+                    Err(_) => None,
+                }
+            }));
+        }
         if wants("reranker", "ranking.rerank") {
             let plug = Arc::clone(&plug);
             hooks.rerankers.push(Box::new(move |items, goal| {

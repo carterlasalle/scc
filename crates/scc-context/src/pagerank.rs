@@ -579,6 +579,19 @@ impl<'a> SystemRanker<'a> {
     /// Build the ranker from the trusted view. Deterministic; O(E) edges.
 // trace:exempt reason=internal-detail
     pub fn new(view: &'a TrustedGraphView<'a>) -> SystemRanker<'a> {
+        Self::with_edge_adjust(view, &|_, _, _, _| None)
+    }
+
+    /// Build the ranker with a per-edge weight adjust hook (DoD 23):
+    /// `adjust(subject, predicate, object, base) -> Option<(mode, value)>`.
+    /// Modes: add | multiply | replace | veto. `None` keeps the base weight.
+    /// Veto (or non-positive/non-finite result) drops the edge. Deterministic
+    /// for a deterministic hook; every other construction step is unchanged.
+// trace:exempt reason=internal-detail
+    pub fn with_edge_adjust(
+        view: &'a TrustedGraphView<'a>,
+        adjust: &dyn Fn(&str, &str, &str, f64) -> Option<(String, f64)>,
+    ) -> SystemRanker<'a> {
         let mut pairs: Vec<(String, String)> = view
             .entities()
             .filter(|e| RANKABLE_KINDS.contains(&e.kind.as_str()))
@@ -632,19 +645,25 @@ impl<'a> SystemRanker<'a> {
                 let w = kind.weight()
                     * provenance_weight(rel.provenance)
                     * rel.confidence.clamp(0.0, 1.0);
-                in_sources[ti].insert(si);
-                edges.push((si, ti, w));
+                if let Some(w) = Self::adjust_edge(adjust, &rel.subject, &rel.predicate, &rel.object, w) {
+                    in_sources[ti].insert(si);
+                    edges.push((si, ti, w));
+                }
                 if let Some(rev) = kind.reverse_ranking_transition() {
                     let rw = rev.weight()
                         * provenance_weight(rel.provenance)
                         * rel.confidence.clamp(0.0, 1.0);
-                    in_sources[si].insert(ti);
-                    edges.push((ti, si, rw));
+                    if let Some(rw) = Self::adjust_edge(adjust, &rel.object, &rel.predicate, &rel.subject, rw) {
+                        in_sources[si].insert(ti);
+                        edges.push((ti, si, rw));
+                    }
                 }
             }
             if let Some(w) = reference_weight {
-                in_sources[ti].insert(si);
-                edges.push((si, ti, w));
+                if let Some(w) = Self::adjust_edge(adjust, &rel.subject, &rel.predicate, &rel.object, w) {
+                    in_sources[ti].insert(si);
+                    edges.push((si, ti, w));
+                }
             }
         }
         let in_degree: Vec<usize> = in_sources.iter().map(|s| s.len()).collect();
@@ -702,6 +721,29 @@ impl<'a> SystemRanker<'a> {
         let mut ranker = ranker;
         ranker.global = global;
         ranker
+    }
+
+    /// Apply one adjust hook to a raw edge weight. `None` keeps base;
+    /// veto/non-positive/non-finite drops the edge (`None` here = drop).
+// trace:exempt reason=internal-detail
+    fn adjust_edge(
+        adjust: &dyn Fn(&str, &str, &str, f64) -> Option<(String, f64)>,
+        subject: &str,
+        predicate: &str,
+        object: &str,
+        base: f64,
+    ) -> Option<f64> {
+        match adjust(subject, predicate, object, base) {
+            None => Some(base),
+            Some((mode, value)) => match mode.as_str() {
+                "add" => Some(base + value),
+                "multiply" => Some(base * value),
+                "replace" => Some(value),
+                "veto" => None,
+                _ => Some(base),
+            }
+            .filter(|w| w.is_finite() && *w > 0.0),
+        }
     }
 
     /// Rankable entity ids in rank order (index i in every vector maps to
