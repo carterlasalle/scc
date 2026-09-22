@@ -97,6 +97,30 @@ curl -sS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.c
 brew update && brew info carterlasalle/tap/system-context-compiler
 ```
 
+<!-- trace:v1 id=doc.scc-publishing.directory-listings work=WORK-SCC-DISTRIBUTION -->
+## Directory listings
+
+Where people look for MCP servers, what each needs, and what is blocking it.
+
+| Directory | Mechanism | Status |
+|---|---|---|
+| [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) | PR adding one row to `README.md` (agent PRs add 🤖🤖🤖 to the title for fast-tracking) | PR opened: <https://github.com/punkpeye/awesome-mcp-servers/pull/14845> |
+| [Official MCP registry](https://registry.modelcontextprotocol.io) | `mcp-publisher` + `server.json`; the entry references the npm package, so the package must exist first | waiting on the next tagged release, then `mcp-publisher login github && mcp-publisher publish` |
+| [Glama](https://glama.ai/mcp/servers) | crawls public GitHub repos that expose an MCP server; no submission form | automatic once the repo is indexed |
+| [mcp.so](https://www.mcp.so/submit) | submission form; free tier needs a signed-in account (a paid $39 tier publishes immediately) | needs an account |
+| [Smithery](https://smithery.ai) | `smithery mcp publish` after `smithery auth login`, or the web form | needs an account |
+| [PulseMCP](https://www.pulsemcp.com/submit) | submission form behind Cloudflare, requires a browser session | needs an account |
+
+Order matters: the MCP registry entry points at `@carterlasalle/scc`, so the npm
+package has to be published (next tag) before that listing can be created. The
+awesome-list PR has no such dependency and is already open.
+
+After publishing to the MCP registry, verify the entry is served:
+
+```bash
+curl -sS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.carterlasalle" | python3 -m json.tool | head -40
+```
+
 <!-- trace:v1 id=doc.scc-publishing.installer-asset-contract work=WORK-SCC-DISTRIBUTION -->
 ## Installer asset contract
 
