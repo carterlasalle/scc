@@ -500,3 +500,51 @@ fn unknown_grant_names_surface_diagnostics() {
     let diags = doc["diagnostics"].as_array().unwrap();
     assert!(diags.iter().any(|d| d["error"].as_str().unwrap_or("").contains("graph.write")), "{doc}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.candidate-provider verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn candidate_provider_merges_by_id() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\ndef zeta():\n    return alpha()\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    // Baseline: lexical candidates for a nonsense goal.
+    let base = scc_engine::invoke(
+        &root, "ranking.candidates",
+        serde_json::json!({"goal": "zzz-no-match", "limit": 50}),
+    )
+    .unwrap();
+    let base_ids: Vec<String> = base["candidates"].as_array().unwrap().iter()
+        .map(|c| c["id"].as_str().unwrap().to_string()).collect();
+    // Provider contributes one novel id + one overlapping id with a large
+    // score (must win the merge), plus one empty id (must be skipped).
+    let plugdir = root.join(".scc").join("plugins").join("acme.cand");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.cand\"\nname = \"Cand\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.candidates\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"candidate-provider:acme.cand\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    let overlap = base_ids.first().cloned().unwrap_or_else(|| "repo://repo/symbol/main.py/alpha".into());
+    let body = format!(
+        "import json\nprint(json.dumps({{\"output\": {{\"candidates\": [{{\"id\": \"plugin:acme/novel\", \"kind\": \"symbol\", \"name\": \"novel\", \"score\": 99.0}}, {{\"id\": \"{overlap}\", \"kind\": \"symbol\", \"name\": \"x\", \"score\": 99.0}}, {{\"id\": \"\", \"kind\": \"symbol\", \"name\": \"empty\", \"score\": 99.0}}]}}}}))\n"
+    );
+    f.write_all(body.as_bytes()).unwrap();
+    let hooked = scc_engine::invoke(
+        &root, "ranking.candidates",
+        serde_json::json!({"goal": "zzz-no-match", "limit": 50}),
+    )
+    .unwrap();
+    let cands = hooked["candidates"].as_array().unwrap();
+    assert!(cands.iter().any(|c| c["id"] == "plugin:acme/novel"), "novel id merged: {hooked}");
+    let novel = cands.iter().find(|c| c["id"] == "plugin:acme/novel").unwrap();
+    assert_eq!(novel["reason"], serde_json::json!("plugin:acme.cand"), "provider provenance: {hooked}");
+    let over = cands.iter().find(|c| c["id"].as_str() == Some(overlap.as_str())).unwrap();
+    assert_eq!(over["score"].as_f64().unwrap(), 99.0, "max score wins: {hooked}");
+    assert!(cands.iter().all(|c| !c["id"].as_str().unwrap_or("").is_empty()), "empty ids skipped");
+    // Deterministic order: scores desc, ties by id.
+    let scores: Vec<f64> = cands.iter().map(|c| c["score"].as_f64().unwrap()).collect();
+    assert!(scores.windows(2).all(|w| w[0] >= w[1]), "sorted desc: {scores:?}");
+}

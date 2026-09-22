@@ -34,9 +34,9 @@ interface types {
     /// A single extension registration.
     record extension-registration {
         /// Extension-point id: `rank-feature`, `reranker`, `seed-provider`,
-        /// `edge-weight`, `similarity`, `blend-profile`, `context-section`,
-        /// `renderer`, `exporter`, `evidence-provider`, `resolver`,
-        /// `operation`, …
+        /// `candidate-provider`, `edge-weight`, `similarity`,
+        /// `blend-profile`, `context-section`, `renderer`, `exporter`,
+        /// `evidence-provider`, `resolver`, `operation`, …
         extension-type: string,
         /// Extension instance id, namespaced by the plugin
         /// (e.g. `acme.security-risk`).

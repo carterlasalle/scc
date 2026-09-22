@@ -302,7 +302,10 @@ pub fn invoke(
         "ranking.candidates" => {
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-            let cands = engine.ranking().candidates(goal, limit)?;
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, goal);
+            let cands = engine.ranking().candidates_with(goal, limit, &hooks)?;
             serde_json::json!({"candidates": cands.iter().map(|c| serde_json::json!({"id": c.id, "kind": c.kind, "name": c.name, "score": c.score, "reason": c.reason})).collect::<Vec<_>>()})
         }
         "ranking.pagerank.global" => {
@@ -503,6 +506,29 @@ fn ranking_hooks_from_plugins(
         let wants = |t: &str, op: &str| {
             spec.exts.iter().any(|(ty, _)| ty == t) || spec.ops.iter().any(|o| o == op)
         };
+        if wants("candidate-provider", "ranking.candidates") {
+            let plug = Arc::clone(&plug);
+            let pid2 = pid.clone();
+            hooks.candidates.push(Box::new(move |goal: &str| {
+                let input = serde_json::json!({"goal": goal});
+                match scc_plugin_host::call(&plug, "ranking.candidates", input, None) {
+                    Ok(v) => v.get("candidates").and_then(|s| s.as_array()).map(|a| {
+                        a.iter().filter_map(|e| {
+                            let id = e.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                            if id.is_empty() { return None; }
+                            Some(scc_context::rank::ScoredEntity {
+                                id,
+                                kind: e.get("kind").and_then(|x| x.as_str()).unwrap_or("symbol").into(),
+                                name: e.get("name").and_then(|x| x.as_str()).unwrap_or("").into(),
+                                score: e.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                                reason: format!("plugin:{}", pid2),
+                            })
+                        }).collect()
+                    }).unwrap_or_default(),
+                    Err(_) => Vec::new(),
+                }
+            }));
+        }
         if wants("seed-provider", "ranking.seed") {
             let plug = Arc::clone(&plug);
             let g = goal.to_string();

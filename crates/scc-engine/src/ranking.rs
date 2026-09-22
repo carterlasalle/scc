@@ -105,8 +105,39 @@ impl<'a> Ranker<'a> {
     /// Lexical candidate generation for goal (stage 1).
     // trace:exempt reason=internal-detail
     pub fn candidates(&self, goal: &str, limit: usize) -> crate::Result<Vec<scc_context::rank::ScoredEntity>> {
+        self.candidates_with(goal, limit, &RankHooks::default())
+    }
+
+    /// Candidates with explicit plugin providers (one call, deterministic
+    /// order). Provider rows merge by canonical id: max score wins, the
+    /// provider reason is tagged `plugin:<id>` for explainability.
+    // trace:exempt reason=internal-detail
+    pub fn candidates_with(
+        &self,
+        goal: &str,
+        limit: usize,
+        hooks: &RankHooks,
+    ) -> crate::Result<Vec<scc_context::rank::ScoredEntity>> {
         let ctx = self.ctx();
-        Ok(scc_context::rank::collect_lexical_candidates(ctx.store, &ctx.view, goal, &[], limit.max(1)))
+        let mut merged: std::collections::BTreeMap<String, scc_context::rank::ScoredEntity> =
+            scc_context::rank::collect_lexical_candidates(ctx.store, &ctx.view, goal, &[], limit.max(1))
+                .into_iter().map(|c| (c.id.clone(), c)).collect();
+        for prov in &hooks.candidates {
+            for mut c in prov(goal) {
+                if c.id.is_empty() {
+                    continue;
+                }
+                c.reason = if c.reason.is_empty() { "plugin-candidate".into() } else { c.reason };
+                match merged.get(&c.id) {
+                    Some(prev) if prev.score >= c.score => {}
+                    _ => { merged.insert(c.id.clone(), c); }
+                }
+            }
+        }
+        let mut out: Vec<scc_context::rank::ScoredEntity> = merged.into_values().collect();
+        out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
+        out.truncate(limit.max(1));
+        Ok(out)
     }
 
     /// Full task/global blend per symbol with feature decomposition.
@@ -281,6 +312,9 @@ pub struct RankFeatureValue {
 // trace:exempt reason=internal-detail
 pub type SeedProvider = Box<dyn Fn(&str) -> Vec<scc_core::TaskSeed> + Send + Sync>;
 // trace:exempt reason=internal-detail
+pub type CandidateProvider =
+    Box<dyn Fn(&str) -> Vec<scc_context::rank::ScoredEntity> + Send + Sync>;
+// trace:exempt reason=internal-detail
 pub type RankFeatureFn = Box<dyn Fn(&str, &str) -> RankFeatureValue + Send + Sync>;
 // trace:exempt reason=internal-detail
 pub type RerankerFn = Box<dyn Fn(&mut Vec<scc_api::RankItem>, &str) + Send + Sync>;
@@ -320,6 +354,9 @@ pub struct RankHooks {
     /// returning a nonzero value wins (deterministic chain order);
     /// the built-in default (same-group => 1.0) runs last.
     pub similarities: Vec<SimilarityFn>,
+    /// Extra candidate providers (spec 18): merged with the lexical base
+    /// by canonical id, max score wins. Deterministic chain order.
+    pub candidates: Vec<CandidateProvider>,
     /// Named blend profiles: profile name -> per-feature weight
     /// overrides for the linear blend (feature keys: task_ppr,
     /// global_ppr, lexical, semantic, confidence, criticality,
