@@ -338,7 +338,14 @@ fn pagerank_stage_ops_ignore_edge_weights() {
     f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nobj = req[\"input\"].get(\"object\", \"\")\nmode = \"multiply\" if \"alpha\" in obj else \"none\"\nprint(json.dumps({\"output\": {\"mode\": mode, \"value\": 0.001}}))\n").unwrap();
     let hooked_task = scc_engine::invoke(&root, "ranking.pagerank.task", serde_json::json!({"goal": "alpha"})).unwrap();
     let hooked_global = scc_engine::invoke(&root, "ranking.pagerank.global", serde_json::json!({})).unwrap();
-    assert_eq!(plain_task, hooked_task, "raw task vector must ignore edge-weight hooks");
-    assert_eq!(plain_global, hooked_global, "raw global vector must ignore edge-weight hooks");
+    // Float summation order is nondeterministic at the 1e-16 level, so
+    // compare with tolerance: a live hook would move alpha massively
+    // (0.001 edge multiply), noise stays far below 1e-9.
+    for (label, plain, hooked) in [("task", &plain_task, &hooked_task), ("global", &plain_global, &hooked_global)] {
+        for (pe, he) in plain["vector"].as_array().unwrap().iter().zip(hooked["vector"].as_array().unwrap()) {
+            let (ps, hs) = (pe["score"].as_f64().unwrap(), he["score"].as_f64().unwrap());
+            assert!((ps - hs).abs() < 1e-9, "raw {label} vector must ignore edge-weight hooks: {} {ps} vs {hs}", pe["id"]);
+        }
+    }
     let _ = score_of(&plain_task, "alpha");
 }
