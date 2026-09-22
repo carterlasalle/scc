@@ -200,6 +200,11 @@ impl Engine<'_> {
     }
 
     // trace:exempt reason=internal-detail
+    pub fn ranking(&self) -> crate::ranking::Ranker<'_> {
+        crate::ranking::Ranker::new(self)
+    }
+
+    // trace:exempt reason=internal-detail
     pub fn operations(&self) -> Operations<'_> {
         Operations { engine: self }
     }

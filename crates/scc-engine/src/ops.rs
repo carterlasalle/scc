@@ -61,6 +61,17 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     // surface + ranking
     OperationDescriptor { id: "surface.build", description: "System Surface Map (global or task-personalized)", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "ranking.important", description: "Fast where-to-pay-attention answer", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.symbols", description: "Full blend per symbol with feature decomposition + plugin hooks", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.candidates", description: "Lexical candidate generation (stage 1)", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.pagerank.global", description: "Raw global PageRank vector over the heterogeneous universe", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.pagerank.task", description: "Raw task-personalized PPR vector", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.final_importance", description: "Pure blend function over explicit features", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.edge_weight", description: "Pure edge-weight function", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.architectural_specificity", description: "Architectural specificity (exported/public signals)", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "ranking.explain", description: "Rank explanation for one symbol", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "selection.mmr", description: "MMR diversification over a ranked list", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "selection.quotas", description: "Token-fraction quota selection over ranked rows", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "selection.budget", description: "Value/token budget selection", mutation: MutationClass::Read, streaming: false },
     // source
     OperationDescriptor { id: "source.structural", description: "Alias for context.structural", mutation: MutationClass::Read, streaming: false },
     // evidence / runtime

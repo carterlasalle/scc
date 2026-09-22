@@ -320,8 +320,10 @@ fn invariant_names(view: &scc_graph::TrustedGraphView) -> Vec<String> {
 /// (non-empty `invocation_surfaces`), invariant-enforcing APIs (contracts
 /// containing an invariant name), primary flow entrypoints (entrypoint of a
 /// triggered flow), and state owners of critical (invariant-scoped) state.
-// trace:exempt reason=internal-detail
-fn required_ids(map: &SystemSurfaceMap, compiler: &ContextCompiler) -> BTreeSet<String> {
+/// Entries the pipeline MUST never omit (engine ranking seam: same set
+/// `build_surface` partitions on, so `ranking.symbols` criticality matches).
+// trace:v1 id=impl.scc.surface.required-ids work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn required_ids(map: &SystemSurfaceMap, compiler: &ContextCompiler) -> BTreeSet<String> {
     let view = &compiler.view;
     let mut required: BTreeSet<String> = BTreeSet::new();
 
@@ -498,7 +500,9 @@ pub(crate) fn file_importance(path: &str) -> f64 {
 /// Lexical relevance of an entry to the goal terms: name hits count double,
 /// signature hits count single (shared with the task-delta pipeline).
 // trace:exempt reason=internal-detail
-pub(crate) fn entry_lexical(e: &SurfaceEntry, goal_terms: &BTreeSet<String>) -> f64 {
+/// Lexical relevance of an entry to the goal terms (engine ranking seam).
+// trace:v1 id=impl.scc.surface.entry-lexical work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn entry_lexical(e: &SurfaceEntry, goal_terms: &BTreeSet<String>) -> f64 {
     if goal_terms.is_empty() {
         return 0.0;
     }

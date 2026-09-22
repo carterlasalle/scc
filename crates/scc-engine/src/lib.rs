@@ -47,6 +47,8 @@ pub mod history;
 pub mod invoke;
 // trace:exempt reason=module-facade
 pub mod misc;
+// trace:exempt reason=module-facade
+pub mod ranking;
 
 
 
@@ -55,4 +57,5 @@ pub use error::{EngineError, Result};
 pub use workspace::{Engine, open_engine};
 pub use invoke::invoke;
 pub use ops::{describe as describe_operation, OPERATIONS};
+pub use ranking::{RankFeatureValue, RankHooks};
 pub use task::{TaskContextArtifact, build_task_context, build_enriched_task_pack};

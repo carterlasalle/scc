@@ -156,3 +156,85 @@ pub struct IndexPathsRequest {
     #[serde(default)]
     pub quiet: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct RankRequest {
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub limit: usize,
+    #[serde(default)]
+    pub explain: bool,
+    #[serde(default)]
+    pub include_features: bool,
+    #[serde(default)]
+    pub include_intermediate: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct RankItem {
+    pub id: String,
+    pub rank: f64,
+    pub position: usize,
+    pub features: RankFeatures,
+    pub specificity: f64,
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub plugin_features: std::collections::BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct RankFeatures {
+    pub task_ppr: f64,
+    pub global_ppr: f64,
+    pub lexical: f64,
+    pub semantic: f64,
+    pub confidence: f64,
+    pub criticality: f64,
+    pub change_risk: f64,
+    pub novelty: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct RankResult {
+    pub items: Vec<RankItem>,
+    #[serde(default)]
+    pub omitted_ids: Vec<String>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct SelectionRequest {
+    pub ranked: Vec<RankedEntry>,
+    pub budget: usize,
+    #[serde(default)]
+    pub lambda: Option<f64>,
+    #[serde(default)]
+    pub quotas: Option<Vec<QuotaEntry>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct RankedEntry {
+    pub id: String,
+    pub value: f64,
+    #[serde(default)]
+    pub token_cost: usize,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub group: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// trace:exempt reason=internal-detail
+pub struct QuotaEntry {
+    pub kind: String,
+    pub fraction: f64,
+}
