@@ -86,7 +86,32 @@ pub struct SurfaceRequest {
     pub budget: Option<usize>,
     #[serde(default)]
     pub explain: bool,
+    /// Optional per-stage toggles for the surface ablation matrix
+    /// (`build_surface_staged`): omitted or all-true = `build_surface`.
+    #[serde(default)]
+    pub stages: Option<SurfaceStages>,
 }
+
+/// Per-stage toggles for `surface.build` (all default true).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+// trace:exempt reason=internal-detail
+pub struct SurfaceStages {
+    #[serde(default = "stage_on")]
+    pub lexical: bool,
+    #[serde(default = "stage_on")]
+    pub global_ppr: bool,
+    #[serde(default = "stage_on")]
+    pub task_ppr: bool,
+    #[serde(default = "stage_on")]
+    pub mmr: bool,
+    #[serde(default = "stage_on")]
+    pub quotas: bool,
+    #[serde(default = "stage_on")]
+    pub optimizer: bool,
+}
+
+// trace:exempt reason=internal-detail
+fn stage_on() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail

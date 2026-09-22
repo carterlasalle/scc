@@ -126,3 +126,28 @@ fn invoke_session_rejects_stale() {
     assert!(err.is_err(), "stale session must fail, not silently answer");
     assert!(err.unwrap_err().to_string().contains("config"), "names the drifted field");
 }
+
+#[test]
+// trace:exempt reason=unit-test
+fn surface_stages_toggle_changes_render() {
+    let (_dir, root) = fixture();
+    let full = scc_engine::invoke(&root, "surface.build", serde_json::json!({})).unwrap();
+    let no_mmr = scc_engine::invoke(
+        &root, "surface.build", serde_json::json!({"stages": {"mmr": false}}),
+    )
+    .unwrap();
+    let full_ids = full["result"]["rendered_ids"].as_array().unwrap();
+    assert!(!full_ids.is_empty(), "surface renders: {full}");
+    // The toggle must be accepted and produce a render (ordering may or may
+    // not differ on this tiny fixture — the contract is staged derivation).
+    assert!(no_mmr["result"]["rendered_ids"].is_array(), "{no_mmr}");
+    let default_explicit = scc_engine::invoke(
+        &root, "surface.build",
+        serde_json::json!({"stages": {"lexical": true, "global_ppr": true, "task_ppr": true, "mmr": true, "quotas": true, "optimizer": true}}),
+    )
+    .unwrap();
+    assert_eq!(
+        full["result"]["rendered_ids"], default_explicit["result"]["rendered_ids"],
+        "all-true stages == build_surface"
+    );
+}

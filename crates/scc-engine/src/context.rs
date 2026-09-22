@@ -112,7 +112,11 @@ impl SccContext<'_> {
             policy: scc_context::surface::SurfacePolicy::defaults(tokens),
             semantic,
         };
-        let result = scc_context::surface::build_surface(&ctx, request);
+        let stages = req.stages.as_ref().map(|st| scc_context::surface::SurfacePipelineStages {
+            lexical: st.lexical, global_ppr: st.global_ppr, task_ppr: st.task_ppr,
+            mmr: st.mmr, quotas: st.quotas, optimizer: st.optimizer,
+        }).unwrap_or_default();
+        let result = scc_context::surface::build_surface_staged(&ctx, request, &stages);
         let text = match req.task.as_deref() {
             Some(goal) => {
                 let body = result.text.strip_prefix("SCC SYSTEM SURFACE MAP").unwrap_or(result.text.as_str());
