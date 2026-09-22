@@ -1255,23 +1255,18 @@ pub fn cmd_diagram(root: &Path, format: &str, out: Option<&str>) -> crate::Resul
     if store.snapshot_status()?.is_none() {
         return Err(crate::CliError::Other("not indexed yet — run `scc index`".into()));
     }
-    let model = crate::viewer::build_diagram_model(&store)?;
-    let text = match format {
-        "mermaid" => crate::viewer::render_mermaid(&model),
-        "svg" => crate::viewer::render_svg(&model),
-        other => {
-            return Err(crate::CliError::Other(format!(
-                "unknown diagram format '{other}' (use mermaid|svg)"
-            )))
-        }
-    };
+    // Registry derivation: the engine owns the model + rendering; the CLI
+    // parses args, writes files, and prints (spec section 2).
+    let v = scc_engine::invoke(root, "export.diagram", serde_json::json!({"format": format}))
+        .map_err(engine_err)?;
+    let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
     if let Some(path) = out {
-        std::fs::write(path, &text)?;
+        std::fs::write(path, text)?;
         println!(
             "diagram: {} nodes, {} edges, {} flows -> {path}",
-            model.nodes.len(),
-            model.edges.len(),
-            model.flows.len()
+            v.get("nodes").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("edges").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("flows").and_then(|n| n.as_u64()).unwrap_or(0),
         );
     } else {
         print!("{text}");

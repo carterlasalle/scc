@@ -120,6 +120,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "export.system_ir_jsonl", description: "Alias for export.system_ir format=system-ir.jsonl", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "export.ccg", description: "Alias for export.system_ir format=ccg", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "export.flow_graphs", description: "Alias for export.system_ir format=flow-graphs.json", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "export.diagram", description: "Architecture diagram (mermaid|svg) with node/edge/flow counts", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "export.snap", description: "Alias for export.system_ir format=capsule.md", mutation: MutationClass::Read, streaming: false },
     // integrity / integrations / lessons / setup
     OperationDescriptor { id: "integrity.invariants", description: "Alias for architecture.invariants", mutation: MutationClass::Read, streaming: false },

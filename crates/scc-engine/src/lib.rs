@@ -39,6 +39,7 @@ pub mod status;
 pub mod systems;
 // trace:exempt reason=module-facade
 pub mod exports;
+pub mod diagram;
 // trace:exempt reason=module-facade
 pub mod integrations;
 // trace:exempt reason=module-facade

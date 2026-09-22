@@ -174,3 +174,26 @@ fn registry_covers_every_invoke_arm() {
         assert!(scc_engine::ops::describe(id).is_some(), "describe missing for {id}");
     }
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.export-diagram verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.diagram
+fn export_diagram_renders_from_engine() {
+    // DoD 5/6: diagram rendering is engine behavior, reachable on every
+    // transport through the registry — not CLI-local.
+    let (_dir, root) = fixture();
+    for format in ["mermaid", "svg"] {
+        let v = scc_engine::invoke(&root, "export.diagram", serde_json::json!({"format": format})).unwrap();
+        assert_eq!(v.get("format"), Some(&serde_json::json!(format)), "{v}");
+        let text = v.get("text").and_then(|t| t.as_str()).unwrap();
+        assert!(!text.is_empty(), "{format} must render");
+        if format == "mermaid" {
+            assert!(text.starts_with("flowchart LR"), "{text:?}");
+        } else {
+            assert!(text.starts_with("<svg"), "{text:?}");
+        }
+        assert!(v.get("nodes").and_then(|n| n.as_u64()).is_some(), "{v}");
+    }
+    assert!(scc_engine::ops::describe("export.diagram").is_some(), "registered");
+    let bad = scc_engine::invoke(&root, "export.diagram", serde_json::json!({"format": "dot"}));
+    assert!(bad.is_err(), "unknown format must fail, not silently default");
+}

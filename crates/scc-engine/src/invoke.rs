@@ -267,7 +267,8 @@ pub fn invoke(
             })
         }
         "export.diagram" => {
-            return Err(crate::EngineError::Other("diagram rendering is CLI-local (viewer); use export.system_ir + render client-side".into()));
+            let format = input.get("format").and_then(|v| v.as_str()).unwrap_or("mermaid");
+            crate::exports::diagram(&store, format)?
         }
         "index.watch" => {
             return Err(crate::EngineError::Other("index.watch is a streaming filesystem watch, not a request/response operation; run `scc watch`".into()));

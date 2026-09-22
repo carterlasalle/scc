@@ -170,3 +170,27 @@ pub fn model_get(store: &scc_store::Store) -> crate::Result<serde_json::Value> {
         "invariants": ir.invariants,
     }))
 }
+
+/// Architecture diagram (spec catalog `export.diagram`): the deterministic
+/// L1 model plus Mermaid/SVG text. Pure Store derivation — every transport
+/// renders the same bytes from the same code.
+// trace:v1 id=impl.scc-engine-exports.diagram work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn diagram(store: &scc_store::Store, format: &str) -> crate::Result<serde_json::Value> {
+    let model = crate::diagram::build_diagram_model(store)?;
+    let text = match format {
+        "mermaid" => crate::diagram::render_mermaid(&model),
+        "svg" => crate::diagram::render_svg(&model),
+        other => {
+            return Err(crate::EngineError::Other(format!(
+                "unknown diagram format '{other}' (use mermaid|svg)"
+            )))
+        }
+    };
+    Ok(serde_json::json!({
+        "format": format,
+        "text": text,
+        "nodes": model.nodes.len(),
+        "edges": model.edges.len(),
+        "flows": model.flows.len(),
+    }))
+}
