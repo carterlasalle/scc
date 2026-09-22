@@ -153,6 +153,32 @@ fn contribution_pipeline_validates_then_commits() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.contribution-unknown-keys verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.commit-contribution
+fn contribution_unknown_keys_fail_loudly() {
+    // A plugin sending `flows`/`invariants` must get an error, not a
+    // silent drop: those derive from entities at graph-compile time.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let store = scc_store::Store::open(&dir.path().join("scc.db"), &root).unwrap();
+    for key in ["flows", "invariants", "contracts", "typo_key"] {
+        let batch = serde_json::json!({"entities": [], "relationships": [], "evidence": []});
+        let mut obj = batch.as_object().cloned().unwrap();
+        obj.insert(key.into(), serde_json::json!([]));
+        let err = scc_engine::plugins::commit_contribution(&store, "acme.t", &serde_json::Value::Object(obj));
+        assert!(err.is_err(), "key '{key}' must be rejected, not dropped: {err:?}");
+        assert!(err.unwrap_err().to_string().contains(key), "error names the key");
+    }
+    // diagnostics is accepted and echoed in the result count.
+    let with_diag = serde_json::json!({"entities": [], "relationships": [], "evidence": [],
+        "diagnostics": [{"level": "warn", "message": "m"}]});
+    let out = scc_engine::plugins::commit_contribution(&store, "acme.t", &with_diag).unwrap();
+    assert_eq!(out.get("diagnostics"), Some(&serde_json::json!(1)), "{out}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.contribution-atomic verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.commit-contribution
 fn contribution_mid_batch_failure_leaves_no_partial_state() {
     // Spec 24: a broken plugin must not leave half a graph. The first

@@ -201,6 +201,20 @@ pub fn validate_contribution(
     plugin_id: &str,
     batch: &serde_json::Value,
 ) -> crate::Result<serde_json::Value> {
+    // Fail loudly on unknown top-level keys: silently dropping a `flows`
+    // or `invariants` array would let a plugin believe it contributed
+    // facts SCC never stored. Flows/invariants/contracts derive from
+    // entities at graph-compile time — contribute entities, not rows.
+    if let Some(obj) = batch.as_object() {
+        let known = ["entities", "relationships", "evidence", "diagnostics"];
+        let unknown: Vec<&str> = obj.keys().filter(|k| !known.contains(&k.as_str())).map(|k| k.as_str()).collect();
+        if !unknown.is_empty() {
+            return Err(crate::EngineError::Other(format!(
+                "contribution has unsupported top-level keys [{}] (supported: entities, relationships, evidence, diagnostics); flows/invariants/contracts derive from entities at graph-compile time",
+                unknown.join(", ")
+            )));
+        }
+    }
     let entities = batch.get("entities").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let relationships = batch.get("relationships").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let evidence = batch.get("evidence").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -260,10 +274,12 @@ pub fn validate_contribution(
         }
         v
     };
+    let diagnostics = batch.get("diagnostics").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     Ok(serde_json::json!({
         "entities": entities.into_iter().map(stamp).collect::<Vec<_>>(),
         "relationships": relationships.into_iter().map(stamp).collect::<Vec<_>>(),
         "evidence": evidence.into_iter().map(stamp).collect::<Vec<_>>(),
+        "diagnostics": diagnostics,
     }))
 }
 
@@ -322,7 +338,8 @@ pub fn commit_contribution(
         counts.2 += 1;
     }
     store.batch_end().map_err(crate::EngineError::Store)?;
-    Ok(serde_json::json!({"entities": counts.0, "relationships": counts.1, "evidence": counts.2}))
+    let n_diag = checked.get("diagnostics").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+    Ok(serde_json::json!({"entities": counts.0, "relationships": counts.1, "evidence": counts.2, "diagnostics": n_diag}))
 }
 
 /// Context-section contributions (§17 Context): every `context-section:*`
