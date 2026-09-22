@@ -186,11 +186,15 @@ class SCC:
         budget: int | None = None,
     ) -> str:
         """Compile the Structural Source representation (rendered text, verbatim)."""
-        return self.invoke("context.structural", {
+        out = self.invoke("context.structural", {
             "files": files or [],
             "task": goal,
             "budget": budget,
         })
+        # Engine returns {"text": ...}; unwrap to the rendered string.
+        if isinstance(out, dict):
+            return out.get("text", "")
+        return out
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.index work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def index(self) -> dict[str, bool]:

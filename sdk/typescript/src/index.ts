@@ -251,9 +251,12 @@ export class SCC {
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async structuralSource(files?: string[], goal?: string, budget?: number): Promise<string> {
-    return this.invoke<string>("context.structural", {
+    const out = await this.invoke<string | { text: string }>("context.structural", {
       files: files ?? [], task: goal ?? null, budget,
     });
+    // Engine returns {"text": ...}; unwrap to the rendered string.
+    if (typeof out === "object" && out !== null && "text" in out) return out.text;
+    return out as string;
   }
 
   /** Index the repository (idempotent; incremental after the first run). */
