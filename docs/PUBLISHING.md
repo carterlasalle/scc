@@ -31,9 +31,14 @@ gh secret set CARGO_REGISTRY_TOKEN -R carterlasalle/scc
 gh variable set CRATES_PUBLISH --body true -R carterlasalle/scc
 gh secret set NPM_TOKEN -R carterlasalle/scc
 curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" | tar xz mcp-publisher
+./mcp-publisher login github            # add --token <PAT> to skip the browser flow
 ```
 
-(The last line installs the MCP registry publisher.)
+The last two lines install and authenticate the MCP registry publisher. Use the
+**official release binary**, not the snap: the snap ships mcp-publisher 1.1.0
+(third-party) which rejects the current server.json schema even for `--help`, and
+its token storage predates the `~/.config/mcp-publisher/` location the current
+tool reads.
 
 `CRATES_PUBLISH` is a **variable**, not a secret, on purpose: `secrets` is not
 allowed in `if:` expressions, and a workflow that references it there fails at
@@ -105,7 +110,7 @@ Where people look for MCP servers, what each needs, and what is blocking it.
 | Directory | Mechanism | Status |
 |---|---|---|
 | [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) | PR adding one row to `README.md` (agent PRs add 🤖🤖🤖 to the title for fast-tracking) | PR opened: <https://github.com/punkpeye/awesome-mcp-servers/pull/14845> |
-| [Official MCP registry](https://registry.modelcontextprotocol.io) | `mcp-publisher` + `server.json`; the entry references the npm package, so the package must exist first | waiting on the next tagged release, then `mcp-publisher login github && mcp-publisher publish` |
+| [Official MCP registry](https://registry.modelcontextprotocol.io) | `mcp-publisher` + `server.json`; the registry validates that the referenced npm package exists | authenticated, and blocked only by the package: `NPM package '@carterlasalle/scc' not found (status: 404)`. After the next tagged release, `mcp-publisher publish` completes it |
 | [Glama](https://glama.ai/mcp/servers) | crawls public GitHub repos that expose an MCP server; no submission form | automatic once the repo is indexed |
 | [mcp.so](https://www.mcp.so/submit) | submission form; free tier needs a signed-in account (a paid $39 tier publishes immediately) | needs an account |
 | [Smithery](https://smithery.ai) | `smithery mcp publish` after `smithery auth login`, or the web form | needs an account |
