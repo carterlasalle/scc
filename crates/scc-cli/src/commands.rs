@@ -217,7 +217,7 @@ pub fn cmd_surface(
     };
     let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
         scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-    let req = scc_api::SurfaceRequest { task: task.map(|s| s.to_string()), budget: Some(tokens), explain };
+    let req = scc_api::SurfaceRequest { task: task.map(|s| s.to_string()), budget: Some(tokens), explain, stages: None };
     let (_result, text) = engine.context().surface(&req, semantic).map_err(engine_err)?;
     print!("{text}");
     Ok(())
