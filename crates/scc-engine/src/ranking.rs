@@ -37,9 +37,11 @@ impl<'a> Ranker<'a> {
         contributors: &[EdgeWeightFn],
     ) -> crate::Result<Vec<(String, f64)>> {
         let ctx = self.ctx();
-        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(&ctx.view, &|s, p, o, b| {
-            Self::fold_edge_contributors(contributors, s, p, o, b).0
-        });
+        let owned: Vec<EdgeWeightFn> = contributors.iter().cloned().collect();
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(
+            &ctx.view,
+            move |s, p, o, b| Self::fold_edge_contributors(&owned, s, p, o, b).0,
+        );
         let v = ranker.global_vector();
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
     }
@@ -58,9 +60,11 @@ impl<'a> Ranker<'a> {
         contributors: &[EdgeWeightFn],
     ) -> crate::Result<Vec<(String, f64)>> {
         let ctx = self.ctx();
-        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(&ctx.view, &|s, p, o, b| {
-            Self::fold_edge_contributors(contributors, s, p, o, b).0
-        });
+        let owned: Vec<EdgeWeightFn> = contributors.iter().cloned().collect();
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(
+            &ctx.view,
+            move |s, p, o, b| Self::fold_edge_contributors(&owned, s, p, o, b).0,
+        );
         let seeds = lexical_seeds(&ctx, goal);
         let v = ranker.task_vector(&seeds);
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
@@ -144,10 +148,11 @@ impl<'a> Ranker<'a> {
         }
         let seed_ids: std::collections::BTreeSet<&str> =
             seeds.iter().map(|s| s.id.as_str()).collect();
-        let edge_contributors: &[EdgeWeightFn] = &hooks.edge_weights;
-        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(&ctx.view, &|s, p, o, b| {
-            Self::fold_edge_contributors(edge_contributors, s, p, o, b).0
-        });
+        let owned: Vec<EdgeWeightFn> = hooks.edge_weights.iter().cloned().collect();
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(
+            &ctx.view,
+            move |s, p, o, b| Self::fold_edge_contributors(&owned, s, p, o, b).0,
+        );
         let global_of: std::collections::BTreeMap<String, f64> =
             ranker.project_to_symbols(&ranker.global_vector()).into_iter().collect();
         let task_of: std::collections::BTreeMap<String, f64> =
@@ -260,8 +265,9 @@ pub type RerankerFn = Box<dyn Fn(&mut Vec<scc_api::RankItem>, &str) + Send + Syn
 /// for no change. Modes: add | multiply | replace | veto. Every applied
 /// contribution is recorded on the affected rank items' reasons.
 // trace:exempt reason=internal-detail
-pub type EdgeWeightFn =
-    Box<dyn Fn(&str, &str, &str, f64) -> Option<(String, f64)> + Send + Sync>;
+pub type EdgeWeightFn = std::sync::Arc<
+    dyn for<'a, 'b, 'c> Fn(&'a str, &'b str, &'c str, f64) -> Option<(String, f64)> + Send + Sync,
+>;
 #[derive(Default)]
 // trace:exempt reason=internal-detail
 pub struct RankHooks {

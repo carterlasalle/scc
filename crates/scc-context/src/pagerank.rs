@@ -47,6 +47,17 @@ use scc_core::{
 use scc_graph::TrustedGraphView;
 use std::collections::{HashMap, HashSet};
 
+/// Per-edge weight adjust hook (DoD 23): `adjust(subject, predicate,
+/// object, base) -> Option<(mode, value)>`, modes add | multiply |
+/// replace | veto. `None` keeps the base weight.
+// trace:exempt reason=internal-detail
+pub type EdgeAdjust = dyn for<'a, 'b, 'c> Fn(&'a str, &'b str, &'c str, f64) -> Option<(String, f64)>;
+
+// trace:exempt reason=internal-detail
+fn no_adjust(_: &str, _: &str, _: &str, _: f64) -> Option<(String, f64)> {
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Edge weight constants (spec §2)
 // ---------------------------------------------------------------------------
@@ -579,7 +590,7 @@ impl<'a> SystemRanker<'a> {
     /// Build the ranker from the trusted view. Deterministic; O(E) edges.
 // trace:exempt reason=internal-detail
     pub fn new(view: &'a TrustedGraphView<'a>) -> SystemRanker<'a> {
-        Self::with_edge_adjust(view, &|_, _, _, _| None)
+        Self::with_edge_adjust(view, no_adjust)
     }
 
     /// Build the ranker with a per-edge weight adjust hook (DoD 23):
@@ -588,10 +599,13 @@ impl<'a> SystemRanker<'a> {
     /// Veto (or non-positive/non-finite result) drops the edge. Deterministic
     /// for a deterministic hook; every other construction step is unchanged.
 // trace:exempt reason=internal-detail
-    pub fn with_edge_adjust(
+    pub fn with_edge_adjust<F>(
         view: &'a TrustedGraphView<'a>,
-        adjust: &dyn Fn(&str, &str, &str, f64) -> Option<(String, f64)>,
-    ) -> SystemRanker<'a> {
+        adjust: F,
+    ) -> SystemRanker<'a>
+    where
+        F: for<'x, 'y, 'z> Fn(&'x str, &'y str, &'z str, f64) -> Option<(String, f64)>,
+    {
         let mut pairs: Vec<(String, String)> = view
             .entities()
             .filter(|e| RANKABLE_KINDS.contains(&e.kind.as_str()))
@@ -645,7 +659,7 @@ impl<'a> SystemRanker<'a> {
                 let w = kind.weight()
                     * provenance_weight(rel.provenance)
                     * rel.confidence.clamp(0.0, 1.0);
-                if let Some(w) = Self::adjust_edge(adjust, &rel.subject, &rel.predicate, &rel.object, w) {
+                if let Some(w) = Self::adjust_edge(&adjust, &rel.subject, &rel.predicate, &rel.object, w) {
                     in_sources[ti].insert(si);
                     edges.push((si, ti, w));
                 }
@@ -653,14 +667,14 @@ impl<'a> SystemRanker<'a> {
                     let rw = rev.weight()
                         * provenance_weight(rel.provenance)
                         * rel.confidence.clamp(0.0, 1.0);
-                    if let Some(rw) = Self::adjust_edge(adjust, &rel.object, &rel.predicate, &rel.subject, rw) {
+                    if let Some(rw) = Self::adjust_edge(&adjust, &rel.object, &rel.predicate, &rel.subject, rw) {
                         in_sources[si].insert(ti);
                         edges.push((ti, si, rw));
                     }
                 }
             }
             if let Some(w) = reference_weight {
-                if let Some(w) = Self::adjust_edge(adjust, &rel.subject, &rel.predicate, &rel.object, w) {
+                if let Some(w) = Self::adjust_edge(&adjust, &rel.subject, &rel.predicate, &rel.object, w) {
                     in_sources[ti].insert(si);
                     edges.push((si, ti, w));
                 }
@@ -727,7 +741,7 @@ impl<'a> SystemRanker<'a> {
     /// veto/non-positive/non-finite drops the edge (`None` here = drop).
 // trace:exempt reason=internal-detail
     fn adjust_edge(
-        adjust: &dyn Fn(&str, &str, &str, f64) -> Option<(String, f64)>,
+        adjust: &impl for<'x, 'y, 'z> Fn(&'x str, &'y str, &'z str, f64) -> Option<(String, f64)>,
         subject: &str,
         predicate: &str,
         object: &str,

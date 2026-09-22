@@ -485,7 +485,7 @@ fn ranking_hooks_from_plugins(
         }
         if wants("edge-weight", "ranking.edge_weight") {
             let plug = Arc::clone(&plug);
-            hooks.edge_weights.push(Box::new(move |subject, predicate, object, base| {
+            hooks.edge_weights.push(std::sync::Arc::new(move |subject, predicate, object, base| {
                 let input = serde_json::json!({
                     "subject": subject, "predicate": predicate,
                     "object": object, "base": base,
