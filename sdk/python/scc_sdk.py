@@ -163,29 +163,20 @@ class SCC:
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.context-startup work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def contextStartup(self, budget: int | None = None) -> dict[str, Any]:
-        """Compile the fused session-startup artifact (rendered text)."""
-        text = self.invoke("context.startup", {"budget": budget})
-        return {"kind": "startup", "content": text, "budget": budget or 0}
+        """Compile the fused session-startup artifact (text + budget + artifact)."""
+        out = self.invoke("context.startup", {"budget": budget})
+        return {"kind": "startup", "content": out.get("text", ""), "budget": out.get("budget", budget or 0), "artifact": out.get("artifact")}
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.surface-map work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def surfaceMap(
         self, goal: str | None = None, budget: int | None = None
     ) -> dict[str, Any]:
-        """Compile the System Surface Map (structured result + text)."""
-        out = self.invoke("surface.build", {
+        """Compile the System Surface Map (structured result + text, verbatim)."""
+        return self.invoke("surface.build", {
             "task": goal,
             "budget": budget,
             "explain": False,
         })
-        result = out.get("result", {})
-        return {
-            "kind": "surface",
-            "content": out.get("text", ""),
-            "result": result,
-            "entity_ids": result.get("rendered_ids", []),
-            "token_count": result.get("token_count", 0),
-            "budget": budget or 0,
-        }
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
@@ -193,19 +184,13 @@ class SCC:
         files: list[str] | None = None,
         goal: str | None = None,
         budget: int | None = None,
-    ) -> dict[str, Any]:
-        """Compile the Structural Source representation of files (explicit
-        ``files`` or the files matched to a ``goal`` via the PPR->Surface
-        pipeline).
-
-        Returns the rendered structural text.
-        """
-        text = self.invoke("context.structural", {
+    ) -> str:
+        """Compile the Structural Source representation (rendered text, verbatim)."""
+        return self.invoke("context.structural", {
             "files": files or [],
             "task": goal,
             "budget": budget,
         })
-        return {"kind": "structural", "content": text}
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.index work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def index(self) -> dict[str, bool]:
@@ -215,17 +200,5 @@ class SCC:
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.operations work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def operations(self) -> Any:
-        """List registered engine operations (introspection)."""
-        proc_close = False
-        import subprocess as _sp
-
-        out = _sp.run(
-            [self._bin, "operations"],
-            cwd=self._cwd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if out.returncode != 0:
-            raise SCCError(out.stderr.strip() or "scc operations failed")
-        return out.stdout
+        """List registered engine operations (introspection, via RPC)."""
+        return self.invoke("operations.list", {})

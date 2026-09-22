@@ -150,41 +150,17 @@ fn route(
             Ok((200, "application/json".to_string(), serde_json::to_string(&artifact)?))
         }
         ("POST", "/v1/context/startup") => {
-            let req: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::json!({}));
+            let input: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::json!({}));
+            let budget = input.get("token_budget").and_then(|b| b.as_u64()).map(|b| b as usize);
             let store = crate::open_store(root)?;
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed; POST /v1/index first".into());
             }
-            let config = crate::load_config(root)?;
-            let stale = crate::stale_paths(&store)?;
-            let comp = crate::compiler(&store, &config, stale)?;
-            let ctx = comp.ctx();
-            // Transport parity: THE shared allocator; `token_budget` absent
-            // selects the default total and STILL adapts.
-            let budget_tokens = req.get("token_budget").and_then(|b| b.as_u64()).map(|b| b as usize);
-            let budget = scc_context::startup::allocate_startup_budget(&ctx, budget_tokens);
-            let startup =
-                scc_context::startup::build_startup(&ctx, &budget, scc_context::startup::RENDERER_VERSION);
-            // Ledger parity with CLI/MCP: record what THIS transport showed.
-            let ledger_store = scc_context::context_ledger::ContextLedgerStore::new(&store);
-            let mut led = ledger_store.load();
-            let (syms, files, comps, flows) =
-                scc_context::startup::visible_ids_from_startup(&ctx, &startup);
-            led.visible_entities.extend(syms.iter().cloned());
-            led.visible_symbols.extend(syms);
-            led.visible_files.extend(files);
-            led.visible_components.extend(comps);
-            led.visible_flows.extend(flows);
-            ledger_store.save(&led);
-            Ok((
-                200,
-                "application/json".to_string(),
-                serde_json::to_string(&serde_json::json!({
-                    "text": scc_context::startup::render_startup(&startup),
-                    "budget": budget,
-                    "artifact": startup.artifact,
-                }))?,
-            ))
+            // Registry derivation: context.startup builds, allocates, and
+            // records the ledger inside the engine — same as CLI/MCP.
+            let output = scc_engine::invoke(root, "context.startup", serde_json::json!({"budget": budget}))
+                .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("GET", "/v1/atlas") => {
             let store = crate::open_store(root)?;
@@ -201,10 +177,9 @@ fn route(
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed".into());
             }
-            let config = crate::load_config(root)?;
-            let stale = crate::stale_paths(&store)?;
-            let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().component_context(id))?))
+            let output = scc_engine::invoke(root, "context.component", serde_json::json!({"id": id}))
+                .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("GET", p) if p.starts_with("/v1/flows/") => {
             let id = p.trim_start_matches("/v1/flows/");
@@ -212,10 +187,9 @@ fn route(
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed".into());
             }
-            let config = crate::load_config(root)?;
-            let stale = crate::stale_paths(&store)?;
-            let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().flow_context(id))?))
+            let output = scc_engine::invoke(root, "context.flow", serde_json::json!({"id": id}))
+                .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("POST", "/v1/impact") => {
             let req: serde_json::Value = match serde_json::from_str(body) {
@@ -226,31 +200,21 @@ fn route(
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed".into());
             }
-            let config = crate::load_config(root)?;
-            let stale = crate::stale_paths(&store)?;
-            let comp = crate::compiler(&store, &config, stale)?;
-            let files = json_arr(&req, "files");
-            let symbols = json_arr(&req, "symbols");
-            let diff = req.get("diff").and_then(|d| d.as_str()).map(|s| s.to_string());
-            Ok((
-                200,
-                "application/json".to_string(),
-                serde_json::to_string(&comp.ctx().impact_context(
-                    &files,
-                    &symbols,
-                    diff.as_deref(),
-                ))?,
-            ))
+            let output = scc_engine::invoke(root, "context.impact", serde_json::json!({
+                "files": json_arr(&req, "files"), "symbols": json_arr(&req, "symbols"),
+                "diff": req.get("diff").and_then(|d| d.as_str()),
+            }))
+            .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("POST", "/v1/verify") => {
             let store = crate::open_store(root)?;
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed".into());
             }
-            let config = crate::load_config(root)?;
-            let stale = crate::stale_paths(&store)?;
-            let comp = crate::compiler(&store, &config, stale)?;
-            Ok((200, "application/json".to_string(), serde_json::to_string(&comp.ctx().verify_context())?))
+            let output = scc_engine::invoke(root, "context.verify", serde_json::json!({}))
+                .map_err(|e| crate::CliError::Other(e.to_string()))?;
+            Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("POST", "/v1/index") => {
             scc_engine::invoke(root, "index.full", serde_json::json!({})).map_err(|e| crate::CliError::Other(e.to_string()))?;

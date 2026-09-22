@@ -226,57 +226,34 @@ export class SCC {
     });
   }
 
-  /**
-   * Run the freshness/evidence verification. `scc verify` has no JSON mode,
-   * so the pack is synthesized from its markdown output.
-   */
+  /** Run the freshness/evidence verification (structured pack, via RPC). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.verify-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async verifyContext(): Promise<ContextPack> {
     return this.invoke<ContextPack>("context.verify", {});
   }
 
-  /**
-   * Compile the fused session-startup artifact (Atlas + Surface + coverage +
-   * omissions). `scc context startup` has no JSON mode, so the pack is
-   * synthesized from its markdown output.
-   */
+  /** Compile the fused session-startup artifact (startup triple, via RPC). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.context-startup work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-  async contextStartup(budget?: number): Promise<ContextPack> {
-    const text = await this.invoke<string>("context.startup", { budget });
-    return { kind: "startup", repository_revision: "", content: text,
-      entity_ids: [], evidence_summary: {}, warnings: [],
-      tokens: 0, budget: budget ?? 0, truncated: false };
+  async contextStartup(budget?: number): Promise<{ text: string; budget: unknown; artifact: unknown }> {
+    return this.invoke("context.startup", { budget });
   }
 
-  /**
-   * Compile the System Surface Map, global or task-personalized. `scc
-   * surface` has no JSON mode, so the pack is synthesized from its markdown
-   * output.
-   */
+  /** Compile the System Surface Map, global or task-personalized (via RPC). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.surface-map work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-  async surfaceMap(goal?: string, budget?: number): Promise<ContextPack> {
-    const out = await this.invoke<{ text: string; result: { rendered_ids: string[]; token_count: number } }>(
-      "surface.build", { task: goal ?? null, budget, explain: false });
-    return { kind: "surface", repository_revision: "", content: out.text,
-      entity_ids: out.result.rendered_ids, evidence_summary: {}, warnings: [],
-      tokens: out.result.token_count, budget: budget ?? 0, truncated: false };
+  async surfaceMap(goal?: string, budget?: number): Promise<{ text: string; result: unknown }> {
+    return this.invoke("surface.build", { task: goal ?? null, budget, explain: false });
   }
 
   /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
-   * PPR->Surface pipeline.
-   * `scc context structural` has no JSON mode, so the pack is synthesized
-   * from its markdown output.
+   * PPR->Surface pipeline (via RPC).
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
-  async structuralSource(files?: string[], goal?: string, budget?: number): Promise<ContextPack> {
-    const text = await this.invoke<string>("context.structural", {
+  async structuralSource(files?: string[], goal?: string, budget?: number): Promise<string> {
+    return this.invoke<string>("context.structural", {
       files: files ?? [], task: goal ?? null, budget,
     });
-    return { kind: "structural", repository_revision: "", content: text,
-      entity_ids: [], evidence_summary: {}, warnings: [],
-      tokens: 0, budget: budget ?? 0, truncated: false };
   }
 
   /** Index the repository (idempotent; incremental after the first run). */
@@ -284,5 +261,11 @@ export class SCC {
   async index(): Promise<IndexResult> {
     await this.invoke("index.full", {});
     return { ok: true };
+  }
+
+  /** List registered engine operations (introspection, via RPC). */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.operations work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
+  async operations(): Promise<{ operations: string[]; api_version: string }> {
+    return this.invoke("operations.list", {});
   }
 }

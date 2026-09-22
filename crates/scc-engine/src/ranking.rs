@@ -67,6 +67,16 @@ impl<'a> Ranker<'a> {
     /// symbol's entries (overloads); blends are otherwise identical math.
     // trace:v1 id=impl.scc-engine-ranking.symbols-hooks work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
     pub fn symbols_with_hooks(&self, req: &RankRequest, hooks: &RankHooks) -> crate::Result<RankResult> {
+        // Named blend profiles (§12): only `default` exists until a plugin
+        // registers one. Unknown names fail loudly — silently running
+        // default math under a requested profile would lie about behavior.
+        if let Some(profile) = req.profile.as_deref() {
+            if profile != "default" {
+                return Err(crate::EngineError::Other(format!(
+                    "unknown ranking profile '{profile}' (available: default)"
+                )));
+            }
+        }
         let ctx = self.ctx();
         let goal = req.goal.as_deref().unwrap_or("");
         let goal_terms = scc_context::rank::terms(goal);

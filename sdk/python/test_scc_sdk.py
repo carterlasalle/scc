@@ -128,19 +128,23 @@ class TestSCCSDK(unittest.TestCase):
 
     # trace:exempt reason=internal-detail  # sdk integration test; behavior traced at impl.scc.cli
     def test_surface_map_renders_global_and_personalized(self):
-        pack = self.scc.surfaceMap()
-        self.assertEqual(pack["kind"], "surface")
-        self.assertIn("SCC SYSTEM SURFACE MAP", pack["content"])
+        out = self.scc.surfaceMap()
+        self.assertIn("SCC SYSTEM SURFACE MAP", out["text"])
         personalized = self.scc.surfaceMap(goal="add numbers")
-        self.assertIn("task-personalized: add numbers", personalized["content"])
+        self.assertIn("task-personalized: add numbers", personalized["text"])
 
     # trace:exempt reason=internal-detail  # sdk integration test; behavior traced at impl.scc.cli
     def test_structural_source_renders_files_and_goal(self):
-        pack = self.scc.structuralSource(files=["a.py"])
-        self.assertEqual(pack["kind"], "structural")
-        self.assertIn("source: a.py:L", pack["content"])
+        text = self.scc.structuralSource(files=["a.py"])
+        self.assertIn("source: a.py:L", text)
         by_goal = self.scc.structuralSource(goal="multiply calculator")
-        self.assertIn("representation:", by_goal["content"])
+        self.assertIn("representation:", by_goal)
+
+    # trace:exempt reason=unit-test
+    def test_operations_lists_registry(self):
+        out = self.scc.operations()
+        self.assertIn("context.task", out["operations"])
+        self.assertIn("ranking.symbols", out["operations"])
 
     # trace:exempt reason=internal-detail  # sdk parity test; behavior traced at impl.crates-scc-cli-src-commands.build-task-context
     def test_task_context_mirrors_cli_json_exactly(self):

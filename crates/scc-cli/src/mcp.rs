@@ -368,7 +368,7 @@ fn call_tool(root: &Path, name: &str, args: &serde_json::Value) -> crate::Result
             // Transport parity via the registry: engine startup derives +
             // records the ledger (same as CLI `context startup`).
             let out = invoke("context.startup", serde_json::json!({"budget": budget_tokens}))?;
-            Ok(out.as_str().unwrap_or("").to_string())
+            Ok(out.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
         }
         "surface_map" => {
             let goal = str_arg("goal");

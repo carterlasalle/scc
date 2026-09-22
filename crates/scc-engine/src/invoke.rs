@@ -33,8 +33,11 @@ pub fn invoke(
         }
         "context.startup" => {
             let req: scc_api::StartupRequest = serde_json::from_value(input).unwrap_or(scc_api::StartupRequest { budget: None });
-            let (_startup, text) = ctx.startup(&req)?;
-            Value::String(text)
+            // Structured triple: text + budget + artifact. Transports that
+            // need a bare string take `.text`; nothing re-derives startup.
+            let (startup, text) = ctx.startup(&req)?;
+            let budget = scc_context::startup::allocate_startup_budget(&ctx.engine.ctx(), req.budget);
+            serde_json::json!({"text": text, "budget": budget, "artifact": startup.artifact})
         }
         "context.task" => {
             let req: scc_api::TaskContextRequest = serde_json::from_value(input)?;
@@ -44,7 +47,22 @@ pub fn invoke(
             let req: scc_api::TaskContextRequest = serde_json::from_value(input)?;
             serde_json::to_value(crate::task::build_enriched_task_pack(&engine, &config, root, &req, None, None)?)?
         }
-        "context.component" | "context.flow" | "context.impact" | "context.verify" | "context.structural" | "surface.build" => {
+        "context.subagent" => {
+            let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let files: Vec<String> = input.get("files").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+            let symbols: Vec<String> = input.get("symbols").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+            let budget = input.get("budget").and_then(|v| v.as_u64()).map(|b| b as usize);
+            serde_json::to_value(ctx.subagent(goal, &files, &symbols, budget)?)?
+        }
+        "context.compress" => {
+            // Pack-only compression ladder, no external summarizer, no delta,
+            // no ledger: same derivation the CLI uses with --cmd omitted.
+            let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let budget = input.get("budget").and_then(|v| v.as_u64()).map(|b| b as usize);
+            let pack = crate::task::build_enriched_task_pack(&engine, &config, root, &scc_api::TaskContextRequest { goal: goal.into(), files: vec![], symbols: vec![], budget, hook: false }, None, None)?;
+            serde_json::to_value(pack)?
+        }
+        "context.component" | "context.flow" | "context.impact" | "context.verify" | "context.structural" | "source.structural" | "surface.build" => {
             invoke_context(&ctx, &store, operation, input)?
         }
         "graph.query" => {
@@ -63,6 +81,46 @@ pub fn invoke(
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
             serde_json::to_value(crate::graph::relationships(&store, subject, predicate, limit)?)?
         }
+        "graph.search" => {
+            let q = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+            let mut entities = store.search_entities(q, limit)?;
+            if entities.is_empty() { entities = store.search_entities_like(q, limit)?; }
+            serde_json::to_value(entities)?
+        }
+        "graph.search_symbols" => {
+            let q = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+            let mut symbols = store.search_symbols(q, limit)?;
+            if symbols.is_empty() { symbols = store.search_symbols_like(q, limit)?; }
+            serde_json::json!({"symbols": symbols.iter().map(|(n, s, k, f)| serde_json::json!({"name": n, "signature": s, "kind": k, "file": f})).collect::<Vec<_>>()})
+        }
+        "evidence.get" => {
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::to_value(store.get_evidence(id)?)?
+        }
+        "evidence.list" => {
+            let path = input.get("path").and_then(|v| v.as_str());
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
+            let mut out = match path {
+                Some(p) => store.evidence_for_path(p)?,
+                None => store.all_evidence()?,
+            };
+            out.truncate(limit.max(1));
+            serde_json::to_value(out)?
+        }
+        "runtime.signatures" => {
+            let rows = store.trace_signatures()?;
+            serde_json::json!({"signatures": rows.iter().map(|(sig, count, lat, err, last)| serde_json::json!({"signature": sig, "count": count, "latency_ms": lat, "errors": err, "last_observed": last})).collect::<Vec<_>>()})
+        }
+        "integrations.describe" => {
+            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let all = crate::integrations::list(root)?;
+            match all.into_iter().find(|(n, _)| n == name) {
+                Some((n, scope)) => serde_json::json!({"name": n, "scope": scope}),
+                None => serde_json::json!({"error": format!("unknown integration '{name}'")}),
+            }
+        }
         "index.full" => serde_json::to_value(crate::index::full(root, &config)?)?,
         "index.refresh" => {
             let req: scc_api::IndexPathsRequest = serde_json::from_value(input)?;
@@ -73,10 +131,15 @@ pub fn invoke(
             let req: scc_api::DiffRequest = serde_json::from_value(input)?;
             serde_json::to_value(crate::history::diff(&store, req.from, req.to)?)?
         }
+        "model.get" => serde_json::to_value(crate::exports::model_get(&store)?)?,
         "export.system_ir" => {
             let req: scc_api::ExportRequest = serde_json::from_value(input).unwrap_or(scc_api::ExportRequest { format: "system-ir.json".into() });
             export_value(&store, root, &req.format)?
         }
+        "export.system_ir_jsonl" => export_value(&store, root, "system-ir.jsonl")?,
+        "export.ccg" => export_value(&store, root, "ccg")?,
+        "export.flow_graphs" => export_value(&store, root, "flow-graphs.json")?,
+        "export.snap" => export_value(&store, root, "capsule.md")?,
         "workspace.init" => {
             let dir = crate::workspace::scc_dir(root);
             std::fs::create_dir_all(&dir)?;
@@ -88,6 +151,11 @@ pub fn invoke(
             serde_json::json!({"initialized": dir.to_string_lossy(), "config": cfg_path.to_string_lossy()})
         }
         "workspace.state_path" => Value::String(crate::workspace::state_dir(root).to_string_lossy().into()),
+        "workspace.session" => serde_json::to_value(crate::workspace::open_session(&store, &config)?)?,
+        "workspace.session_check" => {
+            let session: crate::workspace::Session = serde_json::from_value(input.get("session").cloned().unwrap_or(serde_json::Value::Null))?;
+            serde_json::json!({"current": crate::workspace::session_is_current(&store, &config, &session)?})
+        }
         "index.status" => {
             let s = status_value(&store)?;
             serde_json::to_value(&s)?
@@ -138,7 +206,7 @@ pub fn invoke(
         }
         "beads.list" => serde_json::to_value(crate::state::beads(root, 20)?)?,
         "setup.claude" | "setup.detected" | "setup.codex" | "setup.opencode" | "setup.hermes" | "setup.omp" | "setup.pi" => {
-            serde_json::json!({"ok": false, "reason": "setup operations are CLI-local (file installation); no engine state involved"})
+            return Err(crate::EngineError::Other("setup operations are CLI-local file installation (harness dirs, home directory); not engine operations".into()));
         }
         "snapshot.save" => {
             let req: scc_api::SnapshotSaveRequest = serde_json::from_value(input)?;
@@ -173,7 +241,12 @@ pub fn invoke(
                 "errors": r.errors,
             })
         }
-        "export.diagram" => serde_json::json!({"ok": false, "reason": "diagram rendering is CLI-local (viewer); use export.system_ir + render client-side"}),
+        "export.diagram" => {
+            return Err(crate::EngineError::Other("diagram rendering is CLI-local (viewer); use export.system_ir + render client-side".into()));
+        }
+        "index.watch" => {
+            return Err(crate::EngineError::Other("index.watch is a streaming filesystem watch, not a request/response operation; run `scc watch`".into()));
+        }
         "runtime.ingest" => {
             let body = input.get("body").and_then(|v| v.as_str()).unwrap_or("");
             crate::state::ingest_runtime(root, body)?;
@@ -236,7 +309,7 @@ pub fn invoke(
         "ranking.explain" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-            let req = scc_api::RankRequest { goal: Some(goal.into()), limit: 1000, explain: true, include_features: true, include_intermediate: true };
+            let req = scc_api::RankRequest { profile: None, goal: Some(goal.into()), limit: 1000, explain: true, include_features: true, include_intermediate: true };
             let ranker = engine.ranking();
             let mut ap = crate::plugins::active(root, &config);
             let hooks = ranking_hooks_from_plugins(&mut ap, goal);
@@ -249,7 +322,7 @@ pub fn invoke(
         "ranking.global" | "ranking.task" | "ranking.entities" => {
             let goal = input.get("goal").and_then(|v| v.as_str()).map(|s| s.to_string());
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-            let req = scc_api::RankRequest { goal, limit, explain: false, include_features: true, include_intermediate: false };
+            let req = scc_api::RankRequest { profile: None, goal, limit, explain: false, include_features: true, include_intermediate: false };
             serde_json::to_value(engine.ranking().symbols(&req)?)?
         }
         "selection.mmr" => {
@@ -314,15 +387,24 @@ fn ranking_hooks_from_plugins(
     use std::sync::Arc;
     let mut hooks = crate::ranking::RankHooks::default();
     // Snapshot what each plugin provides (borrow ends before mutation).
-    let specs: Vec<(String, String, Vec<String>)> = ap.plugins.iter()
-        .map(|p| (p.manifest.id.clone(), p.manifest.version.clone(), p.manifest.operations.clone()))
+    // Extension registrations (§17) select hook wiring; legacy bare
+    // operation names (ranking.seed/feature/rerank) keep working.
+    // trace:exempt reason=internal-detail
+    struct PlugSpec { id: String, ops: Vec<String>, exts: Vec<(String, String)> }
+    let specs: Vec<PlugSpec> = ap.plugins.iter()
+        .map(|p| PlugSpec { id: p.manifest.id.clone(), ops: p.manifest.operations.clone(),
+            exts: p.manifest.extensions.iter().map(|e| (e.extension_type.clone(), e.id.clone())).collect() })
         .collect();
-    for (pid, ver, ops) in specs {
-        let plug = match ap.plugins.iter().find(|p| p.manifest.id == pid).cloned() {
+    for spec in specs {
+        let plug = match ap.plugins.iter().find(|p| p.manifest.id == spec.id).cloned() {
             Some(p) => Arc::new(p),
             None => continue,
         };
-        if ops.iter().any(|o| o == "ranking.seed") {
+        let pid = spec.id.clone();
+        let wants = |t: &str, op: &str| {
+            spec.exts.iter().any(|(ty, _)| ty == t) || spec.ops.iter().any(|o| o == op)
+        };
+        if wants("seed-provider", "ranking.seed") {
             let plug = Arc::clone(&plug);
             let g = goal.to_string();
             hooks.seed_providers.push(Box::new(move |_goal| {
@@ -339,7 +421,7 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
-        if ops.iter().any(|o| o == "ranking.feature") {
+        if wants("rank-feature", "ranking.feature") {
             let plug = Arc::clone(&plug);
             hooks.features.push(Box::new(move |sym, goal| {
                 let input = serde_json::json!({"symbol": sym, "goal": goal});
@@ -354,7 +436,7 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
-        if ops.iter().any(|o| o == "ranking.rerank") {
+        if wants("reranker", "ranking.rerank") {
             let plug = Arc::clone(&plug);
             hooks.rerankers.push(Box::new(move |items, goal| {
                 let input = serde_json::json!({"goal": goal, "items": items.iter().map(|i: &scc_api::RankItem| i.id.clone()).collect::<Vec<_>>()});
@@ -368,7 +450,6 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
-        let _ = ver;
     }
     hooks
 }

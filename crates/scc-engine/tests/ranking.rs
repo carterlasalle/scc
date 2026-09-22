@@ -54,7 +54,7 @@ fn stages_agree_and_blend_ranks_task_first() {
     let amax: f64 = tv.iter().filter(|(id, _)| id.contains("b/mod.py")).map(|(_, s)| *s).fold(0.0, f64::max);
     assert!(zmax > amax, "task PPR concentrates on zeta ({zmax} vs {amax})");
     // Full blend: zeta first, features decomposed, positions dense.
-    let out = r.symbols(&RankRequest { goal: Some("zeta".into()), limit: 20, explain: true, include_features: true, include_intermediate: false }).unwrap();
+    let out = r.symbols(&RankRequest { profile: None, goal: Some("zeta".into()), limit: 20, explain: true, include_features: true, include_intermediate: false }).unwrap();
     assert_eq!(out.items.len(), 20);
     assert!(out.items[0].id.contains("a/mod.py"), "zeta first: {}", out.items[0].id);
     assert!(out.items[0].features.task_ppr > 0.0);
@@ -72,14 +72,14 @@ fn plugin_seed_hook_moves_alpha_up() {
     let r = engine.ranking();
     // Neutral goal: no lexical skew, so movement is pure seed effect.
     let goal = "qqqzzz-no-such-term";
-    let base = r.symbols(&RankRequest { goal: Some(goal.into()), limit: 20, explain: false, include_features: false, include_intermediate: false }).unwrap();
+    let base = r.symbols(&RankRequest { profile: None, goal: Some(goal.into()), limit: 20, explain: false, include_features: false, include_intermediate: false }).unwrap();
     let boosted = base.items.iter().find(|i| i.id.contains("b/mod.py")).unwrap().id.clone();
     let base_rank = base.items.iter().find(|i| i.id == boosted).unwrap().rank;
     let mut hooks = scc_engine::ranking::RankHooks::default();
     hooks.seed_providers.push(Box::new(move |_goal| {
         vec![scc_core::TaskSeed { kind: "symbol".into(), id: boosted.clone(), weight: 10.0 }]
     }));
-    let out = r.symbols_with_hooks(&RankRequest { goal: Some(goal.into()), limit: 20, explain: false, include_features: false, include_intermediate: false }, &hooks).unwrap();
+    let out = r.symbols_with_hooks(&RankRequest { profile: None, goal: Some(goal.into()), limit: 20, explain: false, include_features: false, include_intermediate: false }, &hooks).unwrap();
     let new_rank = out.items.iter().find(|i| i.id.contains("b/mod.py")).map(|i| i.rank).unwrap_or(0.0);
     assert!(new_rank > base_rank, "hook seed moves alpha up ({base_rank} -> {new_rank})");
     assert!(out.items[0].id.contains("b/mod.py"), "boosted alpha first: {}", out.items[0].id);
@@ -93,7 +93,7 @@ fn blend_matches_surface_pipeline() {
     let (_g, _c, _s, engine) = ranker_of(&store);
     let r = engine.ranking();
     let goal = "zeta";
-    let out = r.symbols(&RankRequest { goal: Some(goal.into()), limit: 20, explain: false, include_features: true, include_intermediate: false }).unwrap();
+    let out = r.symbols(&RankRequest { profile: None, goal: Some(goal.into()), limit: 20, explain: false, include_features: true, include_intermediate: false }).unwrap();
     // Same order as the pipeline with selection stages off (pure rank).
     let ctx = engine.ctx();
     let policy = SurfacePolicy { quotas: false, mmr: false, coverage: false, hard_max: usize::MAX };

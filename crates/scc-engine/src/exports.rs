@@ -138,3 +138,35 @@ pub fn capsule(root: &std::path::Path) -> crate::Result<String> {
         skeleton.text
     ))
 }
+
+/// Complete live model (§35): repository, snapshot, epoch, files, symbols,
+/// entities, relationships, evidence, components, flows, flow graphs,
+/// invariants, and stats in one structured envelope.
+///
+/// This is the programmatic `give me everything SCC knows`; the export
+/// formats stay the interoperable representations. Sections reuse the same
+/// store getters as `system_ir` — one derivation, one envelope.
+// trace:v1 id=impl.scc-engine-exports.model-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn model_get(store: &scc_store::Store) -> crate::Result<serde_json::Value> {
+    let ir = system_ir(store)?;
+    let (revision, indexed_at, branch) = match store.snapshot_status()? {
+        Some((snap, _)) => (snap.revision, Some(snap.indexed_at), snap.branch),
+        None => ("not-indexed".to_string(), None, None),
+    };
+    Ok(serde_json::json!({
+        "repository": store.repository(),
+        "revision": revision,
+        "branch": branch,
+        "indexed_at": indexed_at,
+        "epoch": store.model_epoch()?,
+        "stats": store.stats()?,
+        "files": store.all_files()?,
+        "entities": ir.entities,
+        "relationships": ir.relationships,
+        "evidence": ir.evidence,
+        "components": store.components()?,
+        "flows": store.flows()?,
+        "flow_graphs": store.flow_graphs()?,
+        "invariants": ir.invariants,
+    }))
+}

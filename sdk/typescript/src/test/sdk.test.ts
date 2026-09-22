@@ -116,28 +116,32 @@ test("verifyContext() content reports freshness", { skip: skip ? skipReason : fa
   assert.match(pack.content, /FRESHNESS/);
 });
 
-test("contextStartup() renders the fused startup artifact", { skip: skip ? skipReason : false }, async () => {
-  const pack = await scc().contextStartup();
-  assert.equal(pack.kind, "startup");
-  assert.match(pack.content, /# SCC SYSTEM CONTEXT/);
-  assert.match(pack.content, /## SYSTEM ATLAS/);
-  assert.match(pack.content, /## SYSTEM SURFACE MAP/);
+test("contextStartup() returns the startup triple", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().contextStartup();
+  assert.match(out.text, /# SCC SYSTEM CONTEXT/);
+  assert.match(out.text, /## SYSTEM ATLAS/);
+  assert.match(out.text, /## SYSTEM SURFACE MAP/);
+  assert.ok(out.artifact !== undefined);
 });
 
-test("surfaceMap() renders the global surface map", { skip: skip ? skipReason : false }, async () => {
-  const pack = await scc().surfaceMap();
-  assert.equal(pack.kind, "surface");
-  assert.match(pack.content, /SCC SYSTEM SURFACE MAP/);
+test("surfaceMap() returns the surface result", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().surfaceMap();
+  assert.match(out.text, /SCC SYSTEM SURFACE MAP/);
   const personalized = await scc().surfaceMap("add numbers");
-  assert.match(personalized.content, /task-personalized: add numbers/);
+  assert.match(personalized.text, /task-personalized: add numbers/);
 });
 
 test("structuralSource() renders units for files and goals", { skip: skip ? skipReason : false }, async () => {
-  const pack = await scc().structuralSource(["a.py"]);
-  assert.equal(pack.kind, "structural");
-  assert.match(pack.content, /source: a\.py:L/);
+  const text = await scc().structuralSource(["a.py"]);
+  assert.match(text, /source: a\.py:L/);
   const byGoal = await scc().structuralSource(undefined, "multiply calculator");
-  assert.match(byGoal.content, /representation:/);
+  assert.match(byGoal, /representation:/);
+});
+
+test("operations() lists the registry via RPC", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().operations();
+  assert.ok(out.operations.length > 50);
+  assert.ok(out.operations.includes("context.task"));
 });
 
 test("non-zero scc exit rejects with stderr", { skip: skip ? skipReason : false }, async () => {

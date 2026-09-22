@@ -163,6 +163,8 @@ pub struct RankRequest {
     #[serde(default)]
     pub goal: Option<String>,
     #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
     pub limit: usize,
     #[serde(default)]
     pub explain: bool,

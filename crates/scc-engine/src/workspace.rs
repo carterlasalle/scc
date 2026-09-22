@@ -268,3 +268,49 @@ impl Operations<'_> {
         crate::ops::describe(id)
     }
 }
+
+/// Pinned model session (§5): repository id, source revision, model epoch,
+/// config hash, plugin lock, and rank salt captured at open.
+///
+/// Sessions let callers run atlas + ranking + structural against exactly
+/// the same compiled model. `is_current()` re-checks the pin against live
+/// state; a changed epoch/revision/config/plugin set reports stale instead
+/// of silently answering from a moved model.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+// trace:v1 id=impl.scc-engine-workspace.session work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct Session {
+    pub repo_id: String,
+    pub revision: String,
+    pub epoch: String,
+    pub config_hash: String,
+    pub plugin_lock: Vec<serde_json::Value>,
+    pub rank_salt: String,
+}
+
+// trace:exempt reason=internal-detail
+pub fn open_session(store: &Store, config: &Config) -> crate::Result<Session> {
+    let repo = store.repository();
+    let head = store.revisions()?.into_iter().last().map(|r| r.rev).unwrap_or(0);
+    let epoch = store.model_epoch()?.composite(&head.to_string());
+    let revision = store
+        .snapshot_status()?
+        .map(|(s, _)| s.revision)
+        .unwrap_or_else(|| "not-indexed".to_string());
+    let engine = open_engine(store, config, stale_paths(store)?)?;
+    Ok(Session {
+        repo_id: repo.id,
+        revision,
+        epoch,
+        config_hash: scc_indexer::semantic_config_hash(config),
+        plugin_lock: crate::plugins::lock_entries(&crate::plugins::active(&store.root, config)),
+        rank_salt: engine.settings.rank_salt,
+    })
+}
+
+// trace:exempt reason=internal-detail
+pub fn session_is_current(store: &Store, config: &Config, session: &Session) -> crate::Result<bool> {
+    let live = open_session(store, config)?;
+    Ok(live == *session)
+}
+
+
