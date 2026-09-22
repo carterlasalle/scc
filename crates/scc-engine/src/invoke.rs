@@ -191,7 +191,36 @@ pub fn invoke(
         "ranking.global" | "ranking.task" | "ranking.symbols" | "ranking.entities" | "ranking.candidates" | "ranking.explain" => {
             serde_json::json!({"ok": false, "reason": "fine-grained ranking stages land with the ranking-pipeline milestone; use surface.build + ranking.important today"})
         }
-        _ => return Err(crate::EngineError::Other(format!("unknown operation '{operation}' (see operations.list)"))),
+        "plugins.list" => {
+            let ap = crate::plugins::active(root, &config);
+            serde_json::json!({"plugins": scc_plugin_host::discover(root).iter().map(|p| &p.manifest.id).collect::<Vec<_>>(), "lock": crate::plugins::lock_entries(&ap)})
+        }
+        "plugins.describe" => {
+            let ap = crate::plugins::active(root, &config);
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match ap.plugins.iter().find(|p| p.manifest.id == id) {
+                Some(p) => serde_json::json!({"manifest": {"id": p.manifest.id, "name": p.manifest.name, "version": p.manifest.version, "api": p.manifest.api, "operations": p.manifest.operations, "timeout_ms": p.manifest.timeout_ms, "failure_policy": p.manifest.failure_policy, "deterministic": p.manifest.deterministic}, "lock": scc_plugin_host::lock_entry(p)}),
+                None => serde_json::json!({"error": format!("unknown plugin '{id}'")}),
+            }
+        }
+        "plugins.doctor" => {
+            let ap = crate::plugins::active(root, &config);
+            serde_json::json!({"plugins": ap.plugins.iter().map(|p| serde_json::json!({"id": p.manifest.id, "operations": p.manifest.operations})).collect::<Vec<_>>(), "diagnostics": ap.diagnostics})
+        }
+        "plugins.invoke" => {
+            let op = input.get("operation").and_then(|v| v.as_str()).unwrap_or(operation);
+            let inner = input.get("input").cloned().unwrap_or(serde_json::json!({}));
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::call_operation(&mut ap, op, inner)?
+        }
+        _ => {
+            // Custom plugin operations: no per-transport code needed (spec 31).
+            let mut ap = crate::plugins::active(root, &config);
+            match scc_plugin_host::provider_for(&ap.plugins, operation) {
+                Ok(_) => crate::plugins::call_operation(&mut ap, operation, input)?,
+                Err(_) => return Err(crate::EngineError::Other(format!("unknown operation '{operation}' (see operations.list)"))),
+            }
+        }
     };
     Ok(out)
 }

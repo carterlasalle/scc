@@ -1462,6 +1462,40 @@ pub fn cmd_operations(describe: Option<&str>) -> crate::Result<()> {
     }
     Ok(())
 }
+
+/// `scc plugin list`: enabled plugins with lock entries (engine owns the set).
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-list work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_list(root: &Path) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.list", serde_json::json!({})).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// `scc plugin describe <id>`.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-describe work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_describe(root: &Path, id: &str) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.describe", serde_json::json!({"id": id})).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// `scc plugin doctor`.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-doctor work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_doctor(root: &Path) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.doctor", serde_json::json!({})).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// `scc plugin invoke <operation> [json-input]`.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-invoke work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_invoke(root: &Path, operation: &str, input: &str) -> crate::Result<()> {
+    let input: serde_json::Value = serde_json::from_str(input).unwrap_or(serde_json::json!({}));
+    let out = scc_engine::invoke(root, operation, input).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
 

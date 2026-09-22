@@ -93,6 +93,10 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "integrations.doctor", description: "Offline adapter diagnostics", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "lessons.add", description: "Append a hindsight lesson", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "lessons.list", description: "List hindsight lessons", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "plugins.list", description: "List enabled plugins with lock entries", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "plugins.describe", description: "Describe one plugin manifest", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "plugins.doctor", description: "Plugin environment + failure diagnostics", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "plugins.invoke", description: "Invoke any plugin operation explicitly", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "setup.claude", description: "Install Claude integration", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "setup.detected", description: "Install all detected harness integrations", mutation: MutationClass::Write, streaming: false },
 ];

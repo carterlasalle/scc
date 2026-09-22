@@ -15,6 +15,8 @@ pub struct Config {
     pub inference: InferenceConfig,
     pub runtime: RuntimeConfig,
     pub integrations: IntegrationsConfig,
+    #[serde(default)]
+    pub plugins: PluginsConfig,
     pub security: SecurityConfig,
     pub repository: RepositoryConfig,
 }
@@ -131,6 +133,18 @@ pub struct OtelConfig {
 }
 
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+// trace:exempt reason=internal-detail
+pub struct PluginsConfig {
+    #[serde(default)]
+    pub enabled: Vec<String>,
+    #[serde(default)]
+    pub config: std::collections::BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub grants: std::collections::BTreeMap<String, Vec<String>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 // trace:exempt reason=internal-detail
@@ -164,6 +178,7 @@ impl Default for Config {
             inference: InferenceConfig::default(),
             runtime: RuntimeConfig::default(),
             integrations: IntegrationsConfig::default(),
+            plugins: PluginsConfig::default(),
             security: SecurityConfig::default(),
             repository: RepositoryConfig::default(),
         }

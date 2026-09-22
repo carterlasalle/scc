@@ -1,0 +1,19 @@
+[package]
+# trace:exempt reason=internal-detail
+name = "scc-plugin-api"
+# trace:exempt reason=internal-detail
+version.workspace = true
+# trace:exempt reason=internal-detail
+edition.workspace = true
+# trace:exempt reason=internal-detail
+license.workspace = true
+# trace:exempt reason=internal-detail
+description = "Stable SCC plugin contracts: manifest, permissions, operation declarations"
+
+[dependencies]
+# trace:exempt reason=internal-detail
+serde.workspace = true
+# trace:exempt reason=internal-detail
+serde_json.workspace = true
+# trace:exempt reason=internal-detail
+thiserror.workspace = true

@@ -26,6 +26,27 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum PluginSub {
+    /// List enabled plugins with lock entries
+    List,
+    /// Describe one plugin manifest
+    Describe {
+        /// Plugin id
+        id: String,
+    },
+    /// Plugin environment + failure diagnostics
+    Doctor,
+    /// Invoke a plugin operation: scc plugin invoke <operation> [json-input]
+    Invoke {
+        /// Operation id (e.g. acme.echo)
+        operation: String,
+        /// JSON input (default {})
+        #[arg(default_value = "{}")]
+        input: String,
+    },
+}
+
+#[derive(Subcommand)]
 // trace:exempt reason=internal-detail
 enum Commands {
     /// Initialize the SCC workspace (.scc/config.yaml + database)
@@ -258,6 +279,12 @@ enum Commands {
         /// Describe one operation in detail
         #[arg(long)]
         describe: Option<String>,
+    },
+
+    /// Plugin extensions (list, describe, doctor, invoke)
+    Plugin {
+        #[command(subcommand)]
+        sub: PluginSub,
     },
 
     /// Ingest runtime observations (POST /v1/runtime/traces body)
@@ -897,6 +924,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Mcp => commands::cmd_mcp(&root),
         Commands::Rpc { stdio } => commands::cmd_rpc(&root, stdio),
         Commands::Operations { describe } => commands::cmd_operations(describe.as_deref()),
+        Commands::Plugin { sub } => match sub {
+            PluginSub::List => commands::cmd_plugin_list(&root),
+            PluginSub::Describe { id } => commands::cmd_plugin_describe(&root, id.as_str()),
+            PluginSub::Doctor => commands::cmd_plugin_doctor(&root),
+            PluginSub::Invoke { operation, input } => commands::cmd_plugin_invoke(&root, operation.as_str(), input.as_str()),
+        },
         Commands::Ingest { body } => commands::cmd_ingest_runtime(&root, &body),
         Commands::Embed => scc_cli::embed_cli::cmd_embed(&root),
         Commands::Important { limit, component, task, json } => {

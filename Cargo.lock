@@ -1606,11 +1606,14 @@ dependencies = [
 name = "scc-engine"
 version = "0.2.6"
 dependencies = [
+ "blake3",
  "scc-api",
  "scc-context",
  "scc-core",
  "scc-graph",
  "scc-indexer",
+ "scc-plugin-api",
+ "scc-plugin-host",
  "scc-store",
  "serde",
  "serde_json",
@@ -1668,6 +1671,27 @@ dependencies = [
  "tree-sitter-rust",
  "tree-sitter-typescript",
  "ureq",
+]
+
+[[package]]
+name = "scc-plugin-api"
+version = "0.2.6"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "scc-plugin-host"
+version = "0.2.6"
+dependencies = [
+ "blake3",
+ "scc-plugin-api",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

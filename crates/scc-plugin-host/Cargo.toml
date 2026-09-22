@@ -1,6 +1,6 @@
 [package]
 # trace:exempt reason=internal-detail
-name = "scc-engine"
+name = "scc-plugin-host"
 # trace:exempt reason=internal-detail
 version.workspace = true
 # trace:exempt reason=internal-detail
@@ -8,32 +8,17 @@ edition.workspace = true
 # trace:exempt reason=internal-detail
 license.workspace = true
 # trace:exempt reason=internal-detail
-description = "SCC engine facade: one orchestration seam for CLI, HTTP, MCP, SDKs, RPC, FFI"
+description = "SCC plugin host: discovery, permissions, process-plugin execution, diagnostics"
 
 [dependencies]
 # trace:exempt reason=internal-detail
-scc-core.workspace = true
-# trace:exempt reason=internal-detail
-scc-store.workspace = true
-# trace:exempt reason=internal-detail
-scc-indexer.workspace = true
-# trace:exempt reason=internal-detail
-scc-graph.workspace = true
-# trace:exempt reason=internal-detail
-scc-context.workspace = true
-# trace:exempt reason=internal-detail
-scc-api.workspace = true
-# trace:exempt reason=internal-detail
 scc-plugin-api.workspace = true
-# trace:exempt reason=internal-detail
-scc-plugin-host.workspace = true
 # trace:exempt reason=internal-detail
 serde.workspace = true
 # trace:exempt reason=internal-detail
 serde_json.workspace = true
 # trace:exempt reason=internal-detail
 thiserror.workspace = true
-
 # trace:exempt reason=internal-detail
 blake3 = "1"
 
