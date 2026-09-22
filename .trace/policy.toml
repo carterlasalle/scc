@@ -96,4 +96,5 @@ paths = [
   "crates/scc-cli/tests/surface_signatures.rs",
   "crates/scc-cli/tests/surface_startup.rs",
   "crates/scc-cli/tests/viewer_diagram_snap.rs",
+  "LICENSE",
 ]

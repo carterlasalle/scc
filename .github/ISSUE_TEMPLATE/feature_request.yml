@@ -1,0 +1,52 @@
+name: Feature request
+description: Ask for a new capability, extractor, adapter, harness integration, or CLI surface.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that SCC does not let you do today? Describe the task, not the API.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+      description: A command, an output, an integration — whatever shape you have in mind.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Extraction (language, framework, config, infra)
+        - Resolution (calls, LSP, SCIP)
+        - System IR / Atlas (components, flows, invariants)
+        - Context packs (ranking, budgets, rendering)
+        - Freshness / incremental indexing / CI gates
+        - Runtime evidence
+        - Harness integration (Claude Code, Codex, OpenCode, Hermes, OMP, Pi, MCP)
+        - SDK / HTTP API
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including other tools, and why they are not enough here.
+    validations:
+      required: false
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints this must respect
+      description: SCC's guarantees are part of its contract; a proposal that breaks one needs to say so explicitly.
+      options:
+        - label: Local-first (no repository content leaves the machine unless explicitly enabled)
+        - label: Provenance honesty (inferred facts stay ranked below deterministic evidence)
+        - label: Hard token budgets (rendered output must always fit)
+        - label: No telemetry

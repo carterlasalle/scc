@@ -1,3 +1,4 @@
+<!-- trace:v1 id=doc.scc-benchmark-holdout type=document work=WORK-SCC-DISTRIBUTION -->
 # SCC Holdout Corpus — 20 blind repos (v1)
 
 Blind holdout corpus for detecting overfitting in the Wave 8 atlas-recall
@@ -66,7 +67,7 @@ Notes:
 ## Re-clone instructions
 
 ```bash
-# from the repo root (system_ir)
+# from the repo root (scc)
 mkdir -p benchmarks/holdout
 git clone --depth 1 https://github.com/django/django.git benchmarks/holdout/django
 git clone --depth 1 https://github.com/psf/requests.git benchmarks/holdout/requests
