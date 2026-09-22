@@ -126,16 +126,21 @@ impl<'a> Ranker<'a> {
     /// symbol's entries (overloads); blends are otherwise identical math.
     // trace:v1 id=impl.scc-engine-ranking.symbols-hooks work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
     pub fn symbols_with_hooks(&self, req: &RankRequest, hooks: &RankHooks) -> crate::Result<RankResult> {
-        // Named blend profiles (§12): only `default` exists until a plugin
-        // registers one. Unknown names fail loudly — silently running
-        // default math under a requested profile would lie about behavior.
-        if let Some(profile) = req.profile.as_deref() {
-            if profile != "default" {
-                return Err(crate::EngineError::Other(format!(
-                    "unknown ranking profile '{profile}' (available: default)"
-                )));
-            }
-        }
+        // Named blend profiles (spec 12 + DoD 25): `default` plus any
+        // plugin-registered profile. Unknown names fail loudly — silently
+        // running default math under a requested profile would lie.
+        let profile_w: Option<BlendWeights> = match req.profile.as_deref() {
+            None | Some("default") => None,
+            Some(name) => Some(hooks.profiles.get(name).cloned().ok_or_else(|| {
+                let mut avail: Vec<&str> = hooks.profiles.keys().map(|s| s.as_str()).collect();
+                avail.insert(0, "default");
+                crate::EngineError::Other(format!(
+                    "unknown ranking profile '{name}' (available: {})",
+                    avail.join(", ")
+                ))
+            })?),
+        };
+        let profile_name: Option<&str> = req.profile.as_deref().filter(|p| *p != "default");
         let ctx = self.ctx();
         let goal = req.goal.as_deref().unwrap_or("");
         let goal_terms = scc_context::rank::terms(goal);
@@ -168,9 +173,25 @@ impl<'a> Ranker<'a> {
             let confidence = e.confidence as f64;
             let criticality = if seed_ids.contains(e.symbol_id.as_str()) || required.contains(&e.id) { 1.0 } else { importance_file_score(&e.path) };
             let change_risk = if !e.path.is_empty() && ctx.stale_paths.iter().any(|p| p == &e.path) { 1.0 } else { 0.0 };
-            let blend = scc_context::pagerank::final_importance(task_ppr, global_ppr, lexical, 0.0, confidence, criticality, change_risk, 0.0, has_task);
+            let blend = match profile_w.as_ref() {
+                None => scc_context::pagerank::final_importance(task_ppr, global_ppr, lexical, 0.0, confidence, criticality, change_risk, 0.0, has_task),
+                Some(w) => {
+                    use scc_context::pagerank as pr;
+                    let (tw, gw) = if has_task { (w.task_ppr.unwrap_or(pr::TASK_PPR_WEIGHT), w.global_ppr.unwrap_or(pr::GLOBAL_PPR_WEIGHT)) }
+                        else { (w.task_ppr.unwrap_or(0.0), w.global_ppr.unwrap_or(pr::NO_TASK_GLOBAL_WEIGHT)) };
+                    tw * task_ppr
+                        + gw * global_ppr
+                        + w.lexical.unwrap_or(pr::LEXICAL_WEIGHT) * lexical
+                        + w.semantic.unwrap_or(pr::SEMANTIC_WEIGHT) * 0.0
+                        + w.confidence.unwrap_or(pr::CONFIDENCE_WEIGHT) * confidence
+                        + w.criticality.unwrap_or(pr::CRITICALITY_WEIGHT) * criticality
+                        + w.change_risk.unwrap_or(pr::CHANGE_RISK_WEIGHT) * change_risk
+                        + w.novelty.unwrap_or(pr::NOVELTY_WEIGHT) * 0.0
+                }
+            };
             let scale = 1.0 / (1.0 - scc_context::pagerank::SEMANTIC_WEIGHT);
-            let total = blend * scale + scc_context::pagerank::NOVELTY_WEIGHT * 1.0;
+            let novelty_w = profile_w.as_ref().and_then(|w| w.novelty).unwrap_or(scc_context::pagerank::NOVELTY_WEIGHT);
+            let total = blend * scale + novelty_w * 1.0;
             let mut plugin_features = std::collections::BTreeMap::new();
             let mut reasons: Vec<String> = Vec::new();
             if seed_ids.contains(e.symbol_id.as_str()) { reasons.push("task-seed".into()); }
@@ -180,6 +201,9 @@ impl<'a> Ranker<'a> {
                 plugin_features.insert(v.name.clone(), v.score);
                 total += v.weight * v.score;
                 if !v.reason.is_empty() { reasons.push(v.reason.clone()); }
+            }
+            if let Some(pname) = profile_name {
+                reasons.push(format!("profile:{pname}"));
             }
             let specificity = if e.exported { 1.15 } else { 1.0 };
             let item = RankItem { id: e.symbol_id.clone(), rank: total, position: 0,
@@ -268,6 +292,20 @@ pub type RerankerFn = Box<dyn Fn(&mut Vec<scc_api::RankItem>, &str) + Send + Syn
 pub type EdgeWeightFn = std::sync::Arc<
     dyn for<'a, 'b, 'c> Fn(&'a str, &'b str, &'c str, f64) -> Option<(String, f64)> + Send + Sync,
 >;
+/// Per-feature linear blend weights. `None` = SCC default.
+#[derive(Clone, Debug, Default)]
+// trace:exempt reason=internal-detail
+pub struct BlendWeights {
+    pub task_ppr: Option<f64>,
+    pub global_ppr: Option<f64>,
+    pub lexical: Option<f64>,
+    pub semantic: Option<f64>,
+    pub confidence: Option<f64>,
+    pub criticality: Option<f64>,
+    pub change_risk: Option<f64>,
+    pub novelty: Option<f64>,
+}
+
 #[derive(Default)]
 // trace:exempt reason=internal-detail
 pub struct RankHooks {
@@ -275,6 +313,12 @@ pub struct RankHooks {
     pub features: Vec<RankFeatureFn>,
     pub rerankers: Vec<RerankerFn>,
     pub edge_weights: Vec<EdgeWeightFn>,
+    /// Named blend profiles: profile name -> per-feature weight
+    /// overrides for the linear blend (feature keys: task_ppr,
+    /// global_ppr, lexical, semantic, confidence, criticality,
+    /// change_risk, novelty). Missing keys keep default weights.
+    /// Applied inside the same linear math; recorded in reasons.
+    pub profiles: std::collections::BTreeMap<String, BlendWeights>,
 }
 
 // trace:exempt reason=internal-detail

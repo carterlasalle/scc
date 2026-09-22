@@ -535,6 +535,45 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
+        // Named blend profiles (spec 12 + DoD 25): a
+        // `blend-profile:<name>` extension registers profile `<name>` via
+        // the plugin's `ranking.profile` op returning weight overrides.
+        for eid in spec.exts.iter().filter(|(ty, _)| ty == "blend-profile").map(|(_, id)| id) {
+            let name = eid.strip_prefix("blend-profile:").unwrap_or(eid).to_string();
+            let plug = Arc::clone(&plug);
+            if let Ok(v) = scc_plugin_host::call(&plug, "ranking.profile", serde_json::json!({"profile": name}), None) {
+                let w = v.get("weights").cloned().unwrap_or(serde_json::Value::Null);
+                let mut bw = crate::ranking::BlendWeights::default();
+                let mut bad: Vec<String> = Vec::new();
+                if let Some(obj) = w.as_object() {
+                    for (k, val) in obj {
+                        let num = val.as_f64();
+                        match (k.as_str(), num) {
+                            ("task_ppr", Some(x)) => bw.task_ppr = Some(x),
+                            ("global_ppr", Some(x)) => bw.global_ppr = Some(x),
+                            ("lexical", Some(x)) => bw.lexical = Some(x),
+                            ("semantic", Some(x)) => bw.semantic = Some(x),
+                            ("confidence", Some(x)) => bw.confidence = Some(x),
+                            ("criticality", Some(x)) => bw.criticality = Some(x),
+                            ("change_risk", Some(x)) => bw.change_risk = Some(x),
+                            ("novelty", Some(x)) => bw.novelty = Some(x),
+                            _ => bad.push(k.clone()),
+                        }
+                    }
+                }
+                // Unknown feature keys fail loudly at registration, not
+                // silently ignored (would lie about the blend).
+                if !bad.is_empty() {
+                    ap.diagnostics.push(scc_plugin_host::PluginDiagnostic {
+                        plugin: spec.id.clone(), operation: "ranking.profile".into(),
+                        error: format!("unknown blend features for profile '{name}': {}", bad.join(", ")),
+                        action: "skipped".into(),
+                    });
+                    continue;
+                }
+                hooks.profiles.insert(name, bw);
+            }
+        }
         if wants("reranker", "ranking.rerank") {
             let plug = Arc::clone(&plug);
             hooks.rerankers.push(Box::new(move |items, goal| {

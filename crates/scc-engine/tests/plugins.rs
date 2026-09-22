@@ -349,3 +349,42 @@ fn pagerank_stage_ops_ignore_edge_weights() {
     }
     let _ = score_of(&plain_task, "alpha");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.blend-profile verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn blend_profile_plugin_rescales_rank() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\ndef zeta():\n    return alpha()\n").unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.prof");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.prof\"\nname = \"Prof\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.profile\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"blend-profile:change-risk\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    // Profile zeroes every weight except change_risk: with a no-goal
+    // request all change_risk values are 0, so every rank must be 0 and
+    // every item carries the profile reason.
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json\nprint(json.dumps({\"output\": {\"weights\": {\"task_ppr\": 0, \"global_ppr\": 0, \"lexical\": 0, \"semantic\": 0, \"confidence\": 0, \"criticality\": 0, \"change_risk\": 1, \"novelty\": 0}}}))\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let out = scc_engine::invoke(
+        &root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10, "profile": "change-risk"}),
+    )
+    .unwrap();
+    let items = out["items"].as_array().unwrap();
+    assert!(!items.is_empty(), "profile rank must return items: {out}");
+    // change_risk is 0 for every symbol here (clean tree) + novelty scaled:
+    // total = blend*scale + novelty*weight(0) = 0 for all.
+    assert!(items.iter().all(|i| i["rank"].as_f64().unwrap() == 0.0), "zeroed profile must zero ranks: {out}");
+    assert!(items.iter().all(|i| i["reasons"].as_array().unwrap().iter().any(|r| r == "profile:change-risk")), "profile recorded: {out}");
+    // Unknown profile still fails closed.
+    let err = scc_engine::invoke(
+        &root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10, "profile": "nope"}),
+    );
+    assert!(err.is_err(), "unknown profile must fail: {err:?}");
+}
