@@ -175,15 +175,12 @@ pub type SeedProvider = Box<dyn Fn(&str) -> Vec<scc_core::TaskSeed> + Send + Syn
 pub type RankFeatureFn = Box<dyn Fn(&str, &str) -> RankFeatureValue + Send + Sync>;
 // trace:exempt reason=internal-detail
 pub type RerankerFn = Box<dyn Fn(&mut Vec<scc_api::RankItem>, &str) + Send + Sync>;
-// trace:exempt reason=internal-detail
-pub type EdgeNoteFn = Box<dyn Fn(&str, &str, f64) -> Option<(String, f64)> + Send + Sync>;
 #[derive(Default)]
 // trace:exempt reason=internal-detail
 pub struct RankHooks {
     pub seed_providers: Vec<SeedProvider>,
     pub features: Vec<RankFeatureFn>,
     pub rerankers: Vec<RerankerFn>,
-    pub edge_notes: Vec<EdgeNoteFn>,
 }
 
 

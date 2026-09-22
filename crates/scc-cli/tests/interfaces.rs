@@ -5,6 +5,19 @@ mod common;
 use common::*;
 use std::io::Write;
 use std::process::{Command, Stdio};
+
+// Daemon guard: kill the child when the test scope exits, even on
+// assertion failure (a leaked `scc serve` would hold the port and poison
+// sibling tests in this binary).
+// trace:exempt reason=test-helper
+struct DaemonGuard(std::process::Child);
+// trace:exempt reason=test-helper
+impl Drop for DaemonGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
 // trace:v1 id=test.scc.interfaces verifies=REQ-SCC-API exercises=impl.scc.mcp,impl.scc.http,impl.scc.cli
 
 #[test]
@@ -328,13 +341,15 @@ fn context_parity_across_cli_http_mcp() {
         cli_content.contains("HINDSIGHT LESSONS"),
         "hindsight enrichment present on CLI: {cli_content}"
     );
-    let mut child = Command::new(scc())
-        .arg("serve")
-        .current_dir(&dir)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let _child = DaemonGuard(
+        Command::new(scc())
+            .arg("serve")
+            .current_dir(&dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
     let mut ready = false;
     for _ in 0..40 {
         if std::net::TcpStream::connect(addr.as_str()).is_ok() {
@@ -370,8 +385,7 @@ fn context_parity_across_cli_http_mcp() {
         http["delta"].as_str().is_some_and(|d| !d.is_empty()),
         "HTTP artifact must carry the surface delta"
     );
-    child.kill().unwrap();
-    child.wait().unwrap();
+    drop(_child);
 
     // MCP server
     let mut child = Command::new(scc())
@@ -510,13 +524,15 @@ fn http_daemon_endpoints() {
     )
     .unwrap();
 
-    let mut child = Command::new(scc())
-        .arg("serve")
-        .current_dir(workdir(repo.path()))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let _child = DaemonGuard(
+        Command::new(scc())
+            .arg("serve")
+            .current_dir(workdir(repo.path()))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
 
     // poll until the port accepts connections
     let mut ready = false;
@@ -584,9 +600,7 @@ fn http_daemon_endpoints() {
     assert!(body.contains("FRESHNESS"), "{body}");
     let (s, _) = get("/v1/nope");
     assert_eq!(s, 404);
-
-    child.kill().unwrap();
-    child.wait().unwrap();
+    drop(_child);
 }
 
 /// Bind an ephemeral port so two HTTP tests in this binary cannot share a

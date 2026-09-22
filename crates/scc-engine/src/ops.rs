@@ -5,7 +5,6 @@
 //! implementation — there are never two paths to the same behavior.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 // trace:exempt reason=internal-detail
@@ -122,9 +121,3 @@ pub fn ids() -> Vec<&'static str> {
     OPERATIONS.iter().map(|d| d.id).collect()
 }
 
-// trace:exempt reason=internal-detail
-pub fn capability_matrix() -> BTreeMap<&'static str, &'static str> {
-    // Operation -> transports serving it today (spec §45 gate input).
-    // Transports: engine always; cli/http/mcp/sdk columns evolve per phase.
-    OPERATIONS.iter().map(|d| (d.id, "engine")).collect()
-}
