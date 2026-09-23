@@ -1260,9 +1260,10 @@ pub fn cmd_diagram(root: &Path, format: &str, out: Option<&str>) -> crate::Resul
         return Err(crate::CliError::Other("not indexed yet — run `scc index`".into()));
     }
     // Registry derivation: the engine owns the model + rendering; the CLI
-    // parses args, writes files, and prints (spec section 2).
-    let v = scc_engine::invoke(root, "export.diagram", serde_json::json!({"format": format}))
-        .map_err(engine_err)?;
+    // parses args, writes files, and prints (spec section 2). The store is
+    // already open for the staleness check — derive directly instead of
+    // re-entering through invoke (which would reopen it).
+    let v = scc_engine::exports::diagram(&store, format).map_err(engine_err)?;
     let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
     if let Some(path) = out {
         std::fs::write(path, text)?;
