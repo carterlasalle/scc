@@ -96,8 +96,8 @@ if [ "$EXECUTE" -eq 1 ]; then
         printf 'working tree is dirty; commit before publishing\n' >&2
         exit 1
     fi
-    if ! grep -qs 'crates\.io' "${CARGO_HOME:-$HOME/.cargo}/credentials.toml"; then
-        printf 'no crates.io token in %s — run `cargo login` first\n' "${CARGO_HOME:-$HOME/.cargo}/credentials.toml" >&2
+    if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+        printf 'CARGO_REGISTRY_TOKEN is not set (pass --token or `cargo login` first)\n' >&2
         exit 1
     fi
 fi
@@ -109,7 +109,7 @@ for c in "${CRATES[@]}"; do
     fi
     if [ "$EXECUTE" -eq 1 ]; then
         printf '==> publishing %s %s\n' "$c" "$VER"
-        cargo publish -p "$c"
+        cargo publish -p "$c" --token "${CARGO_REGISTRY_TOKEN:-}"
         [ "$WAIT" -eq 1 ] && wait_for_index "$c" "$VER"
     else
         printf '==> dry run: %s %s\n' "$c" "$VER"

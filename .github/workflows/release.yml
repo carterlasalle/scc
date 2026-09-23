@@ -174,7 +174,8 @@ jobs:
         # (`scc setup omp`), so npm is the optional route.
         run: |
           cd plugins/omp/scc
-          npm version "${VERSION#v}" --no-git-tag-version
+          want="${VERSION#v}"; cur=$(node -e 'console.log(require("./package.json").version)')
+          if [ "$cur" != "$want" ]; then npm version "$want" --no-git-tag-version; fi
           npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
