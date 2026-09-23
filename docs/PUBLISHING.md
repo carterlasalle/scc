@@ -18,13 +18,11 @@ channel below publishes under a scoped or qualified name.
 | MCP registry | `io.github.carterlasalle/scc` | manual — see below | GitHub login via `mcp-publisher` | ⏳ blocked on npm CLI package (below) |
 | npm | `@carterlasalle/scc` + `@carterlasalle/scc-linux-x64` + `@carterlasalle/scc-darwin-arm64` | `release.yml` `npm-cli` job | `NPM_TOKEN` secret | ✅ live (0.2.7) |
 | npm | `@carterlasalle/omp-scc` (Oh My Pi extension) | `release.yml` `npm-omp` job | `NPM_TOKEN` secret | ✅ live (0.2.7) |
-| crates.io | `scc-core`, `scc-store`, `scc-indexer`, `scc-graph`, `scc-context`, `scc-cli` | `release.yml` `crates` job (gated on `CRATES_PUBLISH`) | `CARGO_REGISTRY_TOKEN` secret + `CRATES_PUBLISH` variable | ❌ blocked: crates.io account needs a verified email (`cargo publish` 400) |
+| crates.io | `scc-core`, `scc-store`, `scc-indexer`, `scc-graph`, `scc-context`, `scc-cli` | `release.yml` `crates` job (gated on `CRATES_PUBLISH`) | `CARGO_REGISTRY_TOKEN` secret + `CRATES_PUBLISH` variable | ✅ live (0.2.7) |
 
-Only crates.io is still missing: `cargo publish` refuses with "A
-verified email address is required" — verify the account email at
-<https://crates.io/settings/profile>, then re-run the Release workflow
-(dispatch with `version=0.2.7`; immutable registries reject re-uploads, so
-only the missing channel will publish anything new).
+All channels are live as of 0.2.7. Re-running the Release workflow
+(dispatch with `version=<v>`) is safe: immutable registries reject
+re-uploads, so only missing artifacts publish anything new.
 
 <!-- trace:v1 id=doc.scc-publishing.one-time-setup work=WORK-SCC-DISTRIBUTION -->
 ## One-time setup
