@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "scc-api"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "scc-context",
  "scc-core",
@@ -1562,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "scc-cli"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "chrono",
  "clap",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "scc-context"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "blake3",
  "scc-core",
@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "scc-core"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "chrono",
  "schemars",
@@ -1613,7 +1613,7 @@ dependencies = [
 
 [[package]]
 name = "scc-engine"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "blake3",
  "scc-api",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "scc-ffi"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "scc-api",
  "scc-engine",
@@ -1643,7 +1643,7 @@ dependencies = [
 
 [[package]]
 name = "scc-graph"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "blake3",
  "scc-core",
@@ -1656,7 +1656,7 @@ dependencies = [
 
 [[package]]
 name = "scc-indexer"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "blake3",
  "globset",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "scc-plugin-api"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -1693,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "scc-plugin-host"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "blake3",
  "scc-plugin-api",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "scc-store"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "blake3",
  "chrono",

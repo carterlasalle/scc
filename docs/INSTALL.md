@@ -13,14 +13,14 @@ scc --version
 ```
 
 That installs the latest release to `~/.local/bin/scc`. To pin a version
-instead of taking latest, pass `--version 0.2.6` (or set `SCC_VERSION`).
+instead of taking latest, pass `--version 0.2.7` (or set `SCC_VERSION`).
 
 If you would rather verify the installer before it runs, download it and its
 checksum first — nothing executes before you have checked it against the
 release's own checksum file:
 
 ```bash
-V=0.2.6
+V=0.2.7
 P=Linux-x86_64            # or Darwin-arm64
 B="https://github.com/carterlasalle/scc/releases/download/v${V}"
 curl -fsSLO "${B}/install.sh" -O "${B}/sha256-${V}-${P}.txt"
@@ -52,7 +52,7 @@ It is short, has no dependencies beyond `curl`/`wget` and
 
 | Flag | Environment | Meaning |
 |---|---|---|
-| `--version <v>` | `SCC_VERSION` | Install a specific release (e.g. `--version 0.2.6`); default is the latest |
+| `--version <v>` | `SCC_VERSION` | Install a specific release (e.g. `--version 0.2.7`); default is the latest |
 | `--dir <path>` | `SCC_INSTALL_DIR` | Install directory; default `~/.local/bin` |
 | `--bin-name <name>` | — | Installed binary name; default `scc` |
 | `--dry-run` | — | Print the resolved release, asset URLs, and target path; download nothing |
@@ -67,14 +67,14 @@ Exit codes: `0` success, `1` usage/environment error, `2` download error,
 ### Verify the install
 
 ```bash
-scc --version        # scc 0.2.6
+scc --version        # scc 0.2.7
 scc doctor           # integration registry health (offline by default)
 ```
 
 ## Manual install (no script)
 
 ```bash
-VERSION=0.2.6
+VERSION=0.2.7
 PLATFORM=Linux-x86_64          # or Darwin-arm64
 BASE="https://github.com/carterlasalle/scc/releases/download/v${VERSION}"
 
@@ -324,7 +324,7 @@ scc context task "add retry to the payment webhook"
 - uses: actions/checkout@v4
 - name: Install SCC (pinned + verified)
   run: |
-    V=0.2.6
+    V=0.2.7
     P=Linux-x86_64
     B="https://github.com/carterlasalle/scc/releases/download/v${V}"
     curl -fsSLO "${B}/install.sh" -O "${B}/sha256-${V}-${P}.txt"

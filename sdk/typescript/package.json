@@ -1,6 +1,6 @@
 {
   "name": "scc-sdk",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Thin TypeScript SDK for the scc (System Context Compiler) CLI",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

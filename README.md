@@ -71,7 +71,7 @@ scc --version
 ```
 
 That installs the latest release to `~/.local/bin/scc` (Linux x86_64, macOS
-arm64). Prefer pinning? Pass a version: `sh install.sh --version 0.2.6`.
+arm64). Prefer pinning? Pass a version: `sh install.sh --version 0.2.7`.
 Homebrew works too: `brew install carterlasalle/tap/system-context-compiler`.
 Everything else — Docker, building from source, supported platforms,
 uninstall, troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.

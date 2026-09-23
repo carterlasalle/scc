@@ -18,7 +18,7 @@ members = [
 
 [workspace.package]
 # trace:v1 id=ops.release-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-version = "0.2.6"
+version = "0.2.7"
 # trace:exempt reason=internal-detail
 edition = "2021"
 # trace:exempt reason=internal-detail
@@ -38,25 +38,26 @@ categories = ["development-tools", "command-line-utilities"]
 # `version` pins below are crates.io requirements (contrib/publish-crates.sh
 # asserts path deps carry the workspace version); new engine/plugin crates
 # stay path-only until published.
-scc-core = { path = "crates/scc-core", version = "0.2.6" }
 # trace:exempt reason=package-metadata
-scc-store = { path = "crates/scc-store", version = "0.2.6" }
+scc-core = { path = "crates/scc-core", version = "0.2.7" }
 # trace:exempt reason=package-metadata
-scc-indexer = { path = "crates/scc-indexer", version = "0.2.6" }
+scc-store = { path = "crates/scc-store", version = "0.2.7" }
 # trace:exempt reason=package-metadata
-scc-graph = { path = "crates/scc-graph", version = "0.2.6" }
+scc-indexer = { path = "crates/scc-indexer", version = "0.2.7" }
 # trace:exempt reason=package-metadata
-scc-context = { path = "crates/scc-context", version = "0.2.6" }
+scc-graph = { path = "crates/scc-graph", version = "0.2.7" }
+# trace:exempt reason=package-metadata
+scc-context = { path = "crates/scc-context", version = "0.2.7" }
 # trace:exempt reason=internal-detail
-scc-api = { path = "crates/scc-api" }
+scc-api = { path = "crates/scc-api", version = "0.2.7" }
 # trace:exempt reason=internal-detail
-scc-engine = { path = "crates/scc-engine" }
+scc-engine = { path = "crates/scc-engine", version = "0.2.7" }
 # trace:exempt reason=internal-detail
-scc-ffi = { path = "crates/scc-ffi" }
+scc-ffi = { path = "crates/scc-ffi", version = "0.2.7" }
 # trace:exempt reason=internal-detail
-scc-plugin-api = { path = "crates/scc-plugin-api" }
+scc-plugin-api = { path = "crates/scc-plugin-api", version = "0.2.7" }
 # trace:exempt reason=internal-detail
-scc-plugin-host = { path = "crates/scc-plugin-host" }
+scc-plugin-host = { path = "crates/scc-plugin-host", version = "0.2.7" }
 
 # trace:exempt reason=internal-detail
 serde = { version = "1", features = ["derive"] }

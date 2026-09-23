@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CRATES=(scc-core scc-store scc-indexer scc-graph scc-context scc-cli)
+CRATES=(scc-api scc-plugin-api scc-core scc-store scc-indexer scc-graph scc-context scc-engine scc-plugin-host scc-ffi scc-cli)
 EXECUTE=0
 WAIT=1
 
@@ -77,7 +77,9 @@ printf 'workspace version: %s\n' "$VER"
 # The version lives in two places that must agree: [workspace.package] and the
 # internal dependency requirements in [workspace.dependencies].
 rc=0
-for c in "${CRATES[@]:0:5}"; do
+for c in "${CRATES[@]}"; do
+    # scc-cli is the end binary (workspace member, not a workspace.dependency)
+    if [ "$c" = "scc-cli" ]; then continue; fi
     dv="$(dep_version "$c")"
     if [ "$dv" != "$VER" ]; then
         printf 'MISMATCH: [workspace.dependencies] %s = %s but the workspace version is %s\n' "$c" "${dv:-<missing>}" "$VER" >&2

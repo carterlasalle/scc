@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.2.7] — 2026-09-23
+
+Engine facade, plugin architecture, and two measured bug fixes. First release
+to ship every distribution channel (npm CLI + OMP extension + crates.io join
+the installer, Homebrew, GHCR, and SDKs).
+
+- **Engine facade (`scc-engine` + `scc-api`).** All transports (CLI, RPC,
+  HTTP daemon, MCP, SDKs, C ABI) route through one operation registry
+  (`scc operations`); a transports-implement-nothing gate enforces it.
+  `export.diagram` renders in the engine; task structural goes through the
+  registry; one inference ranker implementation.
+- **Plugin architecture.** Process plugins (`scc-plugin.toml` + JSON over
+  stdio, crash-isolated, grant-checked before spawn, WIT contract,
+  wasm refused loudly): custom operations, namespaced state ops, lockfile
+  (`plugin lock`/`check`), rank hooks (candidate providers, similarity,
+  edge-weight contributors, blend profiles, legacy-alias parity), sessions
+  profiles/model schemas, plugin-keyed caches. Install guide in
+  `docs/INSTALL.md#plugins-extend-scc-without-forking-it`.
+- **Query answers "where is X defined" (#12).** Symbols carry `start_line`
+  end to end; `scc query` prints `file:line`. TypeScript `var x =
+  require("m")` imports are extracted (express: 2 import edges → 348) and
+  prototype-assigned functions (`res.json = function …`) surface as method
+  symbols — `query "res json"` lands on `lib/response.js:234`.
+- **Impact pulls same-package callers (#11).** Go `func(c *Context)`
+  literals bind params so `c.JSON` resolves (calls edges 2419 → 2599), and
+  a second impact wave adds files whose symbols call affected files'
+  symbols (depth-graded, transitive): gin `context.go` reports 13 depth-1
+  files instead of just the test.
+- **Install docs.** One install path (one-liner + Homebrew); npm-CLI /
+  OMP / crates.io marked ships-on-next-tag until this release publishes
+  them; PUBLISHING.md gains a live/blocked status column.
+
+Full suite green, clippy zero warnings, `trace verify --changed` pass.
+
 ## [0.2.6] — 2026-09-21
 
 Samply/flamegraph + temporary spans, all semantics preserved.
