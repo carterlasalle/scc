@@ -191,7 +191,7 @@ pub fn collect_lexical_candidates_full(
         }
         if let Ok(hits) = store.search_symbols(&query, limit) {
             let rank = limit as f64;
-            for (i, (name, sig, _kind, file)) in hits.iter().enumerate() {
+            for (i, (name, sig, _kind, file, _line)) in hits.iter().enumerate() {
                 let id = scc_core::symbol_id(&view.graph.repo_id, file, name);
                 let mut e = scc_core::Entity::new(id.clone(), kinds::SYMBOL, name.clone());
                 e.attr("file", serde_json::json!(file));
@@ -211,7 +211,7 @@ pub fn collect_lexical_candidates_full(
                     }
                 }
                 if let Ok(hits) = store.search_symbols_like(&variant, 6) {
-                    for (name, sig, _kind, file) in hits.iter() {
+                    for (name, sig, _kind, file, _line) in hits.iter() {
                         let id = scc_core::symbol_id(&view.graph.repo_id, file, name);
                         let mut e = scc_core::Entity::new(id.clone(), kinds::SYMBOL, name.clone());
                         e.attr("file", serde_json::json!(file));

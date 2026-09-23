@@ -182,6 +182,8 @@ The local daemon implements [`docs/openapi.yaml`](docs/openapi.yaml) on loopback
 
 SDKs: TypeScript ([`scc-sdk`](https://www.npmjs.com/package/scc-sdk), source in `sdk/typescript`) and Python ([`scc-sdk`](https://pypi.org/project/scc-sdk/), source in `sdk/python`) wrapping the CLI.
 
+Extend SCC without forking it: drop a `scc-plugin.toml` + JSON-over-stdio command into `.scc/plugins/<id>/` and your operation joins the engine registry (`scc plugin list` / `invoke` / `doctor` / `lock` / `check`). Five-minute echo example and the rules that bite: [Installing SCC → Plugins](docs/INSTALL.md#plugins-extend-scc-without-forking-it).
+
 ## Application workflow
 
 1. Install SCC and run `scc init` in the repository.

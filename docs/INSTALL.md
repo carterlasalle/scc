@@ -239,6 +239,76 @@ MCP-only clients: run `scc mcp` on stdio and register the ten semantic tools
 `surface_map`, `structural_source`) — see
 [API_AND_INTEGRATIONS.md](API_AND_INTEGRATIONS.md).
 
+<!-- trace:v1 id=doc.scc-install-plugins type=document work=WORK-SCC-DISTRIBUTION documents=REQ-SCC-API -->
+## Plugins (extend SCC without forking it)
+
+SCC's engine exposes one operation registry (`scc operations`); plugins add
+operations to it. A plugin is a directory with a `scc-plugin.toml` manifest
+plus a command speaking JSON over stdin/stdout — one request per process
+spawn (crash-isolated, no lingering children). Grants are checked before
+spawn: a plugin never runs code it was not granted.
+
+Where plugins live (first match wins per plugin id):
+
+| Location | Scope |
+|---|---|
+| `<repo>/.scc/plugins/<id>/` | this repository |
+| `$SCC_PLUGIN_PATH/<id>/` | any colon-separated directory list (CI, shared plugins) |
+| `~/.config/scc/plugins/<id>/` | your machine |
+
+Minimal plugin (echo — copy, run, extend):
+
+```bash
+mkdir -p .scc/plugins/acme.echo
+cat > .scc/plugins/acme.echo/scc-plugin.toml <<'EOF'
+[plugin]
+id = "acme.echo"
+name = "Echo"
+version = "1.0.0"
+api = "1"
+operations = ["acme.echo"]
+
+[runtime]
+command = ["python3", "plugin.py"]
+
+[permissions]
+repo_read = true
+EOF
+cat > .scc/plugins/acme.echo/plugin.py <<'EOF'
+import json, sys
+req = json.load(sys.stdin)
+print(json.dumps({"output": {"echo": req["input"].get("text", "")}}))
+EOF
+```
+
+Then:
+
+```bash
+scc plugin list                        # discovered plugins + lock entries
+scc plugin invoke acme.echo '{"text": "hi"}'
+# {"echo": "hi", "_origin": {"kind": "plugin", ...}}   # provenance always attached
+scc plugin doctor                      # environment + failure diagnostics
+scc plugin lock                        # freeze .scc/plugins.lock for reproducible installs
+scc plugin check                       # CI: fail on drift from the lockfile
+```
+
+Rules that bite (stated once, enforced always):
+
+- `api = "1"` — anything else is skipped at discovery, silently.
+- The command reads one JSON `{input, ...}` request on stdin and prints one
+  `{"output": {...}}` on stdout. Anything on stderr becomes diagnostics.
+- Every plugin value carries `_origin` provenance — rank features surface as
+  `plugin_features["<id>.feature"]` with reasons, never as silent score.
+- `runtime = "wasm"` is refused with an actionable error (no WASM host yet —
+  see `crates/scc-plugin-api/PLUGIN_WIT`); use `runtime.command`.
+- `state.*` operations need the matching grant; everything else needs only
+  discovery. Grants from project config narrow the manifest's permissions.
+
+Plugins can also register rank features, candidate providers, and rerankers
+via `[extensions] "rank-feature:<id>" = {priority=1}` — see the echo and
+rank-feature round-trips in `crates/scc-engine/tests/plugins.rs`, which are
+the executable contract for the manifest shape above.
+
 ## First run
 
 ```bash

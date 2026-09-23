@@ -640,6 +640,7 @@ impl GoExtractor {
         match node.kind() {
             "function_declaration" => self.walk_function(node, ctx, src),
             "method_declaration" => self.walk_method(node, ctx, src),
+            "func_literal" => self.walk_func_literal(node, ctx, src),
             "type_declaration" => {
                 self.walk_type_decl(node, ctx, src);
                 self.walk_children(node, ctx, src);
@@ -666,6 +667,15 @@ impl GoExtractor {
         for child in node.named_children(&mut cursor) {
             self.walk(child, ctx, src);
         }
+    }
+
+// trace:v1 id=impl.scc.extract.go.func-literal-params work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-IR
+    fn walk_func_literal(&self, node: Node, ctx: &mut Ctx, src: &[u8]) {
+        // Anonymous closures bind their params in their own scope so calls
+        // like `c.JSON(...)` inside `func(c *Context)` resolve to the
+        // parameter type instead of dropping.
+        self.bind_params(node, ctx, src);
+        self.walk_children(node, ctx, src);
     }
 
 // trace:exempt reason=internal-detail
@@ -2609,6 +2619,17 @@ mod tests {
         assert_eq!(calls[3].caller.as_deref(), Some("top"));
         assert_eq!(calls[3].callee, "panic");
         assert!(calls[3].known_receiver);
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.extract.go.func-literal-params verifies=REQ-SCC-IR exercises=impl.scc.extract.go.func-literal-params
+    fn func_literal_binds_params() {
+        let ef = extract(
+            "package app\n\ntype Context struct{}\n\nfunc (c *Context) JSON(code int) {}\n\nfunc bench() {\n    run(func(c *Context) {\n        c.JSON(200)\n    })\n}\n\nfunc run(f func(*Context)) {}\n",
+        );
+        let typed: Vec<_> = ef.type_binds.iter().filter(|b| b.name == "c").collect();
+        assert!(!typed.is_empty(), "closure param c bound: {:?}", ef.type_binds);
+        assert!(typed.iter().all(|b| b.type_name == "Context"), "{typed:?}");
     }
 
     #[test]

@@ -94,6 +94,64 @@ pub fn forgotten_cochange_partners(
     out
 }
 
+/// Second wave — same-package / re-export callers: a file whose symbol
+/// calls a symbol defined in an affected file is itself affected, even with
+/// no import edge (Go same-package calls, unresolved receivers, facade
+/// re-exports). Depth-graded like the import wave: seed depth + 1,
+/// transitively.
+#[allow(clippy::too_many_arguments)]
+// trace:v1 id=impl.scc.impact.caller-wave work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-IR
+fn caller_wave(
+    view: &TrustedGraphView,
+    graph: &crate::RealityGraph,
+    importer_depth: &mut BTreeMap<String, u32>,
+    importer_prov: &mut BTreeMap<String, scc_core::Provenance>,
+    max_depth: u32,
+) {
+    let mut queue: VecDeque<(String, u32)> = importer_depth.iter().map(|(f, d)| (f.clone(), *d)).collect();
+        // callee symbol id -> defining file (sweep once, not per edge).
+        let mut sym_file: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+        for e in graph.entities_of_kind(kinds::SYMBOL) {
+            if let Some(f) = e.attributes.get("file").and_then(|v| v.as_str()) {
+                sym_file.insert(e.id.as_str(), f);
+            }
+        }
+        while let Some((path, depth)) = queue.pop_front() {
+            if depth >= max_depth {
+                continue;
+            }
+            let target_file_id = scc_core::entity_id(&graph.repo_id, kinds::FILE, &path);
+            // symbols defined in this file: CONTAINS edges file -> symbol.
+            let mut owned: Vec<&str> = Vec::new();
+            for r in view.out_pred(&target_file_id, scc_core::predicates::CONTAINS) {
+                owned.push(r.object.as_str());
+            }
+            // reverse call edges into those symbols.
+            let mut callers: Vec<(&str, scc_core::Provenance)> = Vec::new();
+            for sym in &owned {
+                for r in view.in_pred(sym, scc_core::predicates::CALLS) {
+                    callers.push((r.subject.as_str(), r.provenance));
+                }
+            }
+            callers.sort_by(|a, b| a.0.cmp(b.0));
+            callers.dedup_by(|a, b| a.0 == b.0);
+            for (caller_id, prov) in callers {
+                let Some(caller_file) = sym_file.get(caller_id).copied() else { continue };
+                if caller_file == path {
+                    continue;
+                }
+                match importer_depth.get(caller_file) {
+                    Some(&d) if d <= depth + 1 => {}
+                    _ => {
+                        importer_depth.insert(caller_file.to_string(), depth + 1);
+                        importer_prov.entry(caller_file.to_string()).or_insert(prov);
+                        queue.push_back((caller_file.to_string(), depth + 1));
+                    }
+                }
+            }
+        }
+    }
+
 // trace:v1 id=impl.scc.impact work=WORK-SCC-013 satisfies=REQ-forgotten-impact-partners,REQ-SCC-IR
 // trace:v1 id=impl.scc.impact.importers work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 // trace:v1 id=impl.scc.impact.flowexact work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
@@ -196,9 +254,9 @@ pub fn compute_impact(
     // travels with the edge; the shallowest depth wins on re-visit.
     let mut importer_depth: BTreeMap<String, u32> = BTreeMap::new();
     let mut importer_prov: BTreeMap<String, scc_core::Provenance> = BTreeMap::new();
+    // trace:exempt reason=const-data
+    const IMPORTER_MAX_DEPTH: u32 = 8;
     {
-        // trace:exempt reason=const-data
-        const IMPORTER_MAX_DEPTH: u32 = 8;
         let mut queue: VecDeque<(String, u32)> = VecDeque::new();
         for f in &resolved_files {
             importer_depth.insert((*f).clone(), 0);
@@ -228,6 +286,8 @@ pub fn compute_impact(
             }
         }
     }
+
+    caller_wave(view, graph, &mut importer_depth, &mut importer_prov, IMPORTER_MAX_DEPTH);
 
     for (file, depth) in &importer_depth {
         if *depth == 0 {
@@ -533,6 +593,45 @@ pub fn diff_files(store: &Store, base: Option<&str>) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // trace:exempt reason=unit-test
+    fn fixture_two_file_call() -> (tempfile::TempDir, Store) {
+        use scc_core::{Entity, Relationship};
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let repo = store.repository().id.clone();
+        // a.go defines Svc.Do; b.go calls it with no import edge
+        // (same-package shape).
+        for (path, sym) in [("a.go", "Svc.Do"), ("b.go", "main")] {
+            let fid = scc_core::entity_id(&repo, kinds::FILE, path);
+            store.insert_entity(&Entity::new(fid.clone(), kinds::FILE, path.to_string()), &[path.to_string()]).unwrap();
+            let sid = scc_core::entity_id(&repo, kinds::SYMBOL, &format!("{path}/{sym}"));
+            let mut se = Entity::new(sid.clone(), kinds::SYMBOL, sym.to_string());
+            se.attr("file", serde_json::json!(path));
+            store.insert_entity(&se, &[path.to_string()]).unwrap();
+            store.insert_relationship(&Relationship::new(
+                format!("contains-{path}"), fid, scc_core::predicates::CONTAINS, sid, scc_core::Provenance::Extracted,
+            ), path).unwrap();
+        }
+        let a_sym = scc_core::entity_id(&repo, kinds::SYMBOL, "a.go/Svc.Do");
+        let b_sym = scc_core::entity_id(&repo, kinds::SYMBOL, "b.go/main");
+        store.insert_relationship(&Relationship::new(
+            "calls-b-a".to_string(), b_sym, scc_core::predicates::CALLS, a_sym, scc_core::Provenance::Extracted,
+        ), "b.go").unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.impact.caller-wave verifies=REQ-SCC-IR exercises=impl.scc.impact.caller-wave
+    fn caller_wave_pulls_same_package_callers() {
+        let (_dir, store) = fixture_two_file_call();
+        let g = crate::RealityGraph::load(&store).unwrap();
+        let v = TrustedGraphView::new(&g, &store, &[], crate::TrustPolicy::default());
+        let imp = compute_impact(&v, &store, &["a.go".to_string()], &[]).unwrap();
+        assert!(imp.importers.iter().any(|i| i.file == "b.go"), "{imp:?}");
+    }
 
     #[test]
     // trace:exempt reason=internal-detail

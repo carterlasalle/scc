@@ -757,8 +757,12 @@ pub fn cmd_query(root: &Path, query: &str, limit: usize) -> crate::Result<()> {
         println!("{} [{}]", e.name, e.kind);
     }
     println!("— symbols —");
-    for (name, sig, kind, file) in &hit.symbols {
-        println!("{name} ({kind}) {file} {sig}");
+    for (name, sig, kind, file, line) in &hit.symbols {
+        if *line > 0 {
+            println!("{name} ({kind}) {file}:{line} {sig}");
+        } else {
+            println!("{name} ({kind}) {file} {sig}");
+        }
     }
     Ok(())
 }

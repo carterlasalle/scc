@@ -2593,10 +2593,13 @@ impl Store {
 
     /// Lexical search over symbols.
     // trace:exempt reason=internal-detail
-    pub fn search_symbols(&self, query: &str, limit: usize) -> Result<Vec<(String, String, String, String)>> {
+    pub fn search_symbols(&self, query: &str, limit: usize) -> Result<Vec<(String, String, String, String, u32)>> {
         let q = fts_query(query);
         let mut stmt = self.conn.prepare(
-            "SELECT name, signature, symbol_kind, file FROM symbols_fts
+            "SELECT f.name, f.signature, f.symbol_kind, f.file,
+                    COALESCE((SELECT s.start_line FROM symbols s
+                              WHERE s.file = f.file AND s.name = f.name LIMIT 1), 0)
+             FROM symbols_fts f
              WHERE symbols_fts MATCH ?1 ORDER BY bm25(symbols_fts) LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![q, limit as i64], |r| {
@@ -2605,6 +2608,7 @@ impl Store {
                 r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)? as u32,
             ))
         })?;
         let mut out = Vec::new();
@@ -2652,10 +2656,10 @@ impl Store {
 
     /// Substring fallback over symbols (name, signature, docstring).
     // trace:exempt reason=internal-detail
-    pub fn search_symbols_like(&self, term: &str, limit: usize) -> Result<Vec<(String, String, String, String)>> {
+    pub fn search_symbols_like(&self, term: &str, limit: usize) -> Result<Vec<(String, String, String, String, u32)>> {
         let pat = format!("%{}%", term.to_ascii_lowercase());
         let mut stmt = self.conn.prepare(
-            "SELECT name, signature, symbol_kind, file FROM symbols
+            "SELECT name, signature, symbol_kind, file, start_line FROM symbols
              WHERE lower(name) LIKE ?1 OR lower(signature) LIKE ?1 OR lower(docstring) LIKE ?1
              ORDER BY CASE WHEN lower(name) LIKE ?1 THEN 0 ELSE 1 END, length(name)
              LIMIT ?2",
@@ -2666,6 +2670,7 @@ impl Store {
                 r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)? as u32,
             ))
         })?;
         let mut out = Vec::new();

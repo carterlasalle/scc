@@ -85,7 +85,7 @@ pub fn invoke(
             let hit = crate::graph::query(&store, &req)?;
             serde_json::json!({
                 "entities": hit.entities,
-                "symbols": hit.symbols.iter().map(|(n, s, k, f)| serde_json::json!({"name": n, "signature": s, "kind": k, "file": f})).collect::<Vec<_>>(),
+                "symbols": hit.symbols.iter().map(|(n, s, k, f, l)| serde_json::json!({"name": n, "signature": s, "kind": k, "file": f, "line": l})).collect::<Vec<_>>(),
             })
         }
         "graph.entities" | "architecture.components" => serde_json::to_value(crate::graph::components(&store)?)?,
@@ -108,7 +108,7 @@ pub fn invoke(
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
             let mut symbols = store.search_symbols(q, limit)?;
             if symbols.is_empty() { symbols = store.search_symbols_like(q, limit)?; }
-            serde_json::json!({"symbols": symbols.iter().map(|(n, s, k, f)| serde_json::json!({"name": n, "signature": s, "kind": k, "file": f})).collect::<Vec<_>>()})
+            serde_json::json!({"symbols": symbols.iter().map(|(n, s, k, f, l)| serde_json::json!({"name": n, "signature": s, "kind": k, "file": f, "line": l})).collect::<Vec<_>>()})
         }
         "evidence.get" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");

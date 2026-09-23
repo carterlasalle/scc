@@ -8,7 +8,8 @@ use scc_api::QueryRequest;
 // trace:exempt reason=internal-detail
 pub struct QueryHit {
     pub entities: Vec<scc_core::Entity>,
-    pub symbols: Vec<(String, String, String, String)>,
+    /// (name, signature, kind, file, start_line)
+    pub symbols: Vec<(String, String, String, String, u32)>,
 }
 
 // trace:exempt reason=internal-detail

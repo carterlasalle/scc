@@ -261,7 +261,7 @@ impl LanguageExtractor for TypeScriptExtractor {
                         }
                     }
                 }
-                "lexical_declaration" => {
+                "lexical_declaration" | "variable_declaration" => {
                     if ctx.caller.is_none() && ctx.class.is_none() {
                         let exported = is_exported(&node);
                         let doc = leading_jsdoc(&node, src);
@@ -2315,11 +2315,41 @@ fn ts_record_fn_alias_declarator(node: &Node, ctx: &Ctx, out: &mut ExtractedFile
     );
 }
 
-// trace:exempt reason=internal-detail
+// trace:v1 id=impl.scc.extract.typescript.member-assign-method work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-IR
 fn ts_record_fn_alias_assign(node: &Node, ctx: &Ctx, out: &mut ExtractedFile, src: &[u8]) {
     let Some(left) = node.child_by_field_name("left") else {
         return;
     };
+    let Some(right) = node.child_by_field_name("right") else {
+        return;
+    };
+    // Prototype-style method definition: `res.json = function json(...)`.
+    // The member path IS the defining site — record it as a method symbol
+    // so "where is X defined" resolves to this file and line.
+    if left.kind() == "member_expression"
+        && ctx.caller.is_none()
+        && ctx.class.is_none()
+        && matches!(
+            right.kind(),
+            "function_expression" | "arrow_function" | "generator_function"
+        )
+    {
+        let name = node_text(&left, src).trim().to_string();
+        if !name.is_empty() && !name.contains("prototype") {
+            out.symbols.push(Symbol {
+                name,
+                kind: SymbolKind::Method,
+                signature: None,
+                decl_header: None,
+                start_line: line_of(node),
+                end_line: end_line_of(node),
+                exported: false,
+                docstring: None,
+                parent: None,
+            });
+            return;
+        }
+    }
     if left.kind() != "identifier" {
         return;
     }
@@ -2327,9 +2357,6 @@ fn ts_record_fn_alias_assign(node: &Node, ctx: &Ctx, out: &mut ExtractedFile, sr
     if name.is_empty() {
         return;
     }
-    let Some(right) = node.child_by_field_name("right") else {
-        return;
-    };
     let typed = ts_rhs_type_name(&right, src).is_some();
     crate::model::record_fn_rhs(
         &mut out.fn_binds,
@@ -3827,6 +3854,20 @@ mod tests {
     fn extract(path: &str, content: &str) -> ExtractedFile {
         TypeScriptExtractor::default().extract(&SourceFile::new(path, content))
         }
+
+    #[test]
+    // trace:v1 id=test.scc.extract.typescript.member-assign verifies=REQ-SI-503JSBGP exercises=impl.scc.extract.typescript.member-assign-method
+    fn member_assign_function_is_symbol() {
+        let ef = extract(
+            "lib/response.js",
+            "var escapeHtml = require('escape-html');\nres.json = function json(obj) {\n  return obj;\n};\n",
+        );
+        let sym = find(&ef.symbols, "res.json");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.start_line, 2);
+        let imp = ef.imports.iter().find(|i| i.module == "escape-html").expect("var require");
+        assert_eq!(imp.line, 1);
+    }
 
     fn find<'a>(syms: &'a [Symbol], name: &str) -> &'a Symbol {
         syms.iter().find(|s| s.name == name).unwrap_or_else(|| panic!("symbol {name} not found"))
