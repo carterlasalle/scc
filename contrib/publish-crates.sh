@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CRATES=(scc-api scc-plugin-api scc-core scc-store scc-indexer scc-graph scc-context scc-engine scc-plugin-host scc-ffi scc-cli)
+CRATES=(scc-plugin-api scc-core scc-store scc-plugin-host scc-graph scc-context scc-indexer scc-api scc-engine scc-ffi scc-cli)
 EXECUTE=0
 WAIT=1
 
