@@ -28,15 +28,15 @@ class SystemContextCompiler < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/carterlasalle/scc/releases/download/v0.2.6/scc-0.2.6-Darwin-arm64"
-      sha256 "919daf7bee47f6bed3ec58fae1cf23553ce46d26feec0ff1b5650c0de43f9ae0"
+      url "https://github.com/carterlasalle/scc/releases/download/v0.2.7/scc-0.2.7-Darwin-arm64"
+      sha256 "6270c2c64d6d99908f29a7a7fed9e633a0170f45528d2aafe8f93bedff32c114"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/carterlasalle/scc/releases/download/v0.2.6/scc-0.2.6-Linux-x86_64"
-      sha256 "a9b41f94c0b759587c3b62c6f68ad27f21431c865deb23f6c1a18dae859cd640"
+      url "https://github.com/carterlasalle/scc/releases/download/v0.2.7/scc-0.2.7-Linux-x86_64"
+      sha256 "a78b4d23cc9b0862f0ff712c501cd3b0e57eaf0a5b0552a85d16daf88115fc51"
     end
   end
 
