@@ -79,9 +79,10 @@ uninstall, troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
 > **Package names.** `scc` is taken on npm, crates.io, PyPI and Homebrew by
 > unrelated projects: `npm install -g scc` installs a 2013 SeaJS bundler,
 > `brew install scc` installs a Go line counter ([boyter/scc](https://github.com/boyter/scc)),
-> `cargo install scc-cli` finds nothing (we have never published there), and
 > `pip install scc` installs Open Microscopy OME tools. The CLI ships through
-> GitHub Releases and Homebrew; the SDKs are
+> GitHub Releases and Homebrew (`cargo install scc-cli`,
+> `npm install -g @carterlasalle/scc`, and `omp install
+> @carterlasalle/omp-scc` arrive with the next tagged release); the SDKs are
 > [`scc-sdk`](https://www.npmjs.com/package/scc-sdk) on npm and
 > [`scc-sdk`](https://pypi.org/project/scc-sdk/) on PyPI.
 

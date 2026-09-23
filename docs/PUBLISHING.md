@@ -16,17 +16,14 @@ channel below publishes under a scoped or qualified name.
 | GHCR | `ghcr.io/carterlasalle/scc` | `publish-image.yml` | workflow token | ✅ live |
 | Homebrew tap | `carterlasalle/tap/system-context-compiler` | manual — see below | a PAT that can push to the tap repo | ✅ live (0.2.6) |
 | MCP registry | `io.github.carterlasalle/scc` | manual — see below | GitHub login via `mcp-publisher` | ⏳ blocked on npm CLI package (below) |
-| npm | `@carterlasalle/scc` + `@carterlasalle/scc-linux-x64` + `@carterlasalle/scc-darwin-arm64` | `release.yml` `npm-cli` job | `NPM_TOKEN` secret | ❌ never published (404 as of 2026-09-23) |
-| npm | `@carterlasalle/omp-scc` (Oh My Pi extension) | `release.yml` `npm-omp` job | `NPM_TOKEN` secret | ❌ never published (404 as of 2026-09-23) |
-| crates.io | `scc-core`, `scc-store`, `scc-indexer`, `scc-graph`, `scc-context`, `scc-cli` | `release.yml` `crates` job (gated on `CRATES_PUBLISH`) | `CARGO_REGISTRY_TOKEN` secret + `CRATES_PUBLISH` variable | ❌ never published (`scc-cli` does not exist as of 2026-09-23) |
+| npm | `@carterlasalle/scc` + `@carterlasalle/scc-linux-x64` + `@carterlasalle/scc-darwin-arm64` | `release.yml` `npm-cli` job | `NPM_TOKEN` secret | ⏳ ships on next tag (job added after v0.2.6) |
+| npm | `@carterlasalle/omp-scc` (Oh My Pi extension) | `release.yml` `npm-omp` job | `NPM_TOKEN` secret | ⏳ ships on next tag (job added after v0.2.6) |
+| crates.io | `scc-core`, `scc-store`, `scc-indexer`, `scc-graph`, `scc-context`, `scc-cli` | `release.yml` `crates` job (gated on `CRATES_PUBLISH`) | `CARGO_REGISTRY_TOKEN` secret + `CRATES_PUBLISH` variable | ⏳ ships on next tag if `CRATES_PUBLISH=true` is set |
 
-The ❌ rows are wired in the workflow but have never produced a registry
-entry — do not document them as install paths until a tagged release turns
-them green. Suspect for the npm rows: the `npm-cli` / `npm-omp` jobs have no
-`needs: [release]` ordering and no failure gate surfaced in the release
-summary, so a silent skip looks like success. For crates: the gate variable
-was likely never set to `true`. Next tag: watch those three jobs explicitly,
-then flip their rows above.
+The ⏳ rows are wired on main but have never run: the jobs landed after the
+v0.2.6 tag, and no tag has been pushed since. Do not document them as
+install paths until a tagged release turns them green — then flip their rows
+above and confirm with the registry checks below.
 
 <!-- trace:v1 id=doc.scc-publishing.one-time-setup work=WORK-SCC-DISTRIBUTION -->
 ## One-time setup

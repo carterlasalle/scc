@@ -213,10 +213,9 @@ How each channel publishes, and the command that verifies it:
 [PUBLISHING.md](PUBLISHING.md). The Homebrew tap is updated by hand after
 each tag; the installer remains the path that always works.
 
-> Not shipped (do not document as install paths until a release publishes
-> them): `npm install -g @carterlasalle/scc` and
-> `omp install @carterlasalle/omp-scc` (workflow jobs exist, no published
-> versions yet), `cargo install scc-cli` (never published to crates.io).
+> Not yet published (jobs land on the next tag — see PUBLISHING.md):
+> `npm install -g @carterlasalle/scc`,
+> `omp install @carterlasalle/omp-scc`, `cargo install scc-cli`.
 
 ## Harness integrations
 
