@@ -80,7 +80,7 @@ pub fn token_estimate(map_chars: usize, rows: usize) -> (usize, usize) {
     (text_tokens, image_tokens)
 }
 
-// trace:v1 id=impl.crates-scc-cli-src-viewer.html-esc work=WORK-SCC-VIEWER satisfies=SPEC-SCC-VIEWER
+// trace:v1 id=impl.crates-scc-cli-src-viewer.page-html-esc work=WORK-SCC-VIEWER satisfies=SPEC-SCC-VIEWER
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
