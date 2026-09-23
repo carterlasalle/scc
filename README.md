@@ -73,6 +73,8 @@ scc --version
 That installs the latest release to `~/.local/bin/scc` (Linux x86_64, macOS
 arm64). Prefer pinning? Pass a version: `sh install.sh --version 0.2.7`.
 Homebrew works too: `brew install carterlasalle/tap/system-context-compiler`.
+Alternatives: `brew install carterlasalle/tap/system-context-compiler`,
+`npm install -g @carterlasalle/scc`.
 Everything else — Docker, building from source, supported platforms,
 uninstall, troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
 
@@ -80,9 +82,8 @@ uninstall, troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
 > unrelated projects: `npm install -g scc` installs a 2013 SeaJS bundler,
 > `brew install scc` installs a Go line counter ([boyter/scc](https://github.com/boyter/scc)),
 > `pip install scc` installs Open Microscopy OME tools. The CLI ships through
-> GitHub Releases and Homebrew (`cargo install scc-cli`,
-> `npm install -g @carterlasalle/scc`, and `omp install
-> @carterlasalle/omp-scc` arrive with the next tagged release); the SDKs are
+> GitHub Releases, Homebrew, and npm (`npm install -g @carterlasalle/scc`);
+> `cargo install scc-cli` is pending a crates.io account-email fix. The SDKs are
 > [`scc-sdk`](https://www.npmjs.com/package/scc-sdk) on npm and
 > [`scc-sdk`](https://pypi.org/project/scc-sdk/) on PyPI.
 

@@ -208,14 +208,15 @@ This project ships as:
 | `system-context-compiler` | [Homebrew tap](https://github.com/carterlasalle/homebrew-tap) (formula name differs; installs the `scc` binary) | `brew install carterlasalle/tap/system-context-compiler` |
 | `ghcr.io/carterlasalle/scc` | GitHub Container Registry | `docker run --rm ghcr.io/carterlasalle/scc --version` |
 | `scc-sdk` | npm / [PyPI](https://pypi.org/project/scc-sdk/) (SDKs) | `npm install scc-sdk` / `pip install scc-sdk` |
+| `@carterlasalle/scc` | [npm](https://www.npmjs.com/org/carterlasalle) (scoped — bare `scc` is taken) | `npm install -g @carterlasalle/scc` |
+| `@carterlasalle/omp-scc` | npm (Oh My Pi extension alternative; `scc setup omp` needs no npm) | `omp install @carterlasalle/omp-scc` |
 
 How each channel publishes, and the command that verifies it:
 [PUBLISHING.md](PUBLISHING.md). The Homebrew tap is updated by hand after
 each tag; the installer remains the path that always works.
 
-> Not yet published (jobs land on the next tag — see PUBLISHING.md):
-> `npm install -g @carterlasalle/scc`,
-> `omp install @carterlasalle/omp-scc`, `cargo install scc-cli`.
+> Not yet published: `cargo install scc-cli` (crates.io needs a verified
+> account email first — see PUBLISHING.md).
 
 ## Harness integrations
 
