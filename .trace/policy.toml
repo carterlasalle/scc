@@ -52,6 +52,7 @@ paths = [
   "crates/.DS_Store",
   "plugins/.DS_Store",
   "plugins/omp/**",
+  "crates/scc-cli/embed/**",
   ".gitignore",
   "CHANGELOG.md",
   "README.md",

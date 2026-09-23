@@ -31,10 +31,10 @@ use crate::agents_md::{
 
 // The native extension entry: ONE module registers every ordering-dependent
 // SCC lifecycle behavior (OMP does not promise filename/module ordering).
-const EXTENSION_TS: &str = include_str!("../../../plugins/omp/scc/index.ts");
-const EXTENSION_PACKAGE: &str = include_str!("../../../plugins/omp/scc/package.json");
-const SKILL_MD: &str = include_str!("../../../plugins/omp/scc/skills/scc-system-context/SKILL.md");
-const UPDATE_CHECK_TS: &str = include_str!("../../../plugins/omp/scc/update-check.ts");
+const EXTENSION_TS: &str = include_str!("../embed/plugins/omp/scc/index.ts");
+const EXTENSION_PACKAGE: &str = include_str!("../embed/plugins/omp/scc/package.json");
+const SKILL_MD: &str = include_str!("../embed/plugins/omp/scc/skills/scc-system-context/SKILL.md");
+const UPDATE_CHECK_TS: &str = include_str!("../embed/plugins/omp/scc/update-check.ts");
 
 // trace:exempt reason=const-data (behavior boundary is write_agents_rules)
 const AGENTS_RULES: &str = "<!-- SCC-OMP-SECTION -->\n\

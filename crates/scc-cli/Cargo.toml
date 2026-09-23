@@ -18,6 +18,7 @@ name = "scc"
 # trace:exempt reason=internal-detail
 path = "src/main.rs"
 
+
 [dependencies]
 # trace:exempt reason=internal-detail
 scc-core.workspace = true

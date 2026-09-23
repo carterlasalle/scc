@@ -5,11 +5,11 @@ FROM rust:1.97-bookworm AS builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
-# scc-cli embeds the harness integrations with include_str! (plugins/omp/scc,
-# plugins/hermes/scc, plugins/claude/hooks, plugins/opencode), so the build needs
-# plugins/ as well as crates/. scripts/docker_context_test.sh asserts that every
-# include_str! path is covered here, and CI runs it — the image build failed on
-# exactly this before.
+# scc-cli embeds the harness integrations with include_str! from
+# crates/scc-cli/embed/ (vendored copies of plugins/ — cargo package cannot
+# ship files outside the crate dir). The builder needs crates/ only; the
+# plugins/ COPY stays so local Docker builds also see the canonical sources
+# scripts/docker_context_test.sh asserts embed==plugins parity.
 COPY plugins plugins
 RUN cargo build --release -p scc-cli
 

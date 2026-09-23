@@ -6,13 +6,13 @@
 use std::path::Path;
 
 const PLUGIN_FILES: &[(&str, &str)] = &[
-    ("plugin.yaml", include_str!("../../../plugins/hermes/scc/plugin.yaml")),
-    ("schemas.py", include_str!("../../../plugins/hermes/scc/schemas.py")),
-    ("tools.py", include_str!("../../../plugins/hermes/scc/tools.py")),
-    ("__init__.py", include_str!("../../../plugins/hermes/scc/__init__.py")),
+    ("plugin.yaml", include_str!("../embed/plugins/hermes/scc/plugin.yaml")),
+    ("schemas.py", include_str!("../embed/plugins/hermes/scc/schemas.py")),
+    ("tools.py", include_str!("../embed/plugins/hermes/scc/tools.py")),
+    ("__init__.py", include_str!("../embed/plugins/hermes/scc/__init__.py")),
     (
         "skills/scc-system-context/SKILL.md",
-        include_str!("../../../plugins/hermes/scc/skills/scc-system-context/SKILL.md"),
+        include_str!("../embed/plugins/hermes/scc/skills/scc-system-context/SKILL.md"),
     ),
 ];
 
@@ -113,12 +113,12 @@ mod tests {
                 let dir = tempfile::TempDir::new().unwrap();
                 let f = dir.path().join(rel);
                 std::fs::create_dir_all(f.parent().unwrap()).unwrap();
-                std::fs::write(&f, include_str!("../../../plugins/hermes/scc/schemas.py")).unwrap();
+                std::fs::write(&f, include_str!("../embed/plugins/hermes/scc/schemas.py")).unwrap();
                 let _ = f;
             }
         }
         // schema files are embedded verbatim — ensure the critical contracts
-        let schemas = include_str!("../../../plugins/hermes/scc/schemas.py");
+        let schemas = include_str!("../embed/plugins/hermes/scc/schemas.py");
         for tool in [
             "SYSTEM_OVERVIEW",
             "SYSTEM_ATLAS",
@@ -130,7 +130,7 @@ mod tests {
         ] {
             assert!(schemas.contains(tool), "missing {tool}");
         }
-        let init = include_str!("../../../plugins/hermes/scc/__init__.py");
+        let init = include_str!("../embed/plugins/hermes/scc/__init__.py");
         assert_eq!(init.matches("ctx.register_tool(").count(), 10);
         assert!(init.contains("register_skill"));
     }

@@ -239,9 +239,9 @@ pub fn capsule_markdown(root: &Path) -> crate::Result<String> {
 // in): cache-only startup path, detached background refresh, systemMessage
 // JSON solely when an update is due.
 // trace:exempt reason=internal-detail
-const CHECK_UPDATE_SH: &str = include_str!("../../../plugins/claude/hooks/scc/check-update.sh");
+const CHECK_UPDATE_SH: &str = include_str!("../embed/plugins/claude/hooks/scc/check-update.sh");
 // trace:exempt reason=internal-detail
-const OPENCODE_UPDATE_TS: &str = include_str!("../../../plugins/opencode/scc-update.ts");
+const OPENCODE_UPDATE_TS: &str = include_str!("../embed/plugins/opencode/scc-update.ts");
 
 /// `scc setup codex` — write AGENTS.md with the capsule + usage rules
 /// (docs/API_AND_INTEGRATIONS.md §5 for the Codex harness).

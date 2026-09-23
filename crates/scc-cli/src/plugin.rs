@@ -14,7 +14,7 @@ use std::path::Path;
 
 // SessionStart update reminder (stale-while-revalidate shell checker).
 // trace:exempt reason=internal-detail
-const CHECK_UPDATE_SH: &str = include_str!("../../../plugins/claude/hooks/scc/check-update.sh");
+const CHECK_UPDATE_SH: &str = include_str!("../embed/plugins/claude/hooks/scc/check-update.sh");
 
 const SESSION_START: &str = r#"#!/usr/bin/env bash
 # SCC SessionStart: inject system capsule + freshness warnings + checkpoint.
