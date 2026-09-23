@@ -63,71 +63,32 @@ Inferred claims are labeled with confidence and evidence and never silently prom
 
 ### Install
 
-Pin the release, verify the installer, then run it:
+One path. It verifies the checksum before it installs:
 
 ```bash
-V=0.2.6
-P=Linux-x86_64            # or Darwin-arm64
-B="https://github.com/carterlasalle/scc/releases/download/v${V}"
-curl -fsSLO "${B}/install.sh" -O "${B}/sha256-${V}-${P}.txt"
-shasum -a 256 -c "sha256-${V}-${P}.txt" --ignore-missing   # install.sh: OK
-sh install.sh --version "${V}"
-```
-
-The installer detects your platform (Linux x86_64, macOS arm64), downloads the
-release binary, verifies it against the published SHA-256, refuses to install on
-a mismatch (that refusal is never overridable), and fails the install if the
-binary cannot run on your host. Then:
-
-```bash
+curl -fsSL https://raw.githubusercontent.com/carterlasalle/scc/main/scripts/install.sh | sh
 scc --version
 ```
 
-Every install path — the one-liner convenience form, manual download with
-checksum verification, Docker, building from source, supported platforms,
-uninstall and troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
-
-Other channels:
-
-```bash
-brew install carterlasalle/tap/system-context-compiler        # Homebrew tap (live)
-docker run --rm ghcr.io/carterlasalle/scc --version          # image, published from main
-npm install -g @carterlasalle/scc                            # npm (scoped: bare `scc` is taken)
-cargo install scc-cli                                        # crates.io
-```
-
-The npm and crates.io packages are published by the release workflow, so they
-appear with the next tagged release; the installer above always works. How each
-channel publishes and how to verify it: [docs/PUBLISHING.md](docs/PUBLISHING.md).
+That installs the latest release to `~/.local/bin/scc` (Linux x86_64, macOS
+arm64). Prefer pinning? Pass a version: `sh install.sh --version 0.2.6`.
+Homebrew works too: `brew install carterlasalle/tap/system-context-compiler`.
+Everything else — Docker, building from source, supported platforms,
+uninstall, troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 > **Package names.** `scc` is taken on npm, crates.io, PyPI and Homebrew by
 > unrelated projects: `npm install -g scc` installs a 2013 SeaJS bundler,
 > `brew install scc` installs a Go line counter ([boyter/scc](https://github.com/boyter/scc)),
-> `cargo install scc` installs `scalable-concurrent-containers`, and
-> `pip install scc` installs Open Microscopy OME tools. This project ships the
-> CLI through GitHub Releases (installer above); the SDKs are published as
+> `cargo install scc-cli` finds nothing (we have never published there), and
+> `pip install scc` installs Open Microscopy OME tools. The CLI ships through
+> GitHub Releases and Homebrew; the SDKs are
 > [`scc-sdk`](https://www.npmjs.com/package/scc-sdk) on npm and
 > [`scc-sdk`](https://pypi.org/project/scc-sdk/) on PyPI.
-
-### Build from source
-
-```bash
-git clone https://github.com/carterlasalle/scc.git && cd scc
-cargo build --release -p scc-cli     # → target/release/scc
-cargo test --workspace               # full suite
-cargo clippy --workspace -- -D warnings
-```
-
-Rust stable is the only hard requirement. Optional: `pyright` +
-`typescript-language-server` (LSP resolution), `ollama` or any
-OpenAI-compatible embedding endpoint (semantic ranking), `zstd` (CBM adapter),
-`python3` + `node` (SDK and plugin tests).
 
 If you're using Oh My Pi, the native extension ships inside the binary:
 
 ```bash
 scc setup omp                 # writes .omp/extensions/scc, MCP config, skill
-# or, from npm: omp install @carterlasalle/omp-scc
 ```
 
 ### Index your repository
@@ -136,8 +97,6 @@ scc setup omp                 # writes .omp/extensions/scc, MCP config, skill
 cd /path/to/your/repo
 scc init                                  # .scc/config.yaml + database
 scc index                                 # cold index; incremental afterwards
-scc overview                              # compact startup capsule
-scc context startup                       # fused startup: Atlas + Surface + coverage
 scc context task "change transcript normalization"
 scc setup claude                          # automatic Claude Code hooks
 scc setup omp                             # Oh My Pi native extension + MCP
@@ -178,7 +137,7 @@ The local daemon implements [`docs/openapi.yaml`](docs/openapi.yaml) on loopback
 | Codex | `scc setup codex` | AGENTS.md with capsule, usage rules, authority ordering |
 | OpenCode | `scc setup opencode` | AGENTS.md + `.opencode/opencode.json` wiring the SCC MCP server |
 | Hermes | `scc setup hermes` | Native plugin: ten tools + bundled `scc-system-context` skill |
-| Oh My Pi (OMP) | `scc setup omp` (embedded) or `omp install @carterlasalle/omp-scc` | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
+| Oh My Pi (OMP) | `scc setup omp` (embedded in the binary) | Native extension: fused startup + task packs, `scc index --paths` after edits and opaque mutations, compaction rehydration, MCP, skill |
 
 SDKs: TypeScript ([`scc-sdk`](https://www.npmjs.com/package/scc-sdk), source in `sdk/typescript`) and Python ([`scc-sdk`](https://pypi.org/project/scc-sdk/), source in `sdk/python`) wrapping the CLI.
 

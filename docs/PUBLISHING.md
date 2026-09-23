@@ -8,17 +8,25 @@ projects (`npm install -g scc` is a 2013 SeaJS bundler, `brew install scc` is
 [boyter/scc](https://github.com/boyter/scc), a Go line counter), so every
 channel below publishes under a scoped or qualified name.
 
-| Channel | Artifact | Published by | Credential |
-|---|---|---|---|
-| GitHub Releases | `scc-<v>-<os>-<arch>`, `install.sh`, `sbom-<v>.txt`, `sha256-<v>-<os>-<arch>.txt` | `release.yml` (`dist` + `release` jobs) on a `v*` tag | workflow token |
-| crates.io | `scc-core`, `scc-store`, `scc-indexer`, `scc-graph`, `scc-context`, `scc-cli` | `release.yml` `crates` job | `CARGO_REGISTRY_TOKEN` secret + `CRATES_PUBLISH` variable |
-| npm | `@carterlasalle/scc` + `@carterlasalle/scc-linux-x64` + `@carterlasalle/scc-darwin-arm64` | `release.yml` `npm-cli` job | `NPM_TOKEN` secret |
-| npm | `scc-sdk` (TypeScript SDK) | `release.yml` `npm` job | `NPM_TOKEN` secret |
-| npm | `@carterlasalle/omp-scc` (Oh My Pi extension) | `release.yml` `npm-omp` job | `NPM_TOKEN` secret |
-| PyPI | `scc-sdk` (Python SDK) | `release.yml` `pypi` job | trusted publishing, no token |
-| GHCR | `ghcr.io/carterlasalle/scc` | `publish-image.yml` | workflow token |
-| Homebrew tap | `carterlasalle/tap/system-context-compiler` | manual — see below | a PAT that can push to the tap repo |
-| MCP registry | `io.github.carterlasalle/scc` | manual — see below | GitHub login via `mcp-publisher` |
+| Channel | Artifact | Published by | Credential | Status |
+|---|---|---|---|---|
+| GitHub Releases | `scc-<v>-<os>-<arch>`, `install.sh`, `sbom-<v>.txt`, `sha256-<v>-<os>-<arch>.txt` | `release.yml` (`dist` + `release` jobs) on a `v*` tag | workflow token | ✅ live |
+| npm | `scc-sdk` (TypeScript SDK) | `release.yml` `npm` job | `NPM_TOKEN` secret | ✅ live |
+| PyPI | `scc-sdk` (Python SDK) | `release.yml` `pypi` job | trusted publishing, no token | ✅ live |
+| GHCR | `ghcr.io/carterlasalle/scc` | `publish-image.yml` | workflow token | ✅ live |
+| Homebrew tap | `carterlasalle/tap/system-context-compiler` | manual — see below | a PAT that can push to the tap repo | ✅ live (0.2.6) |
+| MCP registry | `io.github.carterlasalle/scc` | manual — see below | GitHub login via `mcp-publisher` | ⏳ blocked on npm CLI package (below) |
+| npm | `@carterlasalle/scc` + `@carterlasalle/scc-linux-x64` + `@carterlasalle/scc-darwin-arm64` | `release.yml` `npm-cli` job | `NPM_TOKEN` secret | ❌ never published (404 as of 2026-09-23) |
+| npm | `@carterlasalle/omp-scc` (Oh My Pi extension) | `release.yml` `npm-omp` job | `NPM_TOKEN` secret | ❌ never published (404 as of 2026-09-23) |
+| crates.io | `scc-core`, `scc-store`, `scc-indexer`, `scc-graph`, `scc-context`, `scc-cli` | `release.yml` `crates` job (gated on `CRATES_PUBLISH`) | `CARGO_REGISTRY_TOKEN` secret + `CRATES_PUBLISH` variable | ❌ never published (`scc-cli` does not exist as of 2026-09-23) |
+
+The ❌ rows are wired in the workflow but have never produced a registry
+entry — do not document them as install paths until a tagged release turns
+them green. Suspect for the npm rows: the `npm-cli` / `npm-omp` jobs have no
+`needs: [release]` ordering and no failure gate surfaced in the release
+summary, so a silent skip looks like success. For crates: the gate variable
+was likely never set to `true`. Next tag: watch those three jobs explicitly,
+then flip their rows above.
 
 <!-- trace:v1 id=doc.scc-publishing.one-time-setup work=WORK-SCC-DISTRIBUTION -->
 ## One-time setup
@@ -81,14 +89,8 @@ A green job is not proof a package is installable. These are the checks that
 read the registry back:
 
 ```bash
-for c in scc-core scc-store scc-indexer scc-graph scc-context scc-cli; do
-  curl -sS -H 'User-Agent: scc-release-check' \
-    "https://crates.io/api/v1/crates/$c/0.2.7" -o /dev/null -w "$c %{http_code}\n"
-done
-
-for p in @carterlasalle/scc @carterlasalle/scc-linux-x64 @carterlasalle/scc-darwin-arm64 @carterlasalle/omp-scc scc-sdk; do
-  printf '%s ' "$p"; npm view "$p" version 2>&1 | tail -1
-done
+# live channels only — the ❌ rows above have nothing to check until a tag publishes them
+npm view scc-sdk version | tail -1
 
 curl -sS https://pypi.org/pypi/scc-sdk/json | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])'
 

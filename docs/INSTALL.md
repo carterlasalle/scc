@@ -7,8 +7,17 @@ every install path, verification, harness setup, and troubleshooting.
 
 ## Install (recommended)
 
-Pin the release, verify the installer, then run it — nothing executes before
-you have checked it against the release's own checksum file:
+```bash
+curl -fsSL https://raw.githubusercontent.com/carterlasalle/scc/main/scripts/install.sh | sh
+scc --version
+```
+
+That installs the latest release to `~/.local/bin/scc`. To pin a version
+instead of taking latest, pass `--version 0.2.6` (or set `SCC_VERSION`).
+
+If you would rather verify the installer before it runs, download it and its
+checksum first — nothing executes before you have checked it against the
+release's own checksum file:
 
 ```bash
 V=0.2.6
@@ -20,16 +29,9 @@ sh install.sh --version "${V}"
 ```
 
 That verifies the installer itself before it runs, and the installer then
-verifies the release binary against the same checksum file. Pick the release you
-want — the latest is listed at
+verifies the release binary against the same checksum file. The latest
+release is listed at
 <https://github.com/carterlasalle/scc/releases/latest>.
-
-A one-liner convenience form exists, but it executes whatever is on the default
-branch at that moment, so nothing can be verified before it runs:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/carterlasalle/scc/main/scripts/install.sh | sh
-```
 
 The installer:
 
@@ -202,21 +204,19 @@ This project ships as:
 
 | Artifact | Registry | Install |
 |---|---|---|
-| `scc` CLI | GitHub Releases (via `scripts/install.sh`) | the pinned flow above |
-| `@carterlasalle/scc` | [npm](https://www.npmjs.com/org/carterlasalle) (scoped — bare `scc` is taken) | `npm install -g @carterlasalle/scc` |
-| `scc-cli` (+ 5 library crates) | crates.io | `cargo install scc-cli` |
+| `scc` CLI | GitHub Releases (via `scripts/install.sh`) | the one-liner above |
 | `system-context-compiler` | [Homebrew tap](https://github.com/carterlasalle/homebrew-tap) (formula name differs; installs the `scc` binary) | `brew install carterlasalle/tap/system-context-compiler` |
 | `ghcr.io/carterlasalle/scc` | GitHub Container Registry | `docker run --rm ghcr.io/carterlasalle/scc --version` |
 | `scc-sdk` | npm / [PyPI](https://pypi.org/project/scc-sdk/) (SDKs) | `npm install scc-sdk` / `pip install scc-sdk` |
-| `@carterlasalle/omp-scc` | npm (Oh My Pi extension; `scc setup omp` needs no npm) | `omp install @carterlasalle/omp-scc` |
 
-The npm and crates.io packages are produced by the release workflow, so they
-appear with the next tagged release. How each channel publishes, and the command
-that verifies it: [PUBLISHING.md](PUBLISHING.md).
+How each channel publishes, and the command that verifies it:
+[PUBLISHING.md](PUBLISHING.md). The Homebrew tap is updated by hand after
+each tag; the installer remains the path that always works.
 
-The CLI's own package-manager entries are produced by the release workflow
-(`crates` and `npm-cli` jobs) and the Homebrew tap is updated by hand, so the
-installer remains the path that always works.
+> Not shipped (do not document as install paths until a release publishes
+> them): `npm install -g @carterlasalle/scc` and
+> `omp install @carterlasalle/omp-scc` (workflow jobs exist, no published
+> versions yet), `cargo install scc-cli` (never published to crates.io).
 
 ## Harness integrations
 
@@ -229,7 +229,7 @@ harness — each command is idempotent and only touches that harness's config:
 | Codex | `scc setup codex` | `AGENTS.md` with the capsule and authority ordering |
 | OpenCode | `scc setup opencode` | `AGENTS.md` + `.opencode/opencode.json` wiring the SCC MCP server |
 | Hermes | `scc setup hermes` | Native plugin (10 tools) + bundled skill |
-| Oh My Pi (OMP) | `scc setup omp` (or `omp install @carterlasalle/omp-scc`) | Native extension, MCP, skill, `AGENTS.md` |
+| Oh My Pi (OMP) | `scc setup omp` (embedded in the binary) | Native extension, MCP, skill, `AGENTS.md` |
 | Pi | `scc setup pi` | Project-local `.pi/extensions/scc` |
 | All detected | `scc setup` | Auto-detects installed harnesses; `scc setup all` skips detection |
 
