@@ -3,7 +3,7 @@
   "name": "io.github.carterlasalle/scc",
   "title": "System Context Compiler",
   "description": "Compile a repository into an evidence-backed system model for coding agents (10 MCP tools)",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "websiteUrl": "https://github.com/carterlasalle/scc",
   "repository": {
     "url": "https://github.com/carterlasalle/scc",
@@ -15,7 +15,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@carterlasalle/scc",
-      "version": "0.2.7",
+      "version": "0.2.8",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
