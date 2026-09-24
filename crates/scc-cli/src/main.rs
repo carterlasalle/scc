@@ -72,6 +72,16 @@ enum Commands {
     /// Show index status, stats, and freshness
     Status,
 
+    /// Diagnose the scan: what `scc index` would index and what it skips,
+    /// per path, with the responsible rule (no indexing, read-only)
+    Scan {
+        /// One path verdict instead of the summary (exit 1 skipped, 2 missing)
+        path: Option<String>,
+        /// Full indexed + skipped lists as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print the generated language-support matrix (from the registry)
     Languages,
 
@@ -819,6 +829,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::Status => commands::cmd_status(&root),
+        Commands::Scan { path, json } => commands::cmd_scan(&root, path.as_deref(), json),
         Commands::Languages => commands::cmd_languages(),
         Commands::Watch => commands::cmd_watch(&root),
         Commands::Overview { json } => commands::cmd_overview(&root, json),

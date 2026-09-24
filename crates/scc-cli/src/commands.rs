@@ -122,6 +122,95 @@ pub fn cmd_status(root: &Path) -> crate::Result<()> {
     Ok(())
 }
 
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+pub fn cmd_scan(root: &Path, path: Option<&str>, json: bool) -> crate::Result<()> {
+    let config = load_config(root)?;
+    let exp = scc_indexer::scan::explain_scan(root, &config.index)
+        .map_err(|e| crate::CliError::Index(scc_indexer::IndexError::Scan(e)))?;
+    if json {
+        let mut out = String::from("{\"indexed\":[");
+        for (i, f) in exp.indexed.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"path\":{},\"language\":{},\"kind\":{},\"bytes\":{}}}",
+                serde_json::to_string(&f.path).unwrap_or_default(),
+                serde_json::to_string(f.language.as_str()).unwrap_or_default(),
+                serde_json::to_string(f.kind.as_str()).unwrap_or_default(),
+                f.size
+            ));
+        }
+        out.push_str("],\"skipped\":[");
+        for (i, s) in exp.skipped.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"path\":{},\"reason\":{},\"rule\":{}}}",
+                serde_json::to_string(&s.path).unwrap_or_default(),
+                serde_json::to_string(s.reason).unwrap_or_default(),
+                serde_json::to_string(&s.rule).unwrap_or_default()
+            ));
+        }
+        out.push_str("]}");
+        println!("{out}");
+        return Ok(());
+    }
+    // Single path: one verdict line (exit 0 indexed, 1 skipped, 2 missing).
+    if let Some(q) = path {
+        let q = q.trim_start_matches("./");
+        if let Some(f) = exp.indexed.iter().find(|f| f.path == q) {
+            println!("{}: indexed ({} {})", f.path, f.language.as_str(), f.kind.as_str());
+            return Ok(());
+        }
+        if let Some(s) = exp.skipped.iter().find(|s| s.path == q) {
+            match &s.rule {
+                Some(rule) => println!("{q}: {} ({rule})", s.reason),
+                None => println!("{q}: {}", s.reason),
+            }
+            std::process::exit(1);
+        }
+        println!("{q}: not found (no such file in working tree)");
+        std::process::exit(2);
+    }
+    let s = &exp.stats;
+    println!(
+        "scan: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={} (live walk, not index-time counts)",
+        s.discovered, s.indexed, s.ignored, s.unsupported, s.oversized, s.unreadable
+    );
+    if !exp.skipped.is_empty() {
+        use std::collections::BTreeMap;
+        let mut by_rule: BTreeMap<String, usize> = BTreeMap::new();
+        for sk in &exp.skipped {
+            let key = format!("{}: {}", sk.reason, sk.rule.as_deref().unwrap_or("?"));
+            *by_rule.entry(key).or_default() += 1;
+        }
+        println!("\nskips by rule:");
+        for (rule, n) in &by_rule {
+            println!("  {n:>6}  {rule}");
+        }
+    }
+    // Indexed files: top-level dir histogram (where the index weight is).
+    {
+        use std::collections::BTreeMap;
+        let mut by_dir: BTreeMap<String, usize> = BTreeMap::new();
+        for f in &exp.indexed {
+            let top = f.path.split('/').next().unwrap_or(".").to_string();
+            let key = if f.path.contains('/') { top } else { "(root)".to_string() };
+            *by_dir.entry(key).or_default() += 1;
+        }
+        println!("\nindexed by top dir:");
+        let mut rows: Vec<_> = by_dir.into_iter().collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+        for (dir, n) in rows.iter().take(15) {
+            println!("  {n:>6}  {dir}/");
+        }
+    }
+    println!("\nrerun with a path (`scc scan <path>`) for one verdict, or `--json` for the full lists.");
+    Ok(())
+}
+
 /// `scc languages` — generated support matrix. Never hand-maintain a
 /// second list in CLI copy.
 // trace:v1 id=impl.scc.cli.languages work=WORK-ripwire-lessons-phase1 satisfies=REQ-language-support-matrix

@@ -371,8 +371,12 @@ pub fn scan_repo_with_stats(
             return true;
         }
         if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            // Probe must not be a dotfile: `**/.*` style ignores would
+            // match `<dir>/.scc-probe` for EVERY dir and prune the whole
+            // tree (mockingbird: 28 files). `__scc_probe__` avoids all
+            // dotfile/suffix patterns while still matching `dir/**` globs.
             return !is_ignored_with(&filter_matchers, &rel_str)
-                && !is_ignored_with(&filter_matchers, &format!("{rel_str}/.scc-probe"));
+                && !is_ignored_with(&filter_matchers, &format!("{rel_str}/__scc_probe__"));
         }
         true
     });
@@ -434,7 +438,7 @@ pub fn scan_repo_with_stats(
                 continue;
             }
         };
-        if bytes.len() > 5 * 1024 * 1024 {
+        if bytes.len() as u64 > MAX_INDEXED_BYTES {
             stats.oversized += 1;
             continue; // skip oversized files
         }
@@ -485,6 +489,214 @@ pub fn is_ignored_with(matchers: &[GlobMatcher], rel: &str) -> bool {
         }
     }
     false
+}
+
+/// First `index.ignore` pattern matching `rel` (same semantics as
+/// [`is_ignored_with`]), for scan diagnostics. Returns the pattern text so
+/// `scc scan` can name the rule that skips a path. `None` means no config
+/// pattern matches (the path may still be skipped as gitignored,
+/// unsupported, or oversized).
+// trace:v1 id=impl.crates-scc-indexer-src-scan.matching-ignore-pattern work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+pub fn matching_ignore_pattern<'a>(rel: &str, ignore: &'a [String]) -> Option<&'a str> {
+    use globset::Glob;
+    if rel == ".scc/intent.yaml" {
+        return None;
+    }
+    if rel == ".scc" || rel.starts_with(".scc/") {
+        return Some(".scc (built-in: only .scc/intent.yaml is indexed)");
+    }
+    for pat in ignore {
+        let Ok(g) = Glob::new(pat) else { continue };
+        let m = g.compile_matcher();
+        if m.is_match(rel) {
+            return Some(pat.as_str());
+        }
+        // same directory-prefix semantics as is_ignored_with
+        if rel.contains('/') {
+            if let Some(dir) = rel.rsplit_once('/') {
+                if m.is_match(dir.0) {
+                    return Some(pat.as_str());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Files larger than this are counted as oversized, never parsed.
+// trace:exempt reason=internal-detail
+pub const MAX_INDEXED_BYTES: u64 = 5 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+// trace:exempt reason=internal-detail
+pub struct SkippedPath {
+    pub path: String,
+    pub reason: &'static str,
+    pub rule: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+// trace:exempt reason=internal-detail
+pub struct ExplainFile {
+    pub path: String,
+    pub language: Language,
+    pub kind: FileKind,
+    pub size: u64,
+}
+
+#[derive(Debug, Default)]
+// trace:exempt reason=internal-detail
+pub struct ScanExplanation {
+    pub indexed: Vec<ExplainFile>,
+    pub skipped: Vec<SkippedPath>,
+    pub stats: ScanStats,
+}
+
+// trace:exempt reason=internal-detail
+fn unsupported_rule(rel: &str) -> String {
+    match Path::new(rel).extension().and_then(|e| e.to_str()) {
+        Some(ext) if !ext.is_empty() => format!("`.{ext}` has no language mapping"),
+        _ => format!("`{rel}` has no language mapping"),
+    }
+}
+
+/// Gitignore rules for `paths`, via `git check-ignore -v` in argv
+/// batches. Returns path -> `file:line:pattern`. Empty when git is missing
+/// or the root is not a git checkout (then nothing is gitignored).
+/// Argv batches, never `--stdin`: piping 100k+ paths to git's stdin while
+/// its stdout pipe is undrained deadlocks both sides (mockingbird hung 2+
+/// min in `write_all`). Exit status 1 means "none ignored", not failure.
+// trace:exempt reason=internal-detail
+fn git_ignore_rules(root: &Path, paths: &[String]) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    // one line per ignored path: `<source>:<lineno>:<pattern>\t<path>`
+    let mut parse = |stdout: &[u8]| {
+        for line in String::from_utf8_lossy(stdout).lines() {
+            if let Some((rule, path)) = line.rsplit_once('\t') {
+                // unquote C-quoted pathnames (core.quotePath)
+                let path = path.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(path);
+                out.insert(path.to_string(), rule.to_string());
+            }
+        }
+    };
+    for chunk in paths.chunks(500) {
+        let waited = match std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .arg("check-ignore")
+            .arg("-v")
+            .args(chunk)
+            .stderr(std::process::Stdio::null())
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => return out,
+        };
+        // exit 0: some ignored; exit 1: none ignored. Both carry answers.
+        if waited.status.success() || waited.status.code() == Some(1) {
+            parse(&waited.stdout);
+        }
+    }
+    out
+}
+
+/// Diagnose the scan without indexing: walk everything (no gitignore, no
+/// descent pruning) and decide each path in the open so every skip names
+/// its reason and rule. Reads nothing except directory entries and sizes.
+// trace:v1 id=impl.crates-scc-indexer-src-scan.explain-scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+pub fn explain_scan(root: &Path, config: &IndexConfig) -> Result<ScanExplanation, ScanError> {
+    let mut exp = ScanExplanation::default();
+    let mut builder = WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .parents(false)
+        .follow_links(false)
+        .require_git(false);
+    let mut candidates: Vec<(String, u64)> = Vec::new();
+    for entry in builder.build() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => {
+                exp.stats.unreadable += 1;
+                continue;
+            }
+        };
+        if entry.depth() == 0 {
+            continue;
+        }
+        // Mirror the index walk: only regular files are candidates
+        // (symlinks never count there either).
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let rel = match entry.path().strip_prefix(root) {
+            Ok(r) => r,
+            Err(_) => {
+                exp.stats.unreadable += 1;
+                continue;
+            }
+        };
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if rel_str.is_empty() {
+            continue;
+        }
+        exp.stats.discovered += 1;
+        if let Some(rule) = matching_ignore_pattern(&rel_str, &config.ignore) {
+            exp.stats.ignored += 1;
+            exp.skipped.push(SkippedPath {
+                path: rel_str,
+                reason: "ignored",
+                rule: Some(rule.to_string()),
+            });
+            continue;
+        }
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        candidates.push((rel_str, size));
+    }
+    let git_rules: Vec<String> = candidates.iter().map(|(p, _)| p.clone()).collect();
+    let git_rules = git_ignore_rules(root, &git_rules);
+    for (rel_str, size) in candidates {
+        if let Some(rule) = git_rules.get(&rel_str) {
+            exp.stats.ignored += 1;
+            exp.skipped.push(SkippedPath {
+                path: rel_str,
+                reason: "gitignored",
+                rule: Some(rule.clone()),
+            });
+            continue;
+        }
+        let Some((language, kind)) = classify(Path::new(&rel_str)) else {
+            exp.stats.unsupported += 1;
+            exp.skipped.push(SkippedPath {
+                path: rel_str.clone(),
+                reason: "unsupported",
+                rule: Some(unsupported_rule(&rel_str)),
+            });
+            continue;
+        };
+        if size > MAX_INDEXED_BYTES {
+            exp.stats.oversized += 1;
+            exp.skipped.push(SkippedPath {
+                path: rel_str,
+                reason: "oversized",
+                rule: Some(format!("{size} bytes exceeds 5 MiB index cap")),
+            });
+            continue;
+        }
+        exp.stats.indexed += 1;
+        exp.indexed.push(ExplainFile {
+            path: rel_str,
+            language,
+            kind,
+            size,
+        });
+    }
+    exp.indexed.sort_by(|a, b| a.path.cmp(&b.path));
+    exp.skipped.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(exp)
 }
 
 /// Group scanned files by language for stats.
@@ -646,6 +858,65 @@ mod tests {
         assert!(is_ignored("services/.DS_Store", &cfg));
         assert!(is_ignored("Thumbs.db", &cfg));
         assert!(!is_ignored("services/app.py", &cfg));
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.scan.dotfile-ignores-do-not-prune-dirs verifies=REQ-SI-NX53P4B7 exercises=impl.crates-scc-indexer-src-scan.scan-repo-with-stats
+    fn dotfile_ignores_do_not_prune_subdirs() {
+        // `**/.*` must ignore dotfiles without pruning every directory:
+        // the descent probe must not match dotfile patterns (mockingbird
+        // indexed 28 root files instead of ~800).
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.py"), "def main(): pass\n").unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/guide.md"), "# g\n").unwrap();
+        let cfg = IndexConfig {
+            ignore: vec!["**/.*".into()],
+            watch: true,
+            auto_resolve: false,
+        };
+        let files = scan_repo(root, &cfg).unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"src/main.py"), "got {paths:?}");
+        assert!(paths.contains(&"docs/guide.md"), "got {paths:?}");
+        // ...while a real dir glob still prunes descent.
+        let cfg2 = IndexConfig {
+            ignore: vec!["docs/**".into()],
+            watch: true,
+            auto_resolve: false,
+        };
+        let files2 = scan_repo(root, &cfg2).unwrap();
+        let paths2: Vec<&str> = files2.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths2.contains(&"src/main.py"), "got {paths2:?}");
+        assert!(!paths2.iter().any(|p| p.starts_with("docs/")), "got {paths2:?}");
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.scan.explain-names-rule-per-path verifies=REQ-SI-NX53P4B7 exercises=impl.crates-scc-indexer-src-scan.explain-scan
+    fn explain_names_rule_per_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.py"), "def main(): pass\n").unwrap();
+        std::fs::create_dir_all(root.join("vendor")).unwrap();
+        std::fs::write(root.join("vendor/dep.py"), "x = 1\n").unwrap();
+        std::fs::write(root.join("notes.xyz"), "???\n").unwrap();
+        let cfg = IndexConfig {
+            ignore: vec!["vendor/**".into()],
+            watch: true,
+            auto_resolve: false,
+        };
+        assert_eq!(matching_ignore_pattern("vendor/dep.py", &cfg.ignore), Some("vendor/**"));
+        assert_eq!(matching_ignore_pattern("src/main.py", &cfg.ignore), None);
+        let exp = explain_scan(root, &cfg).unwrap();
+        assert!(exp.indexed.iter().any(|f| f.path == "src/main.py"));
+        let v = exp.skipped.iter().find(|s| s.path == "vendor/dep.py").expect("vendor skipped");
+        assert_eq!(v.reason, "ignored");
+        assert_eq!(v.rule.as_deref(), Some("vendor/**"));
+        let u = exp.skipped.iter().find(|s| s.path == "notes.xyz").expect("xyz skipped");
+        assert_eq!(u.reason, "unsupported");
     }
 
     #[test]
