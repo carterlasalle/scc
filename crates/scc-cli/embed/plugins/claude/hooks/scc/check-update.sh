@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# trace:v1 id=ops.scc.claude-check-update work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+# trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 # SCC update check (Claude SessionStart): stale-while-revalidate reminder.
 # Cache-only on the startup path; detached background refresh when the
 # cache is missing or older than 12h. Prints {"systemMessage": "..."}

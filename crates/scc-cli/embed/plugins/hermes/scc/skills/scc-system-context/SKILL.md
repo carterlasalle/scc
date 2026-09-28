@@ -3,7 +3,7 @@ name: scc-system-context
 description: Use the System Context Compiler (SCC) to get evidence-backed system context before planning or editing code.
 ---
 
-<!-- trace:v1 id=doc.hermes.scc-system-context-skill documents=REQ-SCC-API -->
+<!-- trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original) -->
 # SCC System Context
 
 This repository is indexed by the System Context Compiler. Before planning or

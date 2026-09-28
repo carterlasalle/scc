@@ -106,7 +106,7 @@ const refreshInBackground = (): void => {
 // already notified within RENOTIFY_AFTER_MS. Kicks a background refresh
 // when the cache is older than REFRESH_AFTER_MS. Pure cache I/O + string
 // compare on the call path — no subprocess, no network.
-// trace:v1 id=ops.scc.update-check work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 export const checkCachedUpdate = (installed: string): string | undefined => {
   const now = Date.now();
   const cache = readCache();
@@ -132,7 +132,7 @@ export const checkCachedUpdate = (installed: string): string | undefined => {
 // on every line so per-repo failures and timings are greppable from the
 // single file. Best-effort and silent: logging must never break a session.
 // Rotated by truncation (last 2000 lines) past 1MB.
-// trace:v1 id=ops.scc.extension-log work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 export const logEvent = (repo: string, event: string, detail: Record<string, unknown>): void => {
   try {
     const file = join(homedir(), ".cache", "scc", "extension.log");

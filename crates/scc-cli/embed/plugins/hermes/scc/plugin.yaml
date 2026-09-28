@@ -1,6 +1,6 @@
-# trace:v1 id=ops.release-hermes-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+# trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 name: scc
-# trace:v1 id=ops.release-hermes-version-key work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+# trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 version: 0.2.8
 description: >-
   System Context Compiler — evidence-backed system context for coding tasks.

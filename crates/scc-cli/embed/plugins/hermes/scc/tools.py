@@ -9,7 +9,7 @@ import os
 import shutil
 import subprocess
 
-# trace:v1 id=impl.scc.hermes.tools work=WORK-SCC-014 satisfies=REQ-SCC-IR
+# trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 
 
 def _scc_bin():

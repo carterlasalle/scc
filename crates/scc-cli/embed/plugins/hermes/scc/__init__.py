@@ -11,7 +11,7 @@ from . import schemas, tools
 
 logger = logging.getLogger(__name__)
 
-# trace:v1 id=impl.scc.hermes work=WORK-SCC-014 satisfies=REQ-SCC-IR
+# trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 
 
 # trace:exempt reason=internal-detail  # plugin registration glue; behavior traced at impl.scc.hermes.tools

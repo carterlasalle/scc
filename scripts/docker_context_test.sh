@@ -79,13 +79,24 @@ printf 'docker context: %s embedded path(s) covered by the builder stage\n' "$ch
 
 # Embed/vendor parity (crates.io): scc-cli embeds from crates/scc-cli/embed/
 # (vendored copies — cargo package cannot ship files outside the crate dir).
-# Every embed/ file must be byte-identical to its plugins/ original.
+# Every embed/ file must match its plugins/ original except trace-marker
+# lines (vendored copies carry exempt markers where canonicals carry
+# authoring markers; same behavior ID twice would be TL001).
 while read -r src_file rel; do
     case "$rel" in
         ../embed/plugins/*)
             orig="plugins/${rel#../embed/plugins/}"
             efile="crates/scc-cli/embed/plugins/${rel#../embed/plugins/}"
-            cmp -s "$orig" "$efile" || fail "embed drift: $efile != $orig (re-vendor from plugins/)"
+            tmp_o=$(mktemp); tmp_e=$(mktemp)
+            grep -v "trace:v1 " "$orig" | grep -v "trace:exempt reason=vendored-copy" > "$tmp_o" || true
+            grep -v "trace:v1 " "$efile" | grep -v "trace:exempt reason=vendored-copy" > "$tmp_e" || true
+            if cmp -s "$tmp_o" "$tmp_e"; then
+                :
+            else
+                rm -f "$tmp_o" "$tmp_e"
+                fail "embed drift: $efile != $orig (re-vendor from plugins/)"
+            fi
+            rm -f "$tmp_o" "$tmp_e"
             ;;
     esac
 done < "$tmp"

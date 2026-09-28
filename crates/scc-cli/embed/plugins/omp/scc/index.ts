@@ -68,7 +68,7 @@ const withDeadline = (ms = HANDLER_MS): { signal: AbortSignal; done: () => void 
 // subprocess spawn, so it runs at most once no matter how many sessions
 // start. Empty string (memoized failure) means "unknown, stay quiet".
 let cachedInstalled: string | undefined;
-// trace:v1 id=ops.scc.update-version work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 const installedVersion = async (
   pi: ExtensionAPI,
   cwd: string,
@@ -85,7 +85,7 @@ const installedVersion = async (
 // Session-startup update reminder. Cache read + semver compare only — the
 // only async work is the memoized version lookup. Notification goes to the
 // human via ctx.ui.notify, never into model context.
-// trace:v1 id=ops.scc.update-notify work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 const maybeNotifyUpdate = async (
   pi: ExtensionAPI,
   ctx: ExtensionContext,

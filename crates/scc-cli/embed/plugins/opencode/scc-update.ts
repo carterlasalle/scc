@@ -88,7 +88,7 @@ const refreshInBackground = (): void => {
   }
 };
 
-// trace:v1 id=ops.scc.opencode-update work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 export const SccUpdatePlugin: Plugin = async ({ client, $ }) => {
   return {
     event: async ({ event }) => {
