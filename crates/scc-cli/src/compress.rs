@@ -278,7 +278,7 @@ pub fn cmd_setup_codex(root: &Path) -> crate::Result<()> {
 fn install_codex_update_check(root: &Path) -> crate::Result<()> {
     let hook_path = root.join(".codex").join("scc-check-update.sh");
     std::fs::create_dir_all(hook_path.parent().unwrap())?;
-    std::fs::write(&hook_path, CHECK_UPDATE_SH)?;
+    std::fs::write(&hook_path, crate::plugin_omp::strip_authoring_markers(CHECK_UPDATE_SH))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -329,7 +329,7 @@ pub fn cmd_setup_opencode(root: &Path) -> crate::Result<()> {
 fn install_opencode_update_plugin(root: &Path) -> crate::Result<()> {
     let path = root.join(".opencode").join("plugins").join("scc-update.ts");
     std::fs::create_dir_all(path.parent().unwrap())?;
-    std::fs::write(&path, OPENCODE_UPDATE_TS)?;
+    std::fs::write(&path, crate::plugin_omp::strip_authoring_markers(OPENCODE_UPDATE_TS))?;
     println!("wrote {}", path.display());
     println!("OpenCode shows an update toast on session start when a newer SCC release exists.");
     Ok(())

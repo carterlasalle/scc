@@ -106,16 +106,31 @@ fn installable_extension_ts() -> String {
 // The installed artifact runs in a user's repository, where this repo's
 // work/requirement nodes do not exist (dangling TL002 edges under
 // TraceLayer otherwise). Every authoring marker line becomes
-// an exempt comment; all other lines pass through byte-identical.
+// an exempt comment in the file's own comment style; all other lines
+// pass through byte-identical.
 // trace:exempt reason=internal-helper
-fn strip_authoring_markers(src: &str) -> String {
-    const EXEMPT: &str = "// trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)";
+pub(crate) fn strip_authoring_markers(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     for line in src.split('\n') {
-        if line.trim_start().starts_with("// trace:v1 ") {
-            let indent = &line[..line.len() - line.trim_start().len()];
+        let t = line.trim_start();
+        let style = if t.starts_with("// trace:v1 ") {
+            Some("//")
+        } else if t.starts_with("# trace:v1 ") {
+            Some("#")
+        } else if t.starts_with("-- trace:v1 ") {
+            Some("--")
+        } else if t.starts_with("<!-- trace:v1 ") {
+            Some("<!--")
+        } else {
+            None
+        };
+        if let Some(c) = style {
+            let indent = &line[..line.len() - t.len()];
+            let close = if c == "<!--" { " -->" } else { "" };
             out.push_str(indent);
-            out.push_str(EXEMPT);
+            out.push_str(c);
+            out.push_str(" trace:exempt reason=scc-installed-tooling (authoring marker from the SCC source repo removed at install)");
+            out.push_str(close);
         } else {
             out.push_str(line);
         }

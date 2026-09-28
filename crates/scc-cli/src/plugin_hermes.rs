@@ -37,7 +37,9 @@ pub fn cmd_setup_hermes(root: &Path) -> crate::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, content)?;
+        // Installed artifact runs outside this repo: authoring markers
+        // would dangle (TL002), so ship the stripped form.
+        std::fs::write(&path, crate::plugin_omp::strip_authoring_markers(content))?;
     }
     println!("installed Hermes plugin -> {}", plugin_dir.display());
 
@@ -87,6 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
+    // trace:exempt reason=internal-detail  # installer unit test; behavior traced at impl.scc.hermes
     fn install_writes_plugin_and_enables() {
         let dir = tempfile::TempDir::new().unwrap();
         std::env::set_var("HERMES_HOME", dir.path());
@@ -101,6 +104,11 @@ mod tests {
         let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
         assert!(config.contains("enabled"), "{config}");
         assert!(config.contains("scc"), "{config}");
+        // installed artifacts run outside this repo: no authoring markers survive
+        for rel in ["plugin.yaml", "__init__.py", "tools.py", "skills/scc-system-context/SKILL.md"] {
+            let text = std::fs::read_to_string(plugin.join(rel)).unwrap();
+            assert!(!text.contains("trace:v1 id="), "markers stripped in installed {rel}");
+        }
         std::env::remove_var("HERMES_HOME");
     }
 
