@@ -218,14 +218,17 @@ export class SCC {
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.task-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async taskContext(goal: string, opts?: TaskContextOptions): Promise<TaskContextArtifact> {
-    return this.invoke<TaskContextArtifact>("context.task", {
+    const input: Record<string, unknown> = {
       goal,
       files: opts?.files ?? [],
       symbols: opts?.symbols ?? [],
       budget: opts?.tokenBudget,
       hook: false,
-      record_visibility: opts?.recordVisibility ?? null,
-    });
+    };
+    // Omit when unset: the engine field is non-nullable bool with a
+    // server-side default; an explicit null fails deserialization.
+    if (opts?.recordVisibility !== undefined) input.record_visibility = opts.recordVisibility;
+    return this.invoke<TaskContextArtifact>("context.task", input);
   }
 
   /** Compile the context pack for one component (by id or name). */

@@ -129,14 +129,18 @@ class SCC:
         rendered entry ids. Never flattened: consumers read
         ``result["pack"]["content"]``, not ``result["content"]``.
         """
-        return self.invoke("context.task", {
+        req: dict[str, Any] = {
             "goal": goal,
             "files": files or [],
             "symbols": symbols or [],
             "budget": tokenBudget,
             "hook": False,
-            "record_visibility": recordVisibility,
-        })
+        }
+        # Omit when unset: the engine field is non-nullable bool with a
+        # server-side default; an explicit null fails deserialization.
+        if recordVisibility is not None:
+            req["record_visibility"] = recordVisibility
+        return self.invoke("context.task", req)
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.component-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def componentContext(self, id: str) -> dict[str, Any]:
