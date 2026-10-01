@@ -315,6 +315,20 @@ class SCC:
             req["lambda"] = lam
         return self.invoke("selection.preview", req)
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-mmr work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def selectionMmr(
+        self,
+        ranked: list[dict[str, Any]],
+        lam: float | None = None,
+    ) -> dict[str, Any]:
+        """MMR/diversity stage (§124 item 24) over caller rows
+        ``[{id, value, group}]``. Same math the Surface pipeline blends
+        through; a plugin diversity declarer replaces it wholesale."""
+        req: dict[str, Any] = {"ranked": ranked, "budget": 0}
+        if lam is not None:
+            req["lambda"] = lam
+        return self.invoke("selection.mmr", req)
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-required work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def selectionRequired(
         self,

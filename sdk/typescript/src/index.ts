@@ -383,6 +383,16 @@ export class SCC {
   }
 
   /**
+   * MMR/diversity stage (§124 item 24) over caller rows. Same math the
+   * Surface pipeline blends through; a plugin diversity declarer
+   * replaces it wholesale.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.selection-mmr work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async selectionMmr(ranked: Array<{ id: string; value: number; group?: string | null }>, lambda?: number): Promise<{ selected: string[] }> {
+    return this.invoke("selection.mmr", { ranked, budget: 0, lambda: lambda ?? null });
+  }
+
+  /**
    * Required-coverage set (§123 never-omit): engine required_ids plus
    * plugin coverage providers, unioned. Same inputs ranking.symbols
    * blends criticality from.

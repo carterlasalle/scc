@@ -201,6 +201,17 @@ class TestSCCSDK(unittest.TestCase):
 
     # trace:exempt reason=unit-test
     # trace:exempt reason=unit-test
+    def test_selection_mmr_selects_diverse_ids(self):
+        rows = [
+            {"id": "a", "value": 3.0, "group": "x"},
+            {"id": "b", "value": 2.0, "group": "x"},
+            {"id": "c", "value": 1.0, "group": "y"},
+        ]
+        out = self.scc.selectionMmr(rows)
+        self.assertIn("selected", out, f"missing selected: {out}")
+        self.assertEqual(set(out["selected"]), {"a", "b", "c"})
+
+    # trace:exempt reason=unit-test
     def test_project_symbols_maps_universe_vector(self):
         out = self.scc.projectSymbols(source="global")
         self.assertIn("symbols", out, f"missing symbols: {out}")

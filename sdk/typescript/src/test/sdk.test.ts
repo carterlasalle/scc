@@ -193,6 +193,16 @@ test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : 
   assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
 });
 
+test("selectionMmr() selects diverse ids", { skip: skip ? skipReason : false }, async () => {
+  const rows = [
+    { id: "a", value: 3.0, group: "x" },
+    { id: "b", value: 2.0, group: "x" },
+    { id: "c", value: 1.0, group: "y" },
+  ];
+  const out = await scc().selectionMmr(rows);
+  assert.deepEqual(new Set(out.selected), new Set(["a", "b", "c"]));
+});
+
 test("projectSymbols() maps a universe vector to symbols", { skip: skip ? skipReason : false }, async () => {
   const out = await scc().projectSymbols({ source: "global" });
   assert.ok(Array.isArray(out.symbols));
