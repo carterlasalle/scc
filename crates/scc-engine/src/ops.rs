@@ -111,7 +111,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "surface.explain", description: "Alias for ranking.explain", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "surface.rank", description: "Alias for ranking.symbols", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "surface.select", description: "Alias for selection.budget", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
-    OperationDescriptor { id: "surface.render", description: "Alias for surface.build (rendered text)", mutation: MutationClass::Write, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "surface.render", description: "Rendered surface text only (no structured result payload)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "ranking.important", description: "Fast where-to-pay-attention answer", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "ranking.symbols", description: "Full blend per symbol with feature decomposition + plugin hooks", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "ranking.global", description: "Alias for ranking.symbols (global blend, no goal)", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },

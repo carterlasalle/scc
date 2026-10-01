@@ -416,6 +416,20 @@ fn vector_aliases_match_canonical() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.surface-render verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
+fn surface_render_returns_text_only() {
+    // `surface.render`: the read-path projection — text without the
+    // structured result payload. Same text surface.build renders.
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    let build = scc_engine::invoke(&root, "surface.build", json!({})).unwrap();
+    let render = scc_engine::invoke(&root, "surface.render", json!({})).unwrap();
+    assert_eq!(render["text"], build["text"], "same rendered text");
+    assert!(render.get("result").is_none(), "no structured payload: {render}");
+    assert!(render["text"].as_str().is_some_and(|s| !s.is_empty()), "{render}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.ranking-entry verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
 fn ranking_entry_resolves_compiled_candidate() {
     // `ranking.entry`: one compiled entry by id — full structured
