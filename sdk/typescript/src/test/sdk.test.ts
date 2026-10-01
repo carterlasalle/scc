@@ -158,6 +158,14 @@ test("rankingSeeds() returns the seed merge", { skip: skip ? skipReason : false 
   }
 });
 
+test("rankGraph() returns universe, edges, reference graph", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().rankGraph();
+  const nodes = (out.universe as { nodes: unknown[] }).nodes;
+  const edges = (out.edges as { edges: unknown[] }).edges;
+  assert.ok(nodes.length > 0);
+  assert.ok(edges.length > 0);
+});
+
 test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
   const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
   const firstId = ranked.items[0].id;

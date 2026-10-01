@@ -226,6 +226,17 @@ class SCC:
         ranking.symbols consumes. Read-only stage view."""
         return self.invoke("ranking.seeds", {"goal": goal})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-graph work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def rankGraph(self) -> dict[str, Any]:
+        """Rank-universe stage views (§123.8/12): universe nodes, rank
+        edges (pre-aggregation weights), and the reference graph — the
+        structure the PPR vectors diffuse over. Three read-only invokes."""
+        return {
+            "universe": self.invoke("ranking.universe", {}),
+            "edges": self.invoke("ranking.edges", {}),
+            "reference_graph": self.invoke("ranking.reference_graph", {}),
+        }
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,

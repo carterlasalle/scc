@@ -306,6 +306,21 @@ export class SCC {
   }
 
   /**
+   * Rank-universe stage views (§123.8/12): universe nodes, rank edges
+   * (pre-aggregation weights), and the reference graph — the structure
+   * the PPR vectors diffuse over. Three read-only invokes.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-graph work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async rankGraph(): Promise<{ universe: unknown; edges: unknown; reference_graph: unknown }> {
+    const [universe, edges, reference_graph] = await Promise.all([
+      this.invoke("ranking.universe", {}),
+      this.invoke("ranking.edges", {}),
+      this.invoke("ranking.reference_graph", {}),
+    ]);
+    return { universe, edges, reference_graph };
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).

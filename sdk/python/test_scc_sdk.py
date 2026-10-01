@@ -160,6 +160,14 @@ class TestSCCSDK(unittest.TestCase):
             for key in ("id", "kind", "weight"):
                 self.assertIn(key, seed, f"missing {key}: {seed}")
 
+    # trace:exempt reason=unit-test
+    def test_rank_graph_returns_universe_edges_reference(self):
+        out = self.scc.rankGraph()
+        self.assertIn("nodes", out["universe"])
+        self.assertTrue(out["universe"]["nodes"], f"empty universe: {out}")
+        self.assertIn("edges", out["edges"])
+        self.assertTrue(out["edges"]["edges"], f"empty edges: {out}")
+
     def test_explain_ranking_returns_item_audit(self):
         ranked = self.scc.ranking(goal="add numbers", limit=5)
         first_id = ranked["items"][0]["id"]
