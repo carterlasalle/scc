@@ -465,6 +465,60 @@ pub fn diversity_selection(
     }
 }
 
+/// Sidecar promotion (§124 item 36): promote selected sidecar findings
+/// into canonical relationships through the NORMAL contribution path
+/// (validate + atomic commit) — never a side door. Each assertion needs
+/// existing subject/object entity ids (no invented endpoints), a CORE
+/// ontology predicate (custom semantics stay `plugin:<id>/...` via
+/// `plugins.contribute`), and a confidence in [0,1]. Provenance stamps
+/// `plugin:<id>`; RESOLVED only on explicit `exact: true` (spec §43: a
+/// plugin may not label guesses RESOLVED), else INFERRED. Evidence ids
+/// supplied by the caller are preserved; the plugin extractor tag is
+/// added at commit time by the normal path.
+// trace:v1 id=impl.scc-engine-plugins.promote-sidecar work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn promote_sidecar(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    assertions: &serde_json::Value,
+) -> crate::Result<serde_json::Value> {
+    let arr = assertions.as_array().cloned().unwrap_or_default();
+    let mut rels = Vec::new();
+    for (i, a) in arr.iter().enumerate() {
+        let sub = a.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+        let pred = a.get("predicate").and_then(|v| v.as_str()).unwrap_or("");
+        let obj = a.get("object").and_then(|v| v.as_str()).unwrap_or("");
+        if sub.is_empty() || pred.is_empty() || obj.is_empty() {
+            return Err(crate::EngineError::Other(format!(
+                "promotion assertion #{i}: subject/predicate/object required"
+            )));
+        }
+        if !scc_core::predicates::ALL.contains(&pred) {
+            return Err(crate::EngineError::Other(format!(
+                "promotion assertion #{i}: predicate '{pred}' is not core ontology (custom predicates stay 'plugin:<id>/...' via plugins.contribute)"
+            )));
+        }
+        let conf = a.get("confidence").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+        if !(0.0..=1.0).contains(&conf) {
+            return Err(crate::EngineError::Other(format!(
+                "promotion assertion #{i}: confidence {conf} outside [0,1]"
+            )));
+        }
+        let exact = a.get("exact").and_then(|v| v.as_bool()).unwrap_or(false);
+        let prov = if exact { "RESOLVED" } else { "INFERRED" };
+        let ev: Vec<serde_json::Value> = a.get("evidence").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        rels.push(serde_json::json!({
+            "id": format!("plugin:{plugin_id}/promoted/{i}"),
+            "subject": sub, "predicate": pred, "object": obj,
+            "provenance": prov, "confidence": conf, "evidence": ev,
+        }));
+    }
+    let batch = serde_json::json!({
+        "entities": [], "relationships": rels,
+        "evidence": [], "diagnostics": [],
+    });
+    commit_contribution(store, plugin_id, &batch)
+}
+
 /// Deterministic extension order (§19): priority ascending, plugin id
 /// ascending, then before/after DAG edges. Unknown references and cycles
 /// are startup errors — never silent misordering.

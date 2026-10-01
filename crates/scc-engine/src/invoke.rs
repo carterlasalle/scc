@@ -527,6 +527,17 @@ pub fn invoke(
             }
             crate::plugins::commit_contribution(&store, plugin, &batch)?
         }
+        "plugins.promote" => {
+            // Sidecar promotion (§124 item 36): selected sidecar findings
+            // enter the canonical graph through the normal validate+commit
+            // path. Same provenance/conflict rules as every contribution.
+            let plugin = input.get("plugin").and_then(|v| v.as_str()).unwrap_or("");
+            if plugin.is_empty() {
+                return Err(crate::EngineError::Other("plugins.promote requires a `plugin` id".into()));
+            }
+            let assertions = input.get("assertions").cloned().unwrap_or(serde_json::json!([]));
+            crate::plugins::promote_sidecar(&store, plugin, &assertions)?
+        }
         "plugins.lock" => {
             let ap = crate::plugins::active(root, &config);
             let path = scc_plugin_host::write_lockfile(root, &ap.plugins).map_err(crate::EngineError::Other)?;

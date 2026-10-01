@@ -237,6 +237,52 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.promote-sidecar verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.promote-sidecar
+fn promote_sidecar_enters_canonical_graph() {
+    // §124 item 36 (promotion half): selected sidecar findings enter the
+    // canonical graph through the normal contribution path. Core
+    // predicates + existing endpoints + confidence in range succeed;
+    // custom predicates, invented endpoints, and out-of-range confidence
+    // fail loudly — no second universe, no silent downgrade.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let store = scc_store::Store::open(&root.join(".scc").join("scc.db"), &root).unwrap();
+    let ids: Vec<String> = store.all_entities().unwrap().into_iter().map(|e| e.id).collect();
+    assert!(ids.len() >= 2, "need two endpoints: {ids:?}");
+    let (a, b) = (ids[0].clone(), ids[1].clone());
+    // Happy path: exact resolution stamps RESOLVED.
+    let out = scc_engine::invoke(&root, "plugins.promote", serde_json::json!({
+        "plugin": "acme.joern", "assertions": [
+            {"subject": a, "predicate": "calls", "object": b,
+             "confidence": 0.97, "exact": true},
+        ],
+    })).unwrap();
+    assert_eq!(out["relationships"], serde_json::json!(1), "{out}");
+    let rels = store.all_relationships().unwrap();
+    let hit = rels.iter().find(|r| r.subject == a && r.object == b).unwrap();
+    assert_eq!(hit.provenance, scc_core::Provenance::Resolved, "{hit:?}");
+    // Custom predicate rejected (stays namespaced via contribute).
+    let bad = scc_engine::invoke(&root, "plugins.promote", serde_json::json!({
+        "plugin": "acme.joern", "assertions": [
+            {"subject": a, "predicate": "plugin:acme/reaching_def", "object": b,
+             "confidence": 0.9, "exact": true},
+        ],
+    }));
+    assert!(bad.is_err(), "{bad:?}");
+    // Invented endpoint rejected.
+    let bad2 = scc_engine::invoke(&root, "plugins.promote", serde_json::json!({
+        "plugin": "acme.joern", "assertions": [
+            {"subject": "no-such-id", "predicate": "calls", "object": b,
+             "confidence": 0.9, "exact": true},
+        ],
+    }));
+    assert!(bad2.is_err(), "{bad2:?}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.diversity-policy verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.diversity-selection
 fn diversity_policy_plugin_replaces_mmr() {
     // §124 item 24: a `diversity-policy` extension replaces MMR
