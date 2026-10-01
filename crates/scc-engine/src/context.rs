@@ -105,6 +105,13 @@ impl SccContext<'_> {
     }
 
     // trace:exempt reason=internal-detail
+    pub fn surface_entry(&self, id: &str) -> crate::Result<Option<scc_core::SurfaceEntry>> {
+        let ctx = self.engine.ctx();
+        let map = scc_context::surface::compile_surface_map(&ctx);
+        Ok(map.entries.into_iter().find(|e| e.id == id))
+    }
+
+    // trace:exempt reason=internal-detail
     pub fn surface(&self, req: &ApiSurfaceRequest, semantic: Option<&dyn scc_context::rank::SemanticScorer>) -> crate::Result<(SurfaceRenderResult, String)> {
         let ctx = self.engine.ctx();
         let tokens = req.budget.unwrap_or(ContextBudget::default().surface);

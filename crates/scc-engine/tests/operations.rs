@@ -400,6 +400,22 @@ fn surface_compile_returns_unranked_map() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.ranking-entry verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
+fn ranking_entry_resolves_compiled_candidate() {
+    // `ranking.entry`: one compiled entry by id — full structured
+    // candidate. Unknown ids fail closed (error envelope, not null).
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    let map = scc_engine::invoke(&root, "surface.compile", json!({})).unwrap();
+    let first = map["entries"][0]["id"].as_str().unwrap().to_string();
+    let e = scc_engine::invoke(&root, "ranking.entry", json!({"id": first})).unwrap();
+    assert_eq!(e["id"], json!(first), "{e}");
+    assert!(e.get("symbol_id").is_some() && e.get("path").is_some(), "{e}");
+    let miss = scc_engine::invoke(&root, "ranking.entry", json!({"id": "no-such-entry"})).unwrap();
+    assert!(miss.get("error").is_some(), "{miss}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.extensions-preserved verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.model-get
 fn extensions_section_preserves_plugin_facts() {
     let (_dir, root) = fixture();

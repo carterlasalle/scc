@@ -130,6 +130,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "ranking.score_entries", description: "Pure per-entry blend over explicit feature rows (batched final_importance)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "ranking.edge_weight", description: "Pure edge-weight function", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "ranking.architectural_specificity", description: "Architectural specificity (exported/public signals)", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "ranking.entry", description: "One compiled SurfaceEntry by entry id (full structured candidate)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "ranking.explain", description: "Rank explanation for one symbol", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "selection.mmr", description: "MMR diversification over a ranked list", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "selection.quotas", description: "Token-fraction quota selection over ranked rows", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },

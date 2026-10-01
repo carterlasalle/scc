@@ -491,6 +491,13 @@ pub fn invoke(
             let exported = input.get("exported").and_then(|v| v.as_bool()).unwrap_or(false);
             serde_json::json!({"specificity": if exported { 1.15 } else { 1.0 }, "id": id})
         }
+        "ranking.entry" => {
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match ctx.surface_entry(id)? {
+                Some(e) => serde_json::to_value(&e)?,
+                None => serde_json::json!({"error": format!("entry {id} not in surface map")}),
+            }
+        }
         "ranking.explain" | "surface.explain" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
