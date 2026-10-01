@@ -218,6 +218,18 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("rank", entry, f"missing rank: {entry}")
 
     # trace:exempt reason=unit-test
+    def test_final_importance_matches_score_entries(self):
+        feats = {"task_ppr": 0.9, "global_ppr": 0.5, "lexical": 0.8,
+                 "semantic": 0.7, "confidence": 0.9, "criticality": 1.0,
+                 "change_risk": 0.4, "novelty": 0.5}
+        one = self.scc.finalImportance(feats, has_task=True)
+        rows = self.scc.scoreEntries([{"id": "a", **feats, "has_task": True}])
+        self.assertIn("score", one, f"missing score: {one}")
+        self.assertAlmostEqual(
+            one["score"], rows["scores"][0]["score"], places=9,
+            msg=f"blend mismatch: {one} vs {rows}")
+
+    # trace:exempt reason=unit-test
     def test_score_entries_blends_explicit_rows(self):
         rows = [
             {"id": "a", "task_ppr": 0.9, "global_ppr": 0.5, "lexical": 0.8,

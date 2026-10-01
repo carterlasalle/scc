@@ -425,6 +425,15 @@ export class SCC {
   }
 
   /**
+   * Default blend (§51) over explicit feature values. Pure math, no
+   * store, no hooks — the weights ranking.symbols blends from.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.final-importance work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async finalImportance(features: { task_ppr?: number; global_ppr?: number; lexical?: number; semantic?: number; confidence?: number; criticality?: number; change_risk?: number; novelty?: number }, hasTask?: boolean): Promise<{ score: number }> {
+    return this.invoke("ranking.final_importance", { ...features, has_task: hasTask ?? true });
+  }
+
+  /**
    * Pure per-entry blend (§123 intermediate) over explicit feature
    * rows. No store, no hooks — the same math ranking.symbols blends
    * from, exposed for audit and for callers scoring own rows.

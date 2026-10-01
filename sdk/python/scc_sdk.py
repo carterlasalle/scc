@@ -367,6 +367,20 @@ class SCC:
         programmatic Surface object (§123.7 needs entry-level access)."""
         return self.invoke("ranking.entry", {"id": id})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.final-importance work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def finalImportance(
+        self,
+        features: dict[str, float],
+        has_task: bool = True,
+    ) -> dict[str, Any]:
+        """Default blend (§51) over explicit feature values
+        ``{task_ppr, global_ppr, lexical, semantic, confidence,
+        criticality, change_risk, novelty, has_task}``. Pure math, no
+        store, no hooks — the weights ranking.symbols blends from."""
+        return self.invoke("ranking.final_importance", {
+            **features, "has_task": has_task,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.score-entries work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def scoreEntries(
         self,
