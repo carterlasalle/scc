@@ -237,6 +237,34 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.exporter verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-invoke.exporter-plugins
+fn exporter_plugin_renders_unknown_format() {
+    // §124 item 31: an `exporter:<format>` extension renders a format the
+    // engine has no built-in for. Provenance tags the output; enabled
+    // plugins never change a built-in format's bytes (no-plugin parity).
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.exp");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.exp\"\nname = \"Exp\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"export.render\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"exporter:acme.sarif\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nprint(json.dumps({\"output\": {\"format-available\": True, \"text\": \"SARIF-OK\"}}))\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let out = scc_engine::invoke(&root, "export.system_ir", serde_json::json!({"format": "acme.sarif"})).unwrap();
+    assert_eq!(out["output"], serde_json::json!("SARIF-OK"), "{out}");
+    assert_eq!(out["plugin"], serde_json::json!("acme.exp"), "{out}");
+    // Built-in formats are untouched by the enabled plugin.
+    let native = scc_engine::invoke(&root, "export.system_ir", serde_json::json!({"format": "system-ir.json"})).unwrap();
+    assert!(native.get("entities").is_some(), "{native}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.verify-diagnostic verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.verify-diagnostics
 fn verify_diagnostic_plugin_appends_provenance_section() {
     use std::io::Write;

@@ -824,7 +824,66 @@ fn status_value(store: &scc_store::Store) -> crate::Result<Value> {
 // trace:exempt reason=internal-detail
 // trace:exempt reason=internal-detail
 // trace:exempt reason=internal-detail
+// trace:v1 id=impl.scc-engine-invoke.exporter-plugins work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+fn plugin_export(
+    root: &std::path::Path,
+    config: &scc_indexer::Config,
+    format: &str,
+) -> Option<Value> {
+    // `exporter:<format>` extensions render a format the engine does not
+    // know (e.g. SARIF, GraphML). Input carries the requested format;
+    // output is verbatim `{"format-available": true, "text"|"json"}`.
+    let ap = crate::plugins::active(root, config);
+    let specs: Vec<(String, String, String)> = ap
+        .plugins
+        .iter()
+        .flat_map(|pl| {
+            pl.manifest.extensions.iter()
+                .filter(|e| e.extension_type == "exporter" && e.id.strip_prefix("exporter:").unwrap_or(&e.id) == format)
+                .map(|e| (pl.manifest.id.clone(), e.id.clone(), pl.manifest.failure_policy.clone()))
+        })
+        .collect();
+    for (pid, ext_id, policy) in specs {
+        let plug = match ap.plugins.iter().find(|pl| pl.manifest.id == pid).cloned() {
+            Some(pl) => pl,
+            None => continue,
+        };
+        match scc_plugin_host::call(&plug, "export.render", serde_json::json!({"format": format}), None) {
+            Ok(v) => {
+                let has = v.get("format-available").and_then(|x| x.as_bool()).unwrap_or(false);
+                let body = v.get("text").or_else(|| v.get("json"));
+                if has && body.is_some() {
+                    // Provenance tags the output so consumers know a plugin
+                    // rendered it — never a native export masquerading.
+                    let mut out = serde_json::json!({"format": format, "plugin": pid, "extension": ext_id});
+                    out["output"] = body.cloned().unwrap();
+                    return Some(out);
+                }
+            }
+            Err(e) => {
+                if policy == "required" {
+                    return Some(serde_json::json!({"error": format!("exporter {ext_id} from {pid} FAILED: {e}")}));
+                }
+            }
+        }
+    }
+    None
+}
+
+// trace:exempt reason=internal-detail
 fn export_value(store: &scc_store::Store, root: &std::path::Path, format: &str) -> crate::Result<Value> {
+    // Plugin exporters (§124 item 31) fire first for unknown formats; the
+    // engine falls back to built-ins. `config` loads here (not threaded
+    // through every caller) so the seam stays one line at each site.
+    if let Ok(config) = crate::workspace::load_config(root) {
+        if let Some(v) = plugin_export(root, &config, format) {
+            if v.get("error").is_some() {
+                let msg = v["error"].as_str().unwrap_or("exporter failed");
+                return Err(crate::EngineError::Other(msg.into()));
+            }
+            return Ok(v);
+        }
+    }
     let ir = crate::exports::system_ir(store)?;
     match format {
         "system-ir.json" | "system-ir.jsonl" | "ccg" | "flow-graphs.json" => {
