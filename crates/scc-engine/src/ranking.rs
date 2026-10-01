@@ -46,6 +46,16 @@ impl<'a> Ranker<'a> {
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
     }
 
+    /// Raw rank-universe edges (§123.12): (subject, predicate, object,
+    /// base weight), pre-aggregation. No plugin hooks by contract — the
+    /// structure the vectors diffuse over.
+    // trace:exempt reason=internal-detail
+    pub fn rank_edges(&self) -> crate::Result<Vec<(String, String, String, f64)>> {
+        let ctx = self.ctx();
+        let ranker = scc_context::pagerank::SystemRanker::new(&ctx.view);
+        Ok(ranker.rank_edges())
+    }
+
     /// Raw task-personalized PPR vector for goal.
     // trace:exempt reason=internal-detail
     pub fn pagerank_task(&self, goal: &str) -> crate::Result<Vec<(String, f64)>> {

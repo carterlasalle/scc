@@ -574,6 +574,9 @@ pub struct SystemRanker<'a> {
     index: HashMap<String, usize>,
     /// Row-normalized out-edge adjacency: (target index, weight).
     adjacency: Vec<Vec<(usize, f64)>>,
+    /// Surviving rank edges as (source idx, target idx, predicate,
+    /// weight): pre-aggregation triples `ranking.edges` serves.
+    edge_list: Vec<(usize, usize, String, f64)>,
     /// Distinct referencing sources per node (rarity/ubiquity input).
     in_degree: Vec<usize>,
     /// For each node: indices of the non-symbol entities it projects onto
@@ -627,7 +630,7 @@ impl<'a> SystemRanker<'a> {
         // the predicate normalizes to a reference kind OR carries a
         // rank-edge transition (the deliberate direction/weight ontology —
         // CONTAINS/PARTICIPATES_IN/HANDLES/DEFINES; see [`RankEdgeKind`]).
-        let mut edges: Vec<(usize, usize, f64)> = Vec::new();
+        let mut edges: Vec<(usize, usize, String, f64)> = Vec::new();
         let mut in_sources: Vec<HashSet<usize>> = vec![HashSet::new(); n];
         for rel in view.all_rels() {
             let (Some(&si), Some(&ti)) = (index.get(&rel.subject), index.get(&rel.object)) else {
@@ -661,7 +664,7 @@ impl<'a> SystemRanker<'a> {
                     * rel.confidence.clamp(0.0, 1.0);
                 if let Some(w) = Self::adjust_edge(&adjust, &rel.subject, &rel.predicate, &rel.object, w) {
                     in_sources[ti].insert(si);
-                    edges.push((si, ti, w));
+                    edges.push((si, ti, rel.predicate.clone(), w));
                 }
                 if let Some(rev) = kind.reverse_ranking_transition() {
                     let rw = rev.weight()
@@ -669,22 +672,26 @@ impl<'a> SystemRanker<'a> {
                         * rel.confidence.clamp(0.0, 1.0);
                     if let Some(rw) = Self::adjust_edge(&adjust, &rel.object, &rel.predicate, &rel.subject, rw) {
                         in_sources[si].insert(ti);
-                        edges.push((ti, si, rw));
+                        edges.push((ti, si, rel.predicate.clone(), rw));
                     }
                 }
             }
             if let Some(w) = reference_weight {
                 if let Some(w) = Self::adjust_edge(&adjust, &rel.subject, &rel.predicate, &rel.object, w) {
                     in_sources[ti].insert(si);
-                    edges.push((si, ti, w));
+                    edges.push((si, ti, rel.predicate.clone(), w));
                 }
             }
         }
         let in_degree: Vec<usize> = in_sources.iter().map(|s| s.len()).collect();
 
+        // Rank-edge introspection (§123.12): snapshot the surviving
+        // triples before aggregation moves `edges`.
+        let edge_list: Vec<(usize, usize, String, f64)> = edges.iter().cloned().collect();
         // Aggregate parallel edges (sum weights), apply rarity, row-normalize.
         let mut agg: Vec<HashMap<usize, f64>> = vec![HashMap::new(); n];
-        for (si, ti, w) in edges {
+        for (si, ti, _pred, w) in edges.iter() {
+            let (si, ti, w) = (*si, *ti, *w);
             let r = rarity(n, in_degree[ti]);
             *agg[si].entry(ti).or_insert(0.0) += w * r;
         }
@@ -729,6 +736,7 @@ impl<'a> SystemRanker<'a> {
             adjacency,
             in_degree,
             projection,
+            edge_list,
             global: Vec::new(),
         };
         let global = Self::ppr(&ranker.adjacency, &ranker.global_personalization());
@@ -765,6 +773,17 @@ impl<'a> SystemRanker<'a> {
 // trace:exempt reason=internal-detail
     pub fn nodes(&self) -> &[String] {
         &self.nodes
+    }
+
+    /// Surviving rank-universe edges as (subject, predicate, object,
+    /// base weight): pre-aggregation triples, id-resolved. Deterministic
+    /// (construction order). Powers `ranking.edges` (§123.12).
+    // trace:exempt reason=internal-detail
+    pub fn rank_edges(&self) -> Vec<(String, String, String, f64)> {
+        self.edge_list
+            .iter()
+            .map(|(si, ti, pred, w)| (self.nodes[*si].clone(), pred.clone(), self.nodes[*ti].clone(), *w))
+            .collect()
     }
 
     /// Ranked symbol entity ids (subset of [`SystemRanker::nodes`]),

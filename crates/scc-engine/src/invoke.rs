@@ -384,6 +384,10 @@ pub fn invoke(
             let cands = engine.ranking().candidates_with(goal, limit, &hooks)?;
             serde_json::json!({"candidates": cands.iter().map(|c| serde_json::json!({"id": c.id, "kind": c.kind, "name": c.name, "score": c.score, "reason": c.reason})).collect::<Vec<_>>()})
         }
+        "ranking.edges" => {
+            let edges = engine.ranking().rank_edges()?;
+            serde_json::json!({"edges": edges.iter().map(|(s, p, o, w)| serde_json::json!({"subject": s, "predicate": p, "object": o, "weight": w})).collect::<Vec<_>>()})
+        }
         "ranking.seeds" => {
             // Task-seed introspection (§123.11): lexical seeds merged with
             // plugin seed providers (weight sums by id). Read-only stage

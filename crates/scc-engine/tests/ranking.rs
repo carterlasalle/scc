@@ -182,3 +182,32 @@ fn seeds_op_merges_lexical_and_plugin() {
     let v = serde_json::json!({"seeds": out.iter().map(|x| serde_json::json!({"id": x.id, "kind": x.kind, "weight": x.weight})).collect::<Vec<_>>()});
     assert_eq!(v["seeds"][0]["id"], serde_json::json!(base[0].id));
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-ranking.edges-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn edges_op_lists_universe() {
+    // §123.12: `ranking.edges` serves the structure the vectors diffuse
+    // over. Universe of 20 fixture symbols ⇒ edges reference only known
+    // nodes, weights positive and finite.
+    let (_dir, store) = fixture();
+    // The fixture inserts entities only — add two calls rels so the
+    // universe has edges (subject/object are fixture symbol ids).
+    let syms: Vec<String> = store.all_entities().unwrap().into_iter()
+        .filter(|e| e.kind == scc_core::kinds::SYMBOL).map(|e| e.id).collect();
+    for (i, (a, b)) in [(syms[0].clone(), syms[1].clone()), (syms[1].clone(), syms[2].clone())].into_iter().enumerate() {
+        let rel = scc_core::Relationship::new(
+            format!("rel-{i}"), a, scc_core::predicates::CALLS, b, scc_core::Provenance::Extracted);
+        store.insert_relationship(&rel, "a/mod.py").unwrap();
+    }
+    let (_g, _c, _s, engine) = ranker_of(&store);
+    let r = engine.ranking();
+    let edges = r.rank_edges().unwrap();
+    assert!(!edges.is_empty(), "universe has edges");
+    let nodes: std::collections::BTreeSet<String> =
+        r.pagerank_global().unwrap().into_iter().map(|(id, _)| id).collect();
+    for (s, _p, o, w) in &edges {
+        assert!(nodes.contains(s), "unknown subject {s}");
+        assert!(nodes.contains(o), "unknown object {o}");
+        assert!(w.is_finite() && *w > 0.0, "bad weight {w}");
+    }
+}
