@@ -325,3 +325,25 @@ fn spec_section_81_aliases_resolve() {
         assert!(e.is_err(), "{op} must refuse loudly: {e:?}");
     }
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.extensions-preserved verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.model-get
+fn extensions_section_preserves_plugin_facts() {
+    let (_dir, root) = fixture();
+    // Commit a namespaced plugin fact, then export: the extensions
+    // section must carry it (§106) instead of silently dropping it.
+    let batch = serde_json::json!({
+        "entities": [{"id": "plugin:acme.demo/zone", "kind": "plugin:acme.demo/zone", "name": "zone"}],
+        "relationships": [],
+        "evidence": [{"id": "plugin:acme.demo/ev1", "type": "test", "path": "main.py"}],
+    });
+    // Validation requires evidence ids present; commit via the op.
+    let v = scc_engine::invoke(&root, "plugins.contribute",
+        serde_json::json!({"plugin": "acme.demo", "batch": batch})).unwrap();
+    assert!(v.get("entities").is_some(), "{v}");
+    let ir = scc_engine::invoke(&root, "export.system_ir", serde_json::json!({"format": "system-ir.json"})).unwrap();
+    let ext = &ir["extensions"];
+    assert!(ext.get("acme.demo").is_some(), "plugin facts preserved: {ext}");
+    let ids = ext["acme.demo"].as_array().cloned().unwrap_or_default();
+    assert!(ids.iter().any(|i| i.as_str() == Some("plugin:acme.demo/zone")), "{ids:?}");
+}

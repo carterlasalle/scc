@@ -26,6 +26,42 @@ pub fn system_ir(store: &scc_store::Store) -> crate::Result<scc_core::SystemIr> 
     ir.flows = store.flows()?;
     ir.invariants = store.invariants()?;
     ir.evidence = store.all_evidence()?;
+    // §106: preserve plugin facts under a versioned extensions section.
+    // A fact belongs to provider P when its kind/predicate is namespaced
+    // `plugin:P/...` or any evidence id starts with `plugin:P`.
+    let mut ext: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut note = |provider: &str, id: &str| {
+        ext.entry(provider.to_string()).or_default().push(id.to_string());
+    };
+    for en in &ir.entities {
+        if let Some(rest) = en.kind.strip_prefix("plugin:") {
+            let p = rest.split('/').next().unwrap_or(rest);
+            note(p, &en.id);
+        }
+        for ev in &en.evidence {
+            if let Some(rest) = ev.strip_prefix("plugin:") {
+                let p = rest.split('/').next().unwrap_or(rest);
+                note(p, &en.id);
+            }
+        }
+    }
+    for r in &ir.relationships {
+        if let Some(rest) = r.predicate.strip_prefix("plugin:") {
+            let p = rest.split('/').next().unwrap_or(rest);
+            note(p, &r.id);
+        }
+        for ev in &r.evidence {
+            if let Some(rest) = ev.strip_prefix("plugin:") {
+                let p = rest.split('/').next().unwrap_or(rest);
+                note(p, &r.id);
+            }
+        }
+    }
+    for v in ext.values_mut() {
+        v.sort();
+        v.dedup();
+    }
+    ir.extensions = ext;
     Ok(ir)
 }
 

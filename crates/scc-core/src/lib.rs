@@ -1024,6 +1024,11 @@ pub struct SystemIr {
     pub invariants: Vec<Invariant>,
     #[serde(default)]
     pub evidence: Vec<Evidence>,
+    /// Plugin-contributed facts preserved verbatim (§106): provider ->
+    /// the ids this export carries from that provider. Core consumers
+    /// ignore this section; extension-aware consumers resolve it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extensions: BTreeMap<String, Vec<String>>,
 }
 
 // trace:exempt reason=internal-detail
@@ -1039,6 +1044,7 @@ impl SystemIr {
             flows: Vec::new(),
             invariants: Vec::new(),
             evidence: Vec::new(),
+            extensions: BTreeMap::new(),
         }
     }
 }
