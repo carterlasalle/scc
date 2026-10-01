@@ -581,7 +581,7 @@ pub fn invoke(
                 "after_budget": after_budget,
             })
         }
-        "selection.budget" | "surface.select" => {
+        "selection.budget" | "selection.optimize" | "surface.select" => {
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
             let items: Vec<scc_core::ContextItem> = req.ranked.iter().map(|e| scc_core::ContextItem { id: e.id.clone(), value: e.value, token_cost: e.token_cost, required: false, group: e.group.clone() }).collect();
             let budget: usize = items.iter().map(|i| i.token_cost).sum();

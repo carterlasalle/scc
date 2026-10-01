@@ -455,6 +455,23 @@ fn stability_classes_gate_registry() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.optimize-alias verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.budget-selection
+fn selection_optimize_aliases_budget() {
+    // Spec §18 names the slot selection.optimize; it serves the same
+    // default math (and the same plugin slot) as selection.budget.
+    let (_dir, root) = fixture();
+    let ranked = serde_json::json!({"ranked": [
+        {"id": "a", "value": 3.0, "token_cost": 10},
+        {"id": "b", "value": 2.0, "token_cost": 10},
+        {"id": "c", "value": 1.0, "token_cost": 10},
+    ], "budget": 100});
+    let via_budget = scc_engine::invoke(&root, "selection.budget", ranked.clone()).unwrap();
+    let via_opt = scc_engine::invoke(&root, "selection.optimize", ranked).unwrap();
+    assert_eq!(via_budget["selected"], via_opt["selected"], "alias serves same slot");
+    assert!(!via_opt["selected"].as_array().unwrap().is_empty(), "{via_opt}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.mutation-classes verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ops.input-schema
 fn mutation_classes_name_side_effects() {
     let (_dir, root) = fixture();
