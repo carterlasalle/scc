@@ -2654,6 +2654,40 @@ impl Store {
         Ok(out)
     }
 
+    /// Kind-scoped substring start-set for traversal (§16): entities of
+    /// `kind` whose name matches `term` (empty term = all of the kind,
+    /// capped by `limit`). LIKE keeps this dependency-free (no FTS).
+    // trace:v1 id=impl.scc-store-entities-like-kind work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    pub fn search_entities_like_kind(&self, kind: &str, term: &str, limit: usize) -> Result<Vec<Entity>> {
+        let pat = format!("%{}%", term.to_ascii_lowercase());
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, name, attributes, evidence FROM entities
+             WHERE kind = ?1 AND lower(name) LIKE ?2
+             ORDER BY length(name) LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![kind, pat, limit as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, kind, name, attributes, evidence) = r?;
+            out.push(Entity {
+                id,
+                kind,
+                name,
+                attributes: serde_json::from_str(&attributes).unwrap_or_default(),
+                evidence: serde_json::from_str(&evidence).unwrap_or_default(),
+            });
+        }
+        Ok(out)
+    }
+
     /// Substring fallback over symbols (name, signature, docstring).
     // trace:exempt reason=internal-detail
     pub fn search_symbols_like(&self, term: &str, limit: usize) -> Result<Vec<(String, String, String, String, u32)>> {

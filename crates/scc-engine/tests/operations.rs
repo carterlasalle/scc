@@ -197,3 +197,34 @@ fn export_diagram_renders_from_engine() {
     let bad = scc_engine::invoke(&root, "export.diagram", serde_json::json!({"format": "dot"}));
     assert!(bad.is_err(), "unknown format must fail, not silently default");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.traverse verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-graph.traverse
+fn traverse_walks_edges_and_rejects_bad_dir() {
+    let (_dir, root) = fixture();
+    // Baseline: call-graph edges exist in the indexed fixture.
+    let rels = scc_engine::invoke(&root, "graph.relationships", json!({"limit": 50})).unwrap();
+    let n = rels.as_array().map(|a| a.len()).unwrap_or(0);
+    assert!(n > 0, "fixture should have relationships: {rels}");
+    // Traverse from every entity with no steps: start set returned, no rels.
+    let v = scc_engine::invoke(
+        &root,
+        "graph.traverse",
+        json!({"from_ids": ["no-such-id"], "steps": [], "limit": 10}),
+    )
+    .unwrap();
+    assert_eq!(v["entities"].as_array().map(|a| a.len()), Some(0));
+    // Unknown direction fails loudly, never walks the wrong way.
+    let e = scc_engine::invoke(&root, "graph.traverse", json!({"steps": [{"dir": "sideways"}]}));
+    assert!(e.is_err(), "bad direction must fail: {e:?}");
+    // Real walk: from all entities of the dominant kind, one out-step.
+    let ents = scc_engine::invoke(&root, "graph.entities", json!({})).unwrap();
+    let kind = ents.as_array().and_then(|a| a.first()).and_then(|e| e.get("kind")).and_then(|k| k.as_str()).unwrap_or("file");
+    let v = scc_engine::invoke(
+        &root,
+        "graph.traverse",
+        json!({"kind": kind, "name": "", "steps": [{"dir": "out"}], "limit": 10}),
+    )
+    .unwrap();
+    assert!(v.get("entities").is_some() && v.get("relationships").is_some(), "{v}");
+}

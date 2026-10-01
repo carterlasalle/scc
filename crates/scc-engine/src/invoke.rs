@@ -88,6 +88,11 @@ pub fn invoke(
                 "symbols": hit.symbols.iter().map(|(n, s, k, f, l)| serde_json::json!({"name": n, "signature": s, "kind": k, "file": f, "line": l})).collect::<Vec<_>>(),
             })
         }
+        "graph.traverse" => {
+            let req: scc_api::TraverseRequest = serde_json::from_value(input)?;
+            let (entities, relationships) = crate::graph::traverse(&store, &req)?;
+            serde_json::json!({"entities": entities, "relationships": relationships})
+        }
         "graph.entities" | "architecture.components" => serde_json::to_value(crate::graph::components(&store)?)?,
         "graph.flows" | "architecture.flows" => serde_json::to_value(crate::graph::flows(&store)?)?,
         "graph.relationships" => {

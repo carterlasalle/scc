@@ -206,3 +206,41 @@ class SCC:
     def operations(self) -> Any:
         """List registered engine operations (introspection, via RPC)."""
         return self.invoke("operations.list", {})
+
+    def traverse(self, kind=None, name=None, from_ids=None, steps=None, limit=100):
+        """Multi-step graph traversal (§16). Steps: dicts with
+        dir (out|in|both), optional predicate, optional where_kind."""
+        return self.invoke("graph.traverse", {
+            "kind": kind, "name": name, "from_ids": from_ids or [],
+            "steps": steps or [], "limit": limit,
+        })
+
+    def query(self, kind=None, name=None):
+        """Start a fluent traversal: SCC(store).query(kind, name).out(...)."""
+        return _Query(self, kind=kind, name=name)
+
+
+# trace:v1 id=impl.sdk-python-scc-sdk.query-builder work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+class _Query:
+    """Fluent builder for graph.traverse: collects steps, executes on demand."""
+
+    def __init__(self, scc, kind=None, name=None):
+        self._scc = scc
+        self._kind = kind
+        self._name = name
+        self._steps = []
+
+    def out(self, predicate=None, where_kind=None, limit=0):
+        self._steps.append({"dir": "out", "predicate": predicate, "where_kind": where_kind, "limit": limit})
+        return self
+
+    def in_(self, predicate=None, where_kind=None, limit=0):
+        self._steps.append({"dir": "in", "predicate": predicate, "where_kind": where_kind, "limit": limit})
+        return self
+
+    def both(self, predicate=None, where_kind=None, limit=0):
+        self._steps.append({"dir": "both", "predicate": predicate, "where_kind": where_kind, "limit": limit})
+        return self
+
+    def execute(self, limit=100):
+        return self._scc.traverse(kind=self._kind, name=self._name, steps=self._steps, limit=limit)

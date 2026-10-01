@@ -259,6 +259,21 @@ export class SCC {
     return out as string;
   }
 
+  /** Multi-step graph traversal (§16): dir out|in|both, optional predicate + where_kind. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.traverse work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async traverse(args: { kind?: string; name?: string; from_ids?: string[]; steps?: Array<{ dir: string; predicate?: string; where_kind?: string; limit?: number }>; limit?: number }): Promise<{ entities: unknown[]; relationships: unknown[] }> {
+    return this.invoke("graph.traverse", {
+      kind: args.kind ?? null, name: args.name ?? null,
+      from_ids: args.from_ids ?? [], steps: args.steps ?? [], limit: args.limit ?? 100,
+    });
+  }
+
+  /** Start a fluent traversal: scc.query({kind, name}).out(...).execute(). */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.query-builder work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  query(args?: { kind?: string; name?: string }): GraphQuery {
+    return new GraphQuery(this, args?.kind, args?.name);
+  }
+
   /** Index the repository (idempotent; incremental after the first run). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.index work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async index(): Promise<IndexResult> {
@@ -270,5 +285,18 @@ export class SCC {
   // trace:v1 id=impl.sdk-typescript-src-index-scc.operations work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async operations(): Promise<{ operations: string[]; api_version: string }> {
     return this.invoke("operations.list", {});
+  }
+}
+
+/** Fluent builder for graph.traverse: collects steps, executes on demand. */
+// trace:v1 id=impl.sdk-typescript-src-index-graph-query work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+export class GraphQuery {
+  private steps: Array<{ dir: string; predicate?: string; where_kind?: string; limit?: number }> = [];
+  constructor(private scc: SCC, private kind?: string, private name?: string) {}
+  out(predicate?: string, where_kind?: string): this { this.steps.push({ dir: "out", predicate, where_kind }); return this; }
+  in_(predicate?: string, where_kind?: string): this { this.steps.push({ dir: "in", predicate, where_kind }); return this; }
+  both(predicate?: string, where_kind?: string): this { this.steps.push({ dir: "both", predicate, where_kind }); return this; }
+  execute(limit = 100): Promise<{ entities: unknown[]; relationships: unknown[] }> {
+    return this.scc.traverse({ kind: this.kind, name: this.name, steps: this.steps, limit });
   }
 }

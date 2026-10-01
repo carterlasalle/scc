@@ -189,6 +189,21 @@ enum Commands {
         limit: usize,
     },
 
+    /// Multi-step graph traversal (out|in|both, predicate + kind filters)
+    Traverse {
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        from: Vec<String>,
+        /// Step as dir[:predicate[:where_kind]] (repeatable), e.g. out:calls:symbol
+        #[arg(long = "step")]
+        steps: Vec<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+
     /// List components
     Components,
 
@@ -895,6 +910,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::System { member, json } => commands::cmd_system(&root, &member, json),
         Commands::Export { format } => commands::cmd_export(&root, &format),
         Commands::Query { query, limit } => commands::cmd_query(&root, &query, limit),
+        Commands::Traverse { kind, name, from, steps, limit } => {
+            commands::cmd_traverse(&root, kind.as_deref(), name.as_deref(), &from, &steps, limit)
+        }
         Commands::Components => commands::cmd_list_components(&root),
         Commands::Diagram { format, out } => {
             commands::cmd_diagram(&root, &format, out.as_deref())

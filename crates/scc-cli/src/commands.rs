@@ -856,6 +856,55 @@ pub fn cmd_query(root: &Path, query: &str, limit: usize) -> crate::Result<()> {
     Ok(())
 }
 
+/// `scc traverse`: parse step specs, build the request, render engine results.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-traverse work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_traverse(
+    root: &Path,
+    kind: Option<&str>,
+    name: Option<&str>,
+    from: &[String],
+    steps: &[String],
+    limit: usize,
+) -> crate::Result<()> {
+    let mut parsed = Vec::new();
+    for spec in steps {
+        let mut parts = spec.splitn(3, ':');
+        let dir = parts.next().unwrap_or("").to_string();
+        if !["out", "in", "both"].contains(&dir.as_str()) {
+            return Err(crate::CliError::Other(format!(
+                "bad --step '{spec}' (dir must be out|in|both, e.g. out:calls:symbol)"
+            )));
+        }
+        parsed.push(scc_api::TraverseStep {
+            dir,
+            predicate: parts.next().filter(|s| !s.is_empty()).map(str::to_string),
+            where_kind: parts.next().filter(|s| !s.is_empty()).map(str::to_string),
+            limit: 0,
+        });
+    }
+    let store = open_store(root)?;
+    let (entities, rels) = scc_engine::graph::traverse(
+        &store,
+        &scc_api::TraverseRequest {
+            kind: kind.map(str::to_string),
+            name: name.map(str::to_string),
+            from_ids: from.to_vec(),
+            steps: parsed,
+            limit,
+        },
+    )
+    .map_err(engine_err)?;
+    println!("— entities ({}) —", entities.len());
+    for e in &entities {
+        println!("{} [{}] {}", e.name, e.kind, e.id);
+    }
+    println!("— relationships ({}) —", rels.len());
+    for r in &rels {
+        println!("{} -{}-> {}", r.subject, r.predicate, r.object);
+    }
+    Ok(())
+}
+
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-list-components work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn cmd_list_components(root: &Path) -> crate::Result<()> {
     let store = open_store(root)?;

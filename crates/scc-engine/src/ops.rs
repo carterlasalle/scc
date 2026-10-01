@@ -46,6 +46,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "graph.entities", description: "List components/entities", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "graph.relationships", description: "Query relationships", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "graph.query", description: "Lexical entity/symbol search with substring fallback", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "graph.traverse", description: "Multi-step directed traversal (out|in|both, predicate + kind filters)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "graph.flows", description: "List flows", mutation: MutationClass::Read, streaming: false },
     // context
     OperationDescriptor { id: "context.overview", description: "Startup capsule / system overview", mutation: MutationClass::Read, streaming: false },

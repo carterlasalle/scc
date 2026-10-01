@@ -153,6 +153,47 @@ pub struct QueryRequest {
     pub limit: usize,
 }
 
+/// Serializable multi-step graph traversal (§16): start entities resolved
+/// by kind + name substring, then each step walks `out` / `in` / `both`
+/// edges (optional predicate filter, optional kind filter on the landing
+/// entity). Pure JSON — the fluent builder lives in SDKs, this AST is
+/// the wire contract every transport shares.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+// trace:exempt reason=internal-detail
+pub struct TraverseStep {
+    /// Edge direction from the current frontier: `out`, `in`, or `both`.
+    pub dir: String,
+    /// Optional predicate filter (e.g. `calls`, `writes`).
+    #[serde(default)]
+    pub predicate: Option<String>,
+    /// Optional kind filter on the landing entity (e.g. `symbol`, `state`).
+    #[serde(default)]
+    pub where_kind: Option<String>,
+    /// Max edges followed per frontier entity per step (default 50).
+    #[serde(default)]
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+// trace:exempt reason=internal-detail
+pub struct TraverseRequest {
+    /// Entity kind of the start set (e.g. `symbol`).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Name substring matched (LIKE) against the start kind.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Explicit start entity ids (unioned with kind/name matches).
+    #[serde(default)]
+    pub from_ids: Vec<String>,
+    /// Ordered traversal steps applied to the frontier.
+    #[serde(default)]
+    pub steps: Vec<TraverseStep>,
+    /// Max entities returned (default 100).
+    #[serde(default)]
+    pub limit: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
 pub struct DiffRequest {
