@@ -73,6 +73,13 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_evidence_search_lists_path_records(self):
+        got = self.scc.evidenceSearch()
+        self.assertIn("evidence", got, f"missing evidence: {got}")
+        self.assertTrue(got["evidence"], f"empty evidence: {got}")
+        self.assertIn("id", got["evidence"][0], f"missing id: {got}")
+
+    # trace:exempt reason=unit-test
     def test_history_list_reports_revision(self):
         got = self.scc.historyList()
         self.assertIn("revisions", got, f"missing revisions: {got}")

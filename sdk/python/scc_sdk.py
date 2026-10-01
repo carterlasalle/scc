@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.evidence-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def evidenceSearch(self, path: str | None = None, limit: int = 200) -> dict[str, Any]:
+        """Path-filtered evidence facts (evidence.search): the source,
+        config, runtime, test records behind provenance claims. Omit
+        ``path`` to list all evidence (capped at ``limit``)."""
+        return {"evidence": self.invoke("evidence.search", {"path": path, "limit": limit})}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.history-list work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def historyList(self) -> dict[str, Any]:
         """Index revision ledger (history.list): rev, created_at,

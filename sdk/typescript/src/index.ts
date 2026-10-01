@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * Path-filtered evidence facts (evidence.search): the source,
+   * config, runtime, test records behind provenance claims. Omit
+   * `path` to list all evidence (capped at `limit`).
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.evidence-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async evidenceSearch(path?: string, limit?: number): Promise<{ evidence: Array<{ id: string; type: string; path: string }> }> {
+    return { evidence: await this.invoke("evidence.search", { path: path ?? null, limit: limit ?? 200 }) as Array<{ id: string; type: string; path: string }> };
+  }
+
+  /**
    * Index revision ledger (history.list): rev, created_at,
    * file/entity/relationship counts per revision. Read-only provenance
    * for what changed when.
