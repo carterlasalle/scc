@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * Causal FlowGraph list (graph.flows): sequence, architecture, data,
+   * lifecycle flows with steps. Causality over the graph — nodes in
+   * graphEntities, edges in graphRelationships.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.graph-flows work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async graphFlows(): Promise<{ flows: Array<{ id: string; kind: string; name: string }> }> {
+    return { flows: await this.invoke("graph.flows", {}) as Array<{ id: string; kind: string; name: string }> };
+  }
+
+  /**
    * Component/entity inventory (graph.entities): the node list behind
    * relationships and traversal. Edges live in graphRelationships;
    * paths in traverse().

@@ -73,6 +73,13 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_graph_flows_lists_causal_flows(self):
+        got = self.scc.graphFlows()
+        self.assertIn("flows", got, f"missing flows: {got}")
+        self.assertTrue(got["flows"], f"empty flows: {got}")
+        self.assertIn("id", got["flows"][0], f"missing id: {got}")
+
+    # trace:exempt reason=unit-test
     def test_graph_entities_lists_nodes(self):
         got = self.scc.graphEntities()
         self.assertIn("entities", got, f"missing entities: {got}")

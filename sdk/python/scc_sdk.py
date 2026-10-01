@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-flows work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def graphFlows(self) -> dict[str, Any]:
+        """Causal FlowGraph list (graph.flows): sequence, architecture,
+        data, lifecycle flows with steps. Causality over the graph —
+        nodes in graphEntities, edges in graphRelationships."""
+        return {"flows": self.invoke("graph.flows", {})}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-entities work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def graphEntities(self) -> dict[str, Any]:
         """Component/entity inventory (graph.entities): the node list
