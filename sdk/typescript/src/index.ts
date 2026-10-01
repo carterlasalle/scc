@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * Full model access (§14): everything SCC knows as structured state
+   * — repository, entities, relationships, evidence, components, flows,
+   * invariants. Not a rendered Atlas.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.model-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async modelGet(): Promise<unknown> {
+    return this.invoke("model.get", {});
+  }
+
+  /**
    * System Atlas as its structured type (§74): components, hierarchy,
    * ownership, flows, invariants, boundaries, drift. Distinct from
    * contextStartup (fused session artifact).

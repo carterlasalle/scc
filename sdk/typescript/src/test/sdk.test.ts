@@ -70,6 +70,12 @@ test("systemOverview() content identifies the repository", { skip: skip ? skipRe
   assert.ok(Array.isArray(pack.entity_ids));
 });
 
+test("modelGet() returns structured state", { skip: skip ? skipReason : false }, async () => {
+  const model = await scc().modelGet() as Record<string, unknown>;
+  assert.equal(typeof model, "object");
+  assert.ok(model !== null && Object.keys(model).length > 0);
+});
+
 test("contextAtlas() returns the structured Atlas", { skip: skip ? skipReason : false }, async () => {
   const atlas = await scc().contextAtlas() as Record<string, unknown>;
   assert.equal(typeof atlas, "object");

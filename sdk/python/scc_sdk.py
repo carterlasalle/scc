@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.model-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def modelGet(self) -> dict[str, Any]:
+        """Full model access (§14): everything SCC knows as structured
+        state — repository, entities, relationships, evidence,
+        components, flows, invariants. Not a rendered Atlas."""
+        return self.invoke("model.get", {})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.context-atlas work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def contextAtlas(
         self,

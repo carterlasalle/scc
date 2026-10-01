@@ -73,6 +73,12 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_model_get_returns_structured_state(self):
+        model = self.scc.modelGet()
+        self.assertIsInstance(model, dict, f"not a dict: {model}")
+        self.assertTrue(model, f"empty model: {model}")
+
+    # trace:exempt reason=unit-test
     def test_context_atlas_has_components(self):
         atlas = self.scc.contextAtlas()
         self.assertIsInstance(atlas, dict, f"not a dict: {atlas}")
