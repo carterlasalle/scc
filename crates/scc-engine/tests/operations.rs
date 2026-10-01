@@ -384,3 +384,19 @@ fn plugins_graph_groups_by_type() {
     let v = scc_engine::invoke(&root, "plugins.graph", serde_json::json!({})).unwrap();
     assert!(v.get("groups").is_some(), "{v}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.stability-gate verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ops.input-schema
+fn stability_classes_gate_registry() {
+    let (_dir, root) = fixture();
+    // Every descriptor carries a stability class.
+    let v = scc_engine::invoke(&root, "operations.describe", serde_json::json!({"id": "graph.traverse"})).unwrap();
+    assert_eq!(v["stability"], serde_json::json!("Experimental"), "{v}");
+    let v = scc_engine::invoke(&root, "operations.describe", serde_json::json!({"id": "context.task"})).unwrap();
+    assert_eq!(v["stability"], serde_json::json!("Stable"), "{v}");
+    // The new ops are reachable and classified.
+    for (op, want) in [("operations.schema", "Experimental"), ("plugins.graph", "Experimental"), ("operations.capabilities", "Stable")] {
+        let v = scc_engine::invoke(&root, "operations.describe", serde_json::json!({"id": op})).unwrap();
+        assert_eq!(v["stability"], serde_json::json!(want), "{op}: {v}");
+    }
+}
