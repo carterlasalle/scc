@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * Observed runtime edges (runtime.status): reconciled trace facts.
+   * Empty when no traces ingested — the OBSERVED counterpart to
+   * static EXTRACTED facts.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.runtime-status work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async runtimeStatus(): Promise<{ edges: unknown[] }> {
+    return { edges: await this.invoke("runtime.status", {}) as unknown[] };
+  }
+
+  /**
    * Causal FlowGraph list (graph.flows): sequence, architecture, data,
    * lifecycle flows with steps. Causality over the graph — nodes in
    * graphEntities, edges in graphRelationships.

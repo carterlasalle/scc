@@ -73,6 +73,12 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_runtime_status_returns_edge_list(self):
+        got = self.scc.runtimeStatus()
+        self.assertIn("edges", got, f"missing edges: {got}")
+        self.assertIsInstance(got["edges"], list, f"not a list: {got}")
+
+    # trace:exempt reason=unit-test
     def test_graph_flows_lists_causal_flows(self):
         got = self.scc.graphFlows()
         self.assertIn("flows", got, f"missing flows: {got}")

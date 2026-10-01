@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.runtime-status work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def runtimeStatus(self) -> dict[str, Any]:
+        """Observed runtime edges (runtime.status): reconciled trace
+        facts. Empty when no traces ingested — the OBSERVED
+        counterpart to static EXTRACTED facts."""
+        return {"edges": self.invoke("runtime.status", {})}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-flows work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def graphFlows(self) -> dict[str, Any]:
         """Causal FlowGraph list (graph.flows): sequence, architecture,

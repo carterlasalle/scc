@@ -70,6 +70,11 @@ test("systemOverview() content identifies the repository", { skip: skip ? skipRe
   assert.ok(Array.isArray(pack.entity_ids));
 });
 
+test("runtimeStatus() returns the edge list", { skip: skip ? skipReason : false }, async () => {
+  const got = await scc().runtimeStatus();
+  assert.ok(Array.isArray(got.edges));
+});
+
 test("graphFlows() lists causal flows", { skip: skip ? skipReason : false }, async () => {
   const got = await scc().graphFlows();
   assert.ok(got.flows.length > 0);
