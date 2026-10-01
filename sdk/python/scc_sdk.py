@@ -237,6 +237,24 @@ class SCC:
             "reference_graph": self.invoke("ranking.reference_graph", {}),
         }
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-features work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def rankingFeatures(
+        self,
+        goal: str | None = None,
+        limit: int = 50,
+        explain: bool = False,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Feature-score introspection (§123.13): per-symbol core + plugin
+        feature decomposition before the blend — the same computation as
+        ranking.symbols, projected to feature rows."""
+        return self.invoke("ranking.features", {
+            "goal": goal,
+            "limit": limit,
+            "explain": explain,
+            "profile": profile,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,

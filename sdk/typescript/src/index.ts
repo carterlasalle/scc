@@ -321,6 +321,19 @@ export class SCC {
   }
 
   /**
+   * Feature-score introspection (§123.13): per-symbol core + plugin
+   * feature decomposition before the blend — the same computation as
+   * ranking.symbols, projected to feature rows.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-features work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async rankingFeatures(args: { goal?: string; limit?: number; explain?: boolean; profile?: string }): Promise<{ features: Array<{ id: string; position: number; task_ppr: number; global_ppr: number; lexical: number; semantic: number; confidence: number; criticality: number; change_risk: number; novelty: number; specificity: number; plugin_features: Record<string, number> }> }> {
+    return this.invoke("ranking.features", {
+      goal: args.goal ?? null, limit: args.limit ?? 50,
+      explain: args.explain ?? false, profile: args.profile ?? null,
+    });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).

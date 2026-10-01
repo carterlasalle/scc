@@ -168,6 +168,14 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("edges", out["edges"])
         self.assertTrue(out["edges"]["edges"], f"empty edges: {out}")
 
+    # trace:exempt reason=unit-test
+    def test_ranking_features_returns_feature_rows(self):
+        out = self.scc.rankingFeatures(goal="add numbers", limit=5)
+        self.assertIn("features", out)
+        self.assertTrue(out["features"], f"empty features: {out}")
+        for feat in ("task_ppr", "global_ppr", "lexical", "semantic", "confidence", "criticality", "change_risk", "novelty"):
+            self.assertIn(feat, out["features"][0], f"missing feature {feat}: {out['features'][0]}")
+
     def test_explain_ranking_returns_item_audit(self):
         ranked = self.scc.ranking(goal="add numbers", limit=5)
         first_id = ranked["items"][0]["id"]

@@ -166,6 +166,14 @@ test("rankGraph() returns universe, edges, reference graph", { skip: skip ? skip
   assert.ok(edges.length > 0);
 });
 
+test("rankingFeatures() returns feature rows", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().rankingFeatures({ goal: "add numbers", limit: 5 });
+  assert.ok(out.features.length > 0);
+  for (const feat of ["task_ppr", "global_ppr", "lexical", "semantic", "confidence", "criticality", "change_risk", "novelty"] as const) {
+    assert.equal(typeof out.features[0][feat], "number", `missing feature ${feat}`);
+  }
+});
+
 test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
   const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
   const firstId = ranked.items[0].id;
