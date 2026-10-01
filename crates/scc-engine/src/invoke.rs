@@ -484,7 +484,17 @@ pub fn invoke(
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
             let items: Vec<scc_core::ContextItem> = req.ranked.iter().map(|e| scc_core::ContextItem { id: e.id.clone(), value: e.value, token_cost: e.token_cost, required: false, group: e.group.clone() }).collect();
             let budget: usize = items.iter().map(|i| i.token_cost).sum();
-            serde_json::json!({"selected": crate::ranking::select_with_budget(&items, budget, budget)})
+            // Budget-optimizer extension (§124 item 27): at most one
+            // declarer; the plugin returns the full selected id list.
+            let mut ap = crate::plugins::active(root, &config);
+            match crate::plugins::budget_selection(&ap, &req, &items, budget)? {
+                Some(sel) => {
+                    let mut out = serde_json::json!({"selected": sel});
+                    if !ap.diagnostics.is_empty() { out["plugin_diagnostics"] = serde_json::to_value(&ap.diagnostics)?; }
+                    out
+                }
+                None => serde_json::json!({"selected": crate::ranking::select_with_budget(&items, budget, budget)}),
+            }
         }
         "plugins.list" => {
             let ap = crate::plugins::active(root, &config);

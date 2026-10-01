@@ -287,7 +287,7 @@ pub fn capabilities() -> serde_json::Value {
             "candidate-provider", "seed-provider", "rank-feature", "edge-weight",
             "reranker", "similarity", "blend-profile", "coverage", "verify-diagnostic",
             "context-section", "startup-section", "exporter", "viewer-panel",
-            "quota-policy",
+            "quota-policy", "budget-optimizer",
             "operation",
         ],
         "mutation_classes": ["Read", "Write", "Watch"],

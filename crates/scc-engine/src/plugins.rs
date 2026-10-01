@@ -324,6 +324,76 @@ pub fn quota_overrides(
     (out, notes)
 }
 
+/// Budget-optimizer selection (§124 item 27): the single declaring
+/// `budget-optimizer:*` extension replaces budget selection via the
+/// plugin's `selection.optimize` op (input: ranked ids + budget; output
+/// `selected: [ids]`). Zero declarers = None (caller runs the default).
+/// Two+ declarers = hard error (spec §32: no silent last-wins for
+/// exclusive policy slots). Unknown ids in the plugin answer fail
+/// loudly; an empty answer is honored (select nothing).
+// trace:v1 id=impl.scc-engine-plugins.budget-selection work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn budget_selection(
+    ap: &ActivePlugins,
+    req: &scc_api::SelectionRequest,
+    items: &[scc_core::ContextItem],
+    budget: usize,
+) -> crate::Result<Option<Vec<String>>> {
+    let specs: Vec<(String, String, String)> = ap
+        .plugins
+        .iter()
+        .flat_map(|pl| {
+            pl.manifest.extensions.iter()
+                .filter(|e| e.extension_type == "budget-optimizer")
+                .map(|e| (pl.manifest.id.clone(), e.id.clone(), pl.manifest.failure_policy.clone()))
+        })
+        .collect();
+    if specs.is_empty() {
+        return Ok(None);
+    }
+    if specs.len() > 1 {
+        let who: Vec<String> = specs.iter().map(|(pid, eid, _)| format!("{eid} from {pid}")).collect();
+        return Err(crate::EngineError::Other(format!(
+            "multiple budget-optimizer extensions compete ({}) — exclusive policy slot needs explicit configuration (spec §32)",
+            who.join(", ")
+        )));
+    }
+    let (pid, ext_id, policy) = &specs[0];
+    let plug = ap.plugins.iter().find(|pl| &pl.manifest.id == pid).cloned()
+        .ok_or_else(|| crate::EngineError::Other(format!("budget optimizer plugin {pid} vanished")))?;
+    let ranked: Vec<serde_json::Value> = req.ranked.iter().map(|e| {
+        serde_json::json!({"id": e.id, "kind": e.kind, "value": e.value, "token_cost": e.token_cost})
+    }).collect();
+    let input = serde_json::json!({"optimizer": ext_id, "ranked": ranked, "budget": budget});
+    match scc_plugin_host::call(&plug, "selection.optimize", input, None) {
+        Ok(v) => {
+            let known: std::collections::BTreeSet<&str> =
+                items.iter().map(|i| i.id.as_str()).collect();
+            let mut sel = Vec::new();
+            if let Some(arr) = v.get("selected").and_then(|x| x.as_array()) {
+                for x in arr {
+                    let id = x.as_str().unwrap_or("");
+                    if !known.contains(id) {
+                        return Err(crate::EngineError::Other(format!(
+                            "budget optimizer {ext_id} from {pid} selected unknown id '{id}'"
+                        )));
+                    }
+                    sel.push(id.to_string());
+                }
+            }
+            Ok(Some(sel))
+        }
+        Err(e) => {
+            if policy == "required" {
+                Err(crate::EngineError::Other(format!(
+                    "budget optimizer {ext_id} from {pid} failed: {e}"
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 /// Deterministic extension order (§19): priority ascending, plugin id
 /// ascending, then before/after DAG edges. Unknown references and cycles
 /// are startup errors — never silent misordering.
