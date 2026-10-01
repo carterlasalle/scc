@@ -361,6 +361,16 @@ export class SCC {
   }
 
   /**
+   * Candidate-stage introspection: scored entities (id/kind/name/score/
+   * reason) merged from the core Surface compiler plus plugin candidate
+   * providers — the same merge ranking.symbols consumes.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-candidates work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async rankingCandidates(goal?: string, limit?: number): Promise<{ candidates: Array<{ id: string; kind: string; name: string; score: number; reason: string }> }> {
+    return this.invoke("ranking.candidates", { goal: goal ?? null, limit: limit ?? 50 });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).

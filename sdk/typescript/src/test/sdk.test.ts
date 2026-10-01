@@ -186,6 +186,13 @@ test("pagerankVectors() returns global and task vectors", { skip: skip ? skipRea
   assert.ok(out.task.vector.length > 0);
 });
 
+test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().rankingCandidates("add numbers", 5);
+  assert.ok(out.candidates.length > 0);
+  const first = out.candidates[0];
+  assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
+});
+
 test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
   const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
   const firstId = ranked.items[0].id;

@@ -191,6 +191,14 @@ class TestSCCSDK(unittest.TestCase):
             self.assertIn("vector", out[key], f"missing vector in {key}: {out[key]}")
             self.assertTrue(out[key]["vector"], f"empty {key} vector: {out[key]}")
 
+    # trace:exempt reason=unit-test
+    def test_ranking_candidates_returns_scored_entities(self):
+        out = self.scc.rankingCandidates(goal="add numbers", limit=5)
+        self.assertIn("candidates", out)
+        self.assertTrue(out["candidates"], f"empty candidates: {out}")
+        for key in ("id", "kind", "name", "score", "reason"):
+            self.assertIn(key, out["candidates"][0], f"missing {key}: {out['candidates'][0]}")
+
     def test_explain_ranking_returns_item_audit(self):
         ranked = self.scc.ranking(goal="add numbers", limit=5)
         first_id = ranked["items"][0]["id"]

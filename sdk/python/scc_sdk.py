@@ -286,6 +286,17 @@ class SCC:
             "task": self.invoke("ranking.pagerank.task", {"goal": goal}),
         }
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-candidates work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def rankingCandidates(
+        self,
+        goal: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Candidate-stage introspection: scored entities (id/kind/name/
+        score/reason) merged from the core Surface compiler plus plugin
+        candidate providers — the same merge ranking.symbols consumes."""
+        return self.invoke("ranking.candidates", {"goal": goal, "limit": limit})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,
