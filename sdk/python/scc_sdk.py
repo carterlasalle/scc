@@ -343,6 +343,13 @@ class SCC:
             "ranked": ranked, "budget": 0, "quotas": quotas,
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-entry work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def rankingEntry(self, id: str) -> dict[str, Any]:
+        """One authoritative SurfaceEntry by id (§1.6/§18): identity,
+        signatures, flows, contracts, rank decomposition. The full
+        programmatic Surface object (§123.7 needs entry-level access)."""
+        return self.invoke("ranking.entry", {"id": id})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-optimize work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def selectionOptimize(
         self,

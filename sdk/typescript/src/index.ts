@@ -403,6 +403,16 @@ export class SCC {
   }
 
   /**
+   * One authoritative SurfaceEntry by id (§1.6/§18): identity,
+   * signatures, flows, contracts, rank decomposition. The full
+   * programmatic Surface object.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-entry work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async rankingEntry(id: string): Promise<unknown> {
+    return this.invoke("ranking.entry", { id });
+  }
+
+  /**
    * Budget-optimizer stage (§124 item 27) over caller rows:
    * value-density knapsack (value/token_cost desc). At most one plugin
    * declarer replaces it with the full selected id list.

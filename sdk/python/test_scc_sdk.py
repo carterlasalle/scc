@@ -201,6 +201,16 @@ class TestSCCSDK(unittest.TestCase):
 
     # trace:exempt reason=unit-test
     # trace:exempt reason=unit-test
+    def test_ranking_entry_returns_surface_object(self):
+        syms = self.scc.ranking(goal="add numbers", limit=5)
+        self.assertTrue(syms["items"], f"no ranked items: {syms}")
+        entry = self.scc.rankingEntry(syms["items"][0]["id"])
+        self.assertIn("id", entry, f"missing id: {entry}")
+        self.assertIn("source_signature", entry, f"missing source_signature: {entry}")
+        self.assertIn("canonical_signature", entry, f"missing canonical_signature: {entry}")
+        self.assertIn("rank", entry, f"missing rank: {entry}")
+
+    # trace:exempt reason=unit-test
     def test_selection_optimize_picks_value_density(self):
         rows = [
             {"id": "a", "value": 3.0, "token_cost": 10},

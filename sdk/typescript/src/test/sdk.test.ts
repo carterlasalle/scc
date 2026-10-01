@@ -193,6 +193,16 @@ test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : 
   assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
 });
 
+test("rankingEntry() returns the Surface object", { skip: skip ? skipReason : false }, async () => {
+  const syms = await scc().ranking({ goal: "add numbers", limit: 5 });
+  assert.ok(syms.items.length > 0);
+  const entry = await scc().rankingEntry(syms.items[0].id) as Record<string, unknown>;
+  assert.ok("id" in entry);
+  assert.ok("source_signature" in entry);
+  assert.ok("canonical_signature" in entry);
+  assert.ok("rank" in entry);
+});
+
 test("selectionOptimize() picks by value density", { skip: skip ? skipReason : false }, async () => {
   const rows = [
     { id: "a", value: 3.0, token_cost: 10 },
