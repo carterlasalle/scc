@@ -102,6 +102,23 @@ impl<'a> Ranker<'a> {
         (acc, applied)
     }
 
+    /// Task-seed merge for goal (§123.11): lexical seeds + plugin
+    /// providers, weights summed by id. Shared by `ranking.seeds` and
+    /// `symbols_with_hooks` — one merge, two callers.
+    // trace:exempt reason=internal-detail
+    pub fn seeds_with(&self, goal: &str, hooks: &RankHooks) -> crate::Result<Vec<scc_core::TaskSeed>> {
+        let ctx = self.ctx();
+        let mut seeds = lexical_seeds(&ctx, goal);
+        for seed_fn in &hooks.seed_providers {
+            for x in seed_fn(goal) {
+                if let Some(e) = seeds.iter_mut().find(|s| s.id == x.id) { e.weight += x.weight; }
+                else { seeds.push(x); }
+            }
+        }
+        seeds.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
+        Ok(seeds)
+    }
+
     /// Lexical candidate generation for goal (stage 1).
     // trace:exempt reason=internal-detail
     pub fn candidates(&self, goal: &str, limit: usize) -> crate::Result<Vec<scc_context::rank::ScoredEntity>> {

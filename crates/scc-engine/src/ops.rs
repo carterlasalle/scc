@@ -118,6 +118,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "ranking.task", description: "Alias for ranking.symbols (task-personalized blend)", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "ranking.entities", description: "Alias for ranking.symbols (entity-ranked blend)", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "ranking.candidates", description: "Lexical candidate generation (stage 1)", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "ranking.seeds", description: "Task-seed merge: lexical seeds + plugin seed providers (weight sums by id)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "ranking.pagerank.global", description: "Raw global PageRank vector over the heterogeneous universe", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "ranking.pagerank.task", description: "Raw task-personalized PPR vector", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "ranking.final_importance", description: "Pure blend function over explicit features", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },

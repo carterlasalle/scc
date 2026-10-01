@@ -384,6 +384,17 @@ pub fn invoke(
             let cands = engine.ranking().candidates_with(goal, limit, &hooks)?;
             serde_json::json!({"candidates": cands.iter().map(|c| serde_json::json!({"id": c.id, "kind": c.kind, "name": c.name, "score": c.score, "reason": c.reason})).collect::<Vec<_>>()})
         }
+        "ranking.seeds" => {
+            // Task-seed introspection (§123.11): lexical seeds merged with
+            // plugin seed providers (weight sums by id). Read-only stage
+            // view — the same merge symbols_with_hooks consumes.
+            let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, goal);
+            let seeds = engine.ranking().seeds_with(goal, &hooks)?;
+            serde_json::json!({"seeds": seeds.iter().map(|x| serde_json::json!({"id": x.id, "kind": x.kind, "weight": x.weight})).collect::<Vec<_>>()})
+        }
         "ranking.pagerank.global" => {
             // Raw stage introspection: no plugin hooks by contract.
             let v = engine.ranking().pagerank_global()?;

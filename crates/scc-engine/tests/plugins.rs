@@ -237,6 +237,37 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.seeds-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn seeds_op_serves_plugin_merge() {
+    // Live-RPC proof: `ranking.seeds` merges lexical + provider weights
+    // through the real invoke path (same hook wiring as ranking.symbols).
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let base = scc_engine::invoke(&root, "ranking.seeds",
+        serde_json::json!({"goal": "alpha"})).unwrap();
+    assert!(!base["seeds"].as_array().unwrap().is_empty(), "{base}");
+    let first = base["seeds"][0]["id"].as_str().unwrap().to_string();
+    let w0 = base["seeds"][0]["weight"].as_f64().unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.seed");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.seed\"\nname = \"Seed\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.seed\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"seed-provider:acme.s\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    std::fs::write(plugdir.join("plugin.py"), format!(
+        "import json, sys\nprint(json.dumps({{\"output\": {{\"seeds\": [{{\"kind\": \"symbol\", \"id\": \"{first}\", \"weight\": 5.0}}]}}}}))\n")).unwrap();
+    let out = scc_engine::invoke(&root, "ranking.seeds",
+        serde_json::json!({"goal": "alpha"})).unwrap();
+    let hit = out["seeds"].as_array().unwrap().iter()
+        .find(|x| x["id"] == first).unwrap();
+    assert!((hit["weight"].as_f64().unwrap() - (w0 + 5.0)).abs() < 1e-9, "{out}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.sidecar-raw verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.promote-sidecar
 fn sidecar_round_trip_stays_out_of_canonical() {
     // §124 item 35 (raw half): sidecar facts round-trip namespaced per
