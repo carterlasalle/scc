@@ -264,6 +264,66 @@ pub fn viewer_panels(
     (panels, notes)
 }
 
+/// Quota-policy overrides (§124 item 25): every `quota-policy:*`
+/// extension may override per-kind quota fractions via the plugin's
+/// `selection.quotas` op (input: ranked ids + request quotas; output
+/// `quotas: [{kind, fraction}]`). Returned pairs merge over the request
+/// quotas (plugin wins per kind). Failures follow policy: required =
+/// hard error, else skipped with a diagnostic. Fractions clamp to
+/// [0,1] at apply time (apply_quotas already clamps).
+// trace:v1 id=impl.scc-engine-plugins.quota-overrides work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn quota_overrides(
+    ap: &ActivePlugins,
+    req: &scc_api::SelectionRequest,
+) -> (Vec<(String, f64)>, Vec<scc_plugin_host::PluginDiagnostic>) {
+    let mut out = Vec::new();
+    let mut notes = Vec::new();
+    let specs: Vec<(String, String, String)> = ap
+        .plugins
+        .iter()
+        .flat_map(|pl| {
+            pl.manifest.extensions.iter()
+                .filter(|e| e.extension_type == "quota-policy")
+                .map(|e| (pl.manifest.id.clone(), e.id.clone(), pl.manifest.failure_policy.clone()))
+        })
+        .collect();
+    for (pid, ext_id, policy) in specs {
+        let plug = match ap.plugins.iter().find(|pl| pl.manifest.id == pid).cloned() {
+            Some(pl) => pl,
+            None => continue,
+        };
+        let ranked: Vec<serde_json::Value> = req.ranked.iter().map(|e| {
+            serde_json::json!({"id": e.id, "kind": e.kind, "value": e.value, "token_cost": e.token_cost})
+        }).collect();
+        let quotas: Vec<serde_json::Value> = req.quotas.clone().unwrap_or_default().into_iter().map(|q| {
+            serde_json::json!({"kind": q.kind, "fraction": q.fraction})
+        }).collect();
+        let input = serde_json::json!({"policy": ext_id, "ranked": ranked, "quotas": quotas});
+        match scc_plugin_host::call(&plug, "selection.quotas", input, None) {
+            Ok(v) => {
+                if let Some(arr) = v.get("quotas").and_then(|x| x.as_array()) {
+                    for q in arr {
+                        let kind = q.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                        let frac = q.get("fraction").and_then(|x| x.as_f64()).unwrap_or(-1.0);
+                        if !kind.is_empty() && (0.0..=1.0).contains(&frac) {
+                            out.push((kind.to_string(), frac));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                if policy == "required" {
+                    notes.push(scc_plugin_host::PluginDiagnostic {
+                        plugin: pid, operation: "selection.quotas".into(),
+                        error: format!("quota policy {ext_id} failed: {e}"), action: "failed".into(),
+                    });
+                }
+            }
+        }
+    }
+    (out, notes)
+}
+
 /// Deterministic extension order (§19): priority ascending, plugin id
 /// ascending, then before/after DAG edges. Unknown references and cycles
 /// are startup errors — never silent misordering.

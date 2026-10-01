@@ -461,9 +461,24 @@ pub fn invoke(
         "selection.quotas" => {
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
             let rows: Vec<(String, String, f64, usize)> = req.ranked.iter().map(|e| (e.id.clone(), e.kind.clone(), e.value, e.token_cost)).collect();
-            let quotas: Vec<(String, f64)> = req.quotas.unwrap_or_default().iter().map(|q| (q.kind.clone(), q.fraction)).collect();
+            let mut quotas: Vec<(String, f64)> = req.quotas.clone().unwrap_or_default().iter().map(|q| (q.kind.clone(), q.fraction)).collect();
+            // Quota-policy extensions (§124 item 25): declaring plugins
+            // override per-kind fractions (plugin wins per kind). Merged
+            // before the single apply_quotas call — one math path.
+            let mut ap = crate::plugins::active(root, &config);
+            let (overrides, notes) = crate::plugins::quota_overrides(&ap, &req);
+            for (kind, frac) in &overrides {
+                if let Some(slot) = quotas.iter_mut().find(|(k, _)| k == kind) { slot.1 = *frac; }
+                else { quotas.push((kind.clone(), *frac)); }
+            }
+            if !notes.is_empty() { ap.diagnostics.extend(notes); }
             let budget: usize = req.ranked.iter().map(|e| e.token_cost).sum();
-            serde_json::json!({"selected": crate::ranking::apply_quotas(&rows, &quotas, budget)})
+            let mut out = serde_json::json!({"selected": crate::ranking::apply_quotas(&rows, &quotas, budget)});
+            if !overrides.is_empty() {
+                out["quota_overrides"] = serde_json::json!(overrides.iter().map(|(k, f)| serde_json::json!({"kind": k, "fraction": f})).collect::<Vec<_>>());
+            }
+            if !ap.diagnostics.is_empty() { out["plugin_diagnostics"] = serde_json::to_value(&ap.diagnostics)?; }
+            out
         }
         "selection.budget" | "surface.select" => {
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;

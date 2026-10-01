@@ -237,6 +237,48 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.quota-policy verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.quota-overrides
+fn quota_policy_plugin_overrides_fractions() {
+    // §124 item 25 (quota half): a `quota-policy` extension overrides
+    // per-kind fractions. Default no-plugin path unchanged (no
+    // quota_overrides key); plugin wins per kind and is recorded.
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let ranked = |ids: &[&str]| -> Vec<serde_json::Value> {
+        ids.iter().map(|id| serde_json::json!({
+            "id": id, "kind": "symbol", "value": 1.0, "token_cost": 100})).collect()
+    };
+    // Baseline: no plugin, quota 0.5 over 300 tokens admits 1 of 3.
+    let base = scc_engine::invoke(&root, "selection.quotas", serde_json::json!({
+        "ranked": ranked(&["a", "b", "c"]),
+        "quotas": [{"kind": "symbol", "fraction": 0.5}],
+        "budget": 300,
+    })).unwrap();
+    assert!(base.get("quota_overrides").is_none(), "{base}");
+    assert_eq!(base["selected"].as_array().unwrap().len(), 1, "{base}");
+    // Plugin raises the fraction to 1.0: all three admitted, recorded.
+    let plugdir = root.join(".scc").join("plugins").join("acme.q");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.q\"\nname = \"Q\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"selection.quotas\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"quota-policy:acme.lenient\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nprint(json.dumps({\"output\": {\"quotas\": [{\"kind\": \"symbol\", \"fraction\": 1.0}]}}))\n").unwrap();
+    let out = scc_engine::invoke(&root, "selection.quotas", serde_json::json!({
+        "ranked": ranked(&["a", "b", "c"]),
+        "quotas": [{"kind": "symbol", "fraction": 0.5}],
+        "budget": 300,
+    })).unwrap();
+    assert_eq!(out["selected"].as_array().unwrap().len(), 3, "{out}");
+    assert_eq!(out["quota_overrides"], serde_json::json!([{"kind": "symbol", "fraction": 1.0}]), "{out}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.pipeline-rekey verifies=REQ-SI-503JSBGP exercises=impl.scc.startup.rank-cache-pipeline
 fn pipeline_fragment_rekeys_rank_cache() {
     // §58: the rank cache keys on the ranking pipeline, not just the
