@@ -86,6 +86,7 @@ pub extern "C" fn scc_operations_json() -> *mut c_char {
                 "description": d.description,
                 "mutation": format!("{:?}", d.mutation),
                 "streaming": d.streaming,
+                "stability": format!("{:?}", d.stability),
             })
         })
         .collect();

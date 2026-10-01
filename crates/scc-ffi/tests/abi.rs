@@ -60,5 +60,10 @@ fn operations_lists_registry() {
     let s = unsafe { CStr::from_ptr(p).to_string_lossy().into_owned() };
     unsafe { scc_ffi::scc_string_free(p); }
     let v: serde_json::Value = serde_json::from_str(&s).unwrap();
-    assert!(v["operations"].as_array().unwrap().len() >= 50, "{v}");
+    let ops = v["operations"].as_array().unwrap();
+    assert!(ops.len() >= 50, "{v}");
+    // Spec §82: every entry carries its stability class so SDK codegen
+    // can include stable+experimental without opting into internal.
+    assert!(ops.iter().all(|o| o.get("stability").and_then(|x| x.as_str()).is_some()), "{v}");
+    assert!(ops.iter().any(|o| o["stability"] == "Experimental"), "{v}");
 }
