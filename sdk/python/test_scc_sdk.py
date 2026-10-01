@@ -152,6 +152,15 @@ class TestSCCSDK(unittest.TestCase):
             self.assertIn(feat, first["features"], f"missing feature {feat}: {first['features']}")
 
     # trace:exempt reason=unit-test
+    def test_explain_ranking_returns_item_audit(self):
+        ranked = self.scc.ranking(goal="add numbers", limit=5)
+        first_id = ranked["items"][0]["id"]
+        item = self.scc.explainRanking(first_id, goal="add numbers")
+        self.assertEqual(item["id"], first_id)
+        for key in ("rank", "position", "features", "specificity", "reasons", "plugin_features"):
+            self.assertIn(key, item, f"missing {key}: {item}")
+
+    # trace:exempt reason=unit-test
     # trace:exempt reason=unit-test
     def test_task_context_record_visibility_false_skips_ledger(self):
         # Fresh repo: nothing visible yet, so the delta is non-empty.

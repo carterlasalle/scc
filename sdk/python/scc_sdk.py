@@ -205,6 +205,17 @@ class SCC:
             "profile": profile,
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-explain work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def explainRanking(
+        self,
+        id: str,
+        goal: str | None = None,
+    ) -> dict[str, Any]:
+        """Explain one ranked symbol (§19/§96): the RankItem audit —
+        blended score, position, 8-feature decomposition, specificity,
+        reasons, and plugin_features. Same item shape as ranking() items."""
+        return self.invoke("ranking.explain", {"id": id, "goal": goal})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,

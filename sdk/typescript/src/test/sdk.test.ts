@@ -150,6 +150,15 @@ test("ranking() returns items with feature decomposition", { skip: skip ? skipRe
   assert.ok(first.plugin_features !== undefined);
 });
 
+test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
+  const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
+  const firstId = ranked.items[0].id;
+  const item = await scc().explainRanking(firstId, "add numbers");
+  assert.equal(item.id, firstId);
+  assert.equal(typeof item.rank, "number");
+  assert.ok(item.features && item.plugin_features !== undefined);
+});
+
 test("operations() lists the registry via RPC", { skip: skip ? skipReason : false }, async () => {
   const out = await scc().operations();
   assert.ok(out.operations.length > 50);

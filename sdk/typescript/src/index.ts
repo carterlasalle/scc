@@ -286,6 +286,16 @@ export class SCC {
   }
 
   /**
+   * Explain one ranked symbol (§19/§96): the RankItem audit — blended
+   * score, position, 8-feature decomposition, specificity, reasons, and
+   * plugin_features. Same item shape as ranking() items.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-explain work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async explainRanking(id: string, goal?: string): Promise<RankItem> {
+    return this.invoke("ranking.explain", { id, goal: goal ?? null });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).
