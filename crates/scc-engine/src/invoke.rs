@@ -1005,7 +1005,10 @@ fn invoke_context(
             let (scorer, _) = crate::inference::rankers(store, config, &goal);
             let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
                 scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
-            serde_json::json!({"text": ctx.structural(&req, &store.root, semantic)?})
+            // §73: units model first — external programs use the
+            // structured units without scraping text; text stays.
+            let units = ctx.structural_units(&req, &store.root, semantic)?;
+            serde_json::json!({"text": scc_context::structural_source::render_structural(&units), "units": units})
         }
         "surface.compile" => {
             serde_json::to_value(ctx.surface_map()?)?

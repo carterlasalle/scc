@@ -206,12 +206,13 @@ impl SccContext<'_> {
     }
 
     // trace:exempt reason=internal-detail
-    pub fn structural(
+    // trace:exempt reason=internal-detail
+    pub fn structural_units(
         &self,
         req: &StructuralRequest,
         root: &Path,
         semantic: Option<&dyn scc_context::rank::SemanticScorer>,
-    ) -> crate::Result<String> {
+    ) -> crate::Result<Vec<scc_core::StructuralSourceUnit>> {
         let store = self.engine.store;
         let ctx = self.engine.ctx();
         let tokens = req.budget.unwrap_or(ContextBudget::default().structural_source);
@@ -221,26 +222,46 @@ impl SccContext<'_> {
             for f in &req.files {
                 match scc_context::structural_source::resolve_handle_to_path(&store.root, f) {
                     Ok(p) => resolved.push(p),
-                    Err(e) => return Ok(format!("# HANDLE REFUSED\n{e}\n")),
+                    Err(_) => return Ok(Vec::new()),
                 }
             }
             resolved
         } else if let Some(goal) = req.task.as_deref() {
             let goal = goal.trim();
             if goal.is_empty() {
-                return Ok("# STRUCTURAL SOURCE\n\nPass --files <paths...> or --task \"<goal>\".".to_string());
+                return Ok(Vec::new());
             }
             super::task::surface_task_files(&ctx, goal, max_units, tokens.max(1), semantic)
         } else {
-            return Ok("# STRUCTURAL SOURCE\n\nPass --files <paths...> or --task \"<goal>\".".to_string());
+            return Ok(Vec::new());
         };
         if paths.is_empty() {
-            return Ok("# STRUCTURAL SOURCE\n\nNo indexed files matched the task goal (run `scc index` first, or pass --files explicitly).".to_string());
+            return Ok(Vec::new());
         }
         let _ = root;
-        let units = scc_context::structural_source::structural_source(&ctx, &paths, max_units);
+        Ok(scc_context::structural_source::structural_source(&ctx, &paths, max_units))
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn structural(
+        &self,
+        req: &StructuralRequest,
+        root: &Path,
+        semantic: Option<&dyn scc_context::rank::SemanticScorer>,
+    ) -> crate::Result<String> {
+        // Handle-refusal and empty-input envelopes live here (transport
+        // guidance, not model data); the units path is the authority.
+        for f in &req.files {
+            if let Err(e) = scc_context::structural_source::resolve_handle_to_path(&self.engine.store.root, f) {
+                return Ok(format!("# HANDLE REFUSED\n{e}\n"));
+            }
+        }
+        if req.files.is_empty() && req.task.as_deref().map(|g| g.trim().is_empty()).unwrap_or(true) {
+            return Ok("# STRUCTURAL SOURCE\n\nPass --files <paths...> or --task \"<goal>\".".to_string());
+        }
+        let units = self.structural_units(req, root, semantic)?;
         if units.is_empty() {
-            return Ok("# STRUCTURAL SOURCE\n\nNo indexed symbols in the requested files (run `scc index` first).".to_string());
+            return Ok("# STRUCTURAL SOURCE\n\nNo indexed files matched (run `scc index` first, or pass --files explicitly).".to_string());
         }
         Ok(scc_context::structural_source::render_structural(&units))
     }

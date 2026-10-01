@@ -416,6 +416,24 @@ fn vector_aliases_match_canonical() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.structural-units verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
+fn structural_returns_units_model() {
+    // §73: context.structural carries the units model — external
+    // programs use structured units without scraping text. Units and
+    // text agree on paths.
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    let v = scc_engine::invoke(&root, "context.structural", json!({"files": ["main.py"]})).unwrap();
+    let units = v["units"].as_array().unwrap();
+    assert!(!units.is_empty(), "units for main.py: {v}");
+    assert!(units.iter().all(|u| u.get("path").is_some() && u.get("content").is_some()), "{v}");
+    let text = v["text"].as_str().unwrap();
+    for u in units {
+        assert!(text.contains(u["path"].as_str().unwrap()), "text covers unit path");
+    }
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.surface-render verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
 fn surface_render_returns_text_only() {
     // `surface.render`: the read-path projection — text without the
