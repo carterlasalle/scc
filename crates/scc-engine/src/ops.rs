@@ -169,6 +169,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "plugins.invoke", description: "Invoke any plugin operation explicitly", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "plugins.lock", description: "Write .scc/plugins.lock from the live plugin set", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "plugins.check", description: "Verify live plugins against .scc/plugins.lock", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "plugins.graph", description: "Deterministic extension order per type (priority + before/after DAG)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "plugins.contribute", description: "Validate and commit a plugin contribution batch (entities, relationships, evidence)", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "plugin_state.get", description: "Read one namespaced plugin state key (StateRead grant)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "plugin_state.put", description: "Write one namespaced plugin state key (StateWrite grant)", mutation: MutationClass::Write, streaming: false },

@@ -1587,6 +1587,26 @@ pub fn cmd_plugin_doctor(root: &Path) -> crate::Result<()> {
     Ok(())
 }
 
+/// `scc plugin graph`: render the deterministic extension order.
+/// Engine owns derivation (`plugins.graph`); CLI prints text.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-graph work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_graph(root: &Path) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.graph", serde_json::json!({})).map_err(engine_err)?;
+    let groups = out.get("groups").and_then(|g| g.as_object());
+    match groups {
+        Some(g) if !g.is_empty() => {
+            for (ty, items) in g {
+                println!("{ty}:");
+                for it in items.as_array().cloned().unwrap_or_default() {
+                    println!("  {} (priority {})", it.get("key").and_then(|k| k.as_str()).unwrap_or("?"), it.get("priority").and_then(|p| p.as_i64()).unwrap_or(0));
+                }
+            }
+        }
+        _ => println!("(no extensions registered)"),
+    }
+    Ok(())
+}
+
 /// `scc plugin lock`: write .scc/plugins.lock from the live set.
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-lock work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_plugin_lock(root: &Path) -> crate::Result<()> {

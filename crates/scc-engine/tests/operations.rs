@@ -376,3 +376,11 @@ fn operations_capabilities_lists_vocabulary() {
         assert!(v["extension_points"].as_array().unwrap().iter().any(|e| e == ext), "missing {ext}: {v}");
     }
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.plugins-graph verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.order-extensions
+fn plugins_graph_groups_by_type() {
+    let (_dir, root) = fixture();
+    let v = scc_engine::invoke(&root, "plugins.graph", serde_json::json!({})).unwrap();
+    assert!(v.get("groups").is_some(), "{v}");
+}

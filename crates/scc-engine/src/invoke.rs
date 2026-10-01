@@ -493,6 +493,21 @@ pub fn invoke(
             let path = scc_plugin_host::write_lockfile(root, &ap.plugins).map_err(crate::EngineError::Other)?;
             serde_json::json!({"ok": true, "path": path.to_string_lossy(), "plugins": crate::plugins::lock_entries(&ap)})
         }
+        "plugins.graph" => {
+            let ap = crate::plugins::active(root, &config);
+            let exts = crate::plugins::collect_extensions(&ap);
+            let order = crate::plugins::order_extensions(&exts)?;
+            // Group by type in deterministic key order, listing
+            // `type:id` in execution order with priority.
+            let mut by_type: std::collections::BTreeMap<String, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
+            for i in order {
+                let e = &exts[i];
+                by_type.entry(e.extension_type.clone()).or_default().push(
+                    serde_json::json!({"id": e.id, "key": e.key(), "priority": e.priority}),
+                );
+            }
+            serde_json::json!({"groups": by_type})
+        }
         "plugins.check" => {
             let ap = crate::plugins::active(root, &config);
             match scc_plugin_host::check_lockfile(root, &ap.plugins) {
