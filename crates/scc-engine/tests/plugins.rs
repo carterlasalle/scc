@@ -237,6 +237,29 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.startup-section verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.startup-sections
+fn startup_section_plugin_appends_provenance_section() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.boot");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.boot\"\nname = \"Boot\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"startup.section\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"startup-section:acme.banner\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nprint(json.dumps({\"output\": {\"section\": \"banner: hi\"}}))\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let out = scc_engine::invoke(&root, "context.startup", serde_json::json!({})).unwrap();
+    let text = out["text"].as_str().unwrap_or("");
+    assert!(text.contains("# PLUGIN STARTUP SECTION acme.banner (from acme.boot"), "{text}");
+    assert!(text.contains("banner: hi"), "{text}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.context-section verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.context-sections
 fn context_section_plugin_appends_provenance_section() {
     use std::io::Write;

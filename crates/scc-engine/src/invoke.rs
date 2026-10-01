@@ -37,6 +37,16 @@ pub fn invoke(
             // need a bare string take `.text`; nothing re-derives startup.
             let (startup, text) = ctx.startup(&req)?;
             let budget = scc_context::startup::allocate_startup_budget(&ctx.engine.ctx(), req.budget);
+            // Plugin startup sections (§124 item 29): verbatim markdown
+            // under provenance headers, appended by the engine so every
+            // transport delivers them. Skips are recorded inline (startup
+            // has no warnings channel); symbol visibility unaffected.
+            let (sections, notes) = crate::plugins::startup_sections(root, &config);
+            let mut text = text;
+            text.push_str(&sections);
+            for n in notes {
+                text.push_str(&format!("\n(startup section skipped: {n})\n"));
+            }
             serde_json::json!({"text": text, "budget": budget, "artifact": startup.artifact})
         }
         "context.task" => {
@@ -276,8 +286,8 @@ pub fn invoke(
             serde_json::to_value(crate::state::lessons_list(root, limit)?)?
         }
         "beads.list" | "beads.active" => serde_json::to_value(crate::state::beads(root, 20)?)?,
-        "index.watch" | "viewer.snapshot" => {
-            return Err(crate::EngineError::Other("watch/viewer-snapshot are CLI-local loops (file watcher, browser capture); not engine operations".into()));
+        "viewer.snapshot" => {
+            return Err(crate::EngineError::Other("viewer.snapshot is CLI-local browser capture; not an engine operation".into()));
         }
         "setup.claude" | "setup.detected" | "setup.codex" | "setup.opencode" | "setup.hermes" | "setup.omp" | "setup.pi" => {
             return Err(crate::EngineError::Other("setup operations are CLI-local file installation (harness dirs, home directory); not engine operations".into()));
@@ -336,7 +346,7 @@ pub fn invoke(
             let (entries, tasked) = ctx.important(limit, component.as_deref(), task.as_deref())?;
             serde_json::json!({"entries": entries, "tasked": tasked})
         }
-        "ranking.symbols" | "ranking.global" | "ranking.task" | "ranking.entities" | "surface.rank" => {
+        "ranking.symbols" | "surface.rank" => {
             let req: scc_api::RankRequest = serde_json::from_value(input)?;
             let ranker = engine.ranking();
             let mut ap = crate::plugins::active(root, &config);
