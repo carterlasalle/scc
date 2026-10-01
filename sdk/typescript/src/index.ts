@@ -347,6 +347,20 @@ export class SCC {
   }
 
   /**
+   * Raw PPR stage vectors (§123.10): the global vector and the task
+   * vector for a goal. No plugin hooks by contract — the structure the
+   * symbol projection blends from.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.pagerank-vectors work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async pagerankVectors(goal?: string): Promise<{ global: { vector: Array<{ id: string; score: number }> }; task: { vector: Array<{ id: string; score: number }> } }> {
+    const [global, task] = await Promise.all([
+      this.invoke("ranking.pagerank.global", {}),
+      this.invoke("ranking.pagerank.task", { goal: goal ?? null }),
+    ]);
+    return { global: global as { vector: Array<{ id: string; score: number }> }, task: task as { vector: Array<{ id: string; score: number }> } };
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).

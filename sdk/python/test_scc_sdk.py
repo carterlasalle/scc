@@ -184,6 +184,13 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("seeds", out)
         self.assertIn("required", out)
 
+    # trace:exempt reason=unit-test
+    def test_pagerank_vectors_return_global_and_task(self):
+        out = self.scc.pagerankVectors(goal="add numbers")
+        for key in ("global", "task"):
+            self.assertIn("vector", out[key], f"missing vector in {key}: {out[key]}")
+            self.assertTrue(out[key]["vector"], f"empty {key} vector: {out[key]}")
+
     def test_explain_ranking_returns_item_audit(self):
         ranked = self.scc.ranking(goal="add numbers", limit=5)
         first_id = ranked["items"][0]["id"]

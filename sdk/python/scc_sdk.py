@@ -273,6 +273,19 @@ class SCC:
             "profile": profile,
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.pagerank-vectors work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def pagerankVectors(
+        self,
+        goal: str | None = None,
+    ) -> dict[str, Any]:
+        """Raw PPR stage vectors (§123.10): the global vector and the
+        task vector for a goal. No plugin hooks by contract — the
+        structure the symbol projection blends from."""
+        return {
+            "global": self.invoke("ranking.pagerank.global", {}),
+            "task": self.invoke("ranking.pagerank.task", {"goal": goal}),
+        }
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,

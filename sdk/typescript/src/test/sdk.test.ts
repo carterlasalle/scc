@@ -180,6 +180,12 @@ test("rankingTrace() returns items plus seed/required inputs", { skip: skip ? sk
   assert.ok(Array.isArray(out.seeds) && Array.isArray(out.required));
 });
 
+test("pagerankVectors() returns global and task vectors", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().pagerankVectors("add numbers");
+  assert.ok(out.global.vector.length > 0);
+  assert.ok(out.task.vector.length > 0);
+});
+
 test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
   const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
   const firstId = ranked.items[0].id;
