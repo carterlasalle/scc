@@ -194,6 +194,9 @@ pub fn invoke(
         "operations.list" => {
             serde_json::json!({"operations": crate::ops::ids(), "api_version": scc_api::API_VERSION})
         }
+        "operations.capabilities" => {
+            serde_json::to_value(crate::ops::capabilities())?
+        }
         "operations.schema" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             serde_json::to_value(crate::ops::input_schema(id).ok_or_else(|| {

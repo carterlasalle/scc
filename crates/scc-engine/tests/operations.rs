@@ -363,3 +363,16 @@ fn operations_schema_comes_from_request_types() {
     let e = scc_engine::invoke(&root, "operations.schema", serde_json::json!({"id": "nope.nope"}));
     assert!(e.is_err(), "{e:?}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.capabilities-vocabulary verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ops.capabilities
+fn operations_capabilities_lists_vocabulary() {
+    let (_dir, root) = fixture();
+    let v = scc_engine::invoke(&root, "operations.capabilities", serde_json::json!({})).unwrap();
+    for perm in ["repo.read", "graph.read", "graph.contribute", "state.read", "state.write", "network", "subprocess", "operation.register", "ranking.extend", "context.extend"] {
+        assert!(v["permissions"].as_array().unwrap().iter().any(|p| p["id"] == perm), "missing {perm}: {v}");
+    }
+    for ext in ["seed-provider", "rank-feature", "context-section", "startup-section", "operation"] {
+        assert!(v["extension_points"].as_array().unwrap().iter().any(|e| e == ext), "missing {ext}: {v}");
+    }
+}

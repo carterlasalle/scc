@@ -29,6 +29,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "operations.list", description: "List every registered operation id (introspection)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "operations.describe", description: "Describe one operation by id", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "operations.schema", description: "JSON Schema for one operation's input (naming its scc-api request type)", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "operations.capabilities", description: "Capability vocabulary: permission names, extension points, mutation classes", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "workspace.init", description: "Initialize the SCC workspace (.scc/config.yaml + database)", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "workspace.status", description: "Index status, stats, and freshness", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "workspace.session", description: "Pin the current model session (repo, revision, epoch, config, plugins, salt)", mutation: MutationClass::Read, streaming: false },
@@ -226,4 +227,39 @@ pub fn input_schema(id: &str) -> Option<serde_json::Value> {
         _ => return None,
     };
     Some(serde_json::json!({"operation": id, "input": v}))
+}
+
+/// Capability vocabulary (§9): the permission names plugins request, the
+/// extension-point names they register under, and the mutation classes
+/// operations declare. Derived from the [`scc_plugin_api::Permission`] enum
+/// (single source) so docs can never drift from enforcement.
+// trace:v1 id=impl.scc-engine-ops.capabilities work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn capabilities() -> serde_json::Value {
+    serde_json::json!({
+        "permissions": [
+            {"id": "repo.read", "description": "Read repository files"},
+            {"id": "repo.write", "description": "Write repository files"},
+            {"id": "graph.read", "description": "Read the Reality Graph (raw + trusted)"},
+            {"id": "graph.contribute", "description": "Contribute entities/relationships/evidence"},
+            {"id": "evidence.contribute", "description": "Alias scope for graph.contribute (evidence importers)"},
+            {"id": "runtime.contribute", "description": "Contribute runtime observations"},
+            {"id": "state.read", "description": "Read namespaced plugin state"},
+            {"id": "state.write", "description": "Write namespaced plugin state"},
+            {"id": "network", "description": "Network access"},
+            {"id": "subprocess", "description": "Spawn subprocesses"},
+            {"id": "operation.register", "description": "Register custom operations (via manifest operations list)"},
+            {"id": "ranking.extend", "description": "Ranking hooks: seeds, candidates, features, weights, rerank, similarity, profiles"},
+            {"id": "context.extend", "description": "Context sections: task sections, startup sections"},
+            {"id": "renderer.extend", "description": "Export/diagram rendering via export.* operations"},
+        ],
+        "extension_points": [
+            "candidate-provider", "seed-provider", "rank-feature", "edge-weight",
+            "reranker", "similarity", "blend-profile",
+            "context-section", "startup-section",
+            "operation",
+        ],
+        "mutation_classes": ["Read", "Write", "Watch"],
+        "plugin_api_version": scc_plugin_api::PLUGIN_API_VERSION,
+        "api_version": scc_api::API_VERSION,
+    })
 }
