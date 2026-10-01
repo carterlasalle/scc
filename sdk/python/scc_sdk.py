@@ -297,6 +297,24 @@ class SCC:
         candidate providers — the same merge ranking.symbols consumes."""
         return self.invoke("ranking.candidates", {"goal": goal, "limit": limit})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-preview work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def selectionPreview(
+        self,
+        ranked: list[dict[str, Any]],
+        budget: int = 0,
+        quotas: list[dict[str, Any]] | None = None,
+        lam: float | None = None,
+    ) -> dict[str, Any]:
+        """Selection-effects introspection (§123.14): per-stage survivors
+        (after_mmr, after_quotas, after_budget) over caller-supplied rows
+        ``[{id, value, token_cost, kind, group}]``. Default math only."""
+        req: dict[str, Any] = {"ranked": ranked, "budget": budget}
+        if quotas is not None:
+            req["quotas"] = quotas
+        if lam is not None:
+            req["lambda"] = lam
+        return self.invoke("selection.preview", req)
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,

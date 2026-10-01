@@ -199,6 +199,18 @@ class TestSCCSDK(unittest.TestCase):
         for key in ("id", "kind", "name", "score", "reason"):
             self.assertIn(key, out["candidates"][0], f"missing {key}: {out['candidates'][0]}")
 
+    # trace:exempt reason=unit-test
+    def test_selection_preview_shows_stage_survivors(self):
+        rows = [
+            {"id": "a", "value": 3.0, "token_cost": 10, "kind": "symbol"},
+            {"id": "b", "value": 2.0, "token_cost": 10, "kind": "symbol"},
+            {"id": "c", "value": 1.0, "token_cost": 10, "kind": "symbol"},
+        ]
+        out = self.scc.selectionPreview(rows, budget=100)
+        for key in ("after_mmr", "after_quotas", "after_budget"):
+            self.assertIn(key, out, f"missing {key}: {out}")
+        self.assertEqual(set(out["after_budget"]), {"a", "b", "c"})
+
     def test_explain_ranking_returns_item_audit(self):
         ranked = self.scc.ranking(goal="add numbers", limit=5)
         first_id = ranked["items"][0]["id"]

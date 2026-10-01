@@ -193,6 +193,16 @@ test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : 
   assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
 });
 
+test("selectionPreview() shows per-stage survivors", { skip: skip ? skipReason : false }, async () => {
+  const rows = [
+    { id: "a", value: 3.0, token_cost: 10, kind: "symbol" },
+    { id: "b", value: 2.0, token_cost: 10, kind: "symbol" },
+    { id: "c", value: 1.0, token_cost: 10, kind: "symbol" },
+  ];
+  const out = await scc().selectionPreview(rows, { budget: 100 });
+  assert.deepEqual(new Set(out.after_budget), new Set(["a", "b", "c"]));
+});
+
 test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
   const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
   const firstId = ranked.items[0].id;

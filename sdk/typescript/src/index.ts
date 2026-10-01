@@ -371,6 +371,18 @@ export class SCC {
   }
 
   /**
+   * Selection-effects introspection (§123.14): per-stage survivors
+   * (after_mmr, after_quotas, after_budget) over caller-supplied rows.
+   * Default math only: shows WHERE each id drops out.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.selection-preview work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async selectionPreview(ranked: Array<{ id: string; value: number; token_cost?: number; kind?: string; group?: string | null }>, opts?: { budget?: number; quotas?: Array<{ kind: string; fraction: number }>; lambda?: number }): Promise<{ after_mmr: string[]; after_quotas: string[]; after_budget: string[] }> {
+    return this.invoke("selection.preview", {
+      ranked, budget: opts?.budget ?? 0, quotas: opts?.quotas ?? null, lambda: opts?.lambda ?? null,
+    });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).
