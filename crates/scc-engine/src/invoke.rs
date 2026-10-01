@@ -1006,9 +1006,12 @@ fn invoke_context(
             let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
                 scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
             // §73: units model first — external programs use the
-            // structured units without scraping text; text stays.
+            // structured units without scraping text. Text comes from
+            // ctx.structural (owns the HANDLE REFUSED / empty envelopes);
+            // units come from structural_units (model data only).
+            let text = ctx.structural(&req, &store.root, semantic)?;
             let units = ctx.structural_units(&req, &store.root, semantic)?;
-            serde_json::json!({"text": scc_context::structural_source::render_structural(&units), "units": units})
+            serde_json::json!({"text": text, "units": units})
         }
         "surface.compile" => {
             serde_json::to_value(ctx.surface_map()?)?

@@ -416,6 +416,22 @@ fn vector_aliases_match_canonical() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.structural-refusal verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
+fn structural_stale_handle_refused_at_invoke() {
+    // Stale handle -> HANDLE REFUSED envelope (never empty text, never
+    // guessed content). Guards the invoke arm against bypassing the
+    // ctx.structural envelope path.
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    let v = scc_engine::invoke(&root, "context.structural",
+        json!({"files": ["scc://repo/epoch/file/main.py@aaaaaaaaaaaaaaaa"]})).unwrap();
+    let text = v["text"].as_str().unwrap();
+    assert!(text.contains("HANDLE REFUSED"), "{v}");
+    assert!(text.contains("stale"), "{v}");
+    assert!(v["units"].as_array().unwrap().is_empty(), "{v}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.structural-units verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
 fn structural_returns_units_model() {
     // §73: context.structural carries the units model — external
