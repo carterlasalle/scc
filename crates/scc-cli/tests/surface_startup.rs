@@ -130,7 +130,7 @@ fn with_cli_compiler<T>(
 
 #[test]
 // trace:exempt reason=unit-test
-// trace:v1 id=test.scc.surface-startup.rank-cache verifies=REQ-global-rank-cached-per-model-epoch exercises=impl.scc.startup.rank-cache-load
+// trace:v1 id=test.scc.surface-startup.rank-cache verifies=REQ-global-rank-cached-per-model-epoch exercises=impl.scc.startup.rank-cache-pipeline
 fn startup_rank_cache_persists_and_is_reused_across_runs() {
     // Wave 15.2: the per-ModelEpoch global rank cache. Two consecutive
     // `scc context startup` runs: the first stores the entry (miss), the

@@ -623,8 +623,6 @@ fn global_rank_key(epoch: &str, policy: &str, salt: &str, pipeline: &str) -> Str
     format!("rank:global:{}", &h.finalize().to_hex()[..20])
 }
 
-// trace:exempt reason=internal-detail
-fn no_pipeline() -> String { String::new() }
 
 /// Load the per-ModelEpoch global rank cache from the store cache
 /// (key `rank:global:<hash>` over epoch + policy + salt). `None` on any
