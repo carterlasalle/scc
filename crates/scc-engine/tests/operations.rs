@@ -176,6 +176,36 @@ fn registry_covers_every_invoke_arm() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.selection-preview verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.budget-selection
+fn selection_preview_shows_stage_survivors() {
+    // §123.14: `selection.preview` reports per-stage survivors through
+    // the default chain. Quota 0.5 over 300 symbol-tokens admits 1 of 3
+    // at the quota stage; budget keeps it (300 <= 300).
+    let (_dir, root) = fixture();
+    let rows = |ids: &[&str]| -> Vec<serde_json::Value> {
+        ids.iter().map(|id| json!({
+            "id": id, "kind": "symbol", "value": 1.0, "token_cost": 100,
+            "group": "g"})).collect()
+    };
+    let out = scc_engine::invoke(&root, "selection.preview", json!({
+        "ranked": rows(&["a", "b", "c"]),
+        "quotas": [{"kind": "symbol", "fraction": 0.5}],
+        "budget": 300,
+    })).unwrap();
+    assert_eq!(out["after_mmr"].as_array().unwrap().len(), 3, "{out}");
+    assert_eq!(out["after_quotas"].as_array().unwrap().len(), 1, "{out}");
+    assert_eq!(out["after_budget"].as_array().unwrap().len(), 1, "{out}");
+    // Monotone narrowing: each stage is a subset of the previous.
+    let mmr: std::collections::BTreeSet<String> = out["after_mmr"].as_array().unwrap().iter()
+        .map(|x| x.as_str().unwrap().to_string()).collect();
+    for stage in ["after_quotas", "after_budget"] {
+        for x in out[stage].as_array().unwrap() {
+            assert!(mmr.contains(x.as_str().unwrap()), "{x} not in mmr survivors: {out}");
+        }
+    }
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.export-diagram verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.diagram
 fn export_diagram_renders_from_engine() {
     // DoD 5/6: diagram rendering is engine behavior, reachable on every

@@ -491,7 +491,7 @@ pub fn invoke(
             let out = scc_context::selector::mmr_diversify(
                 &ranked,
                 |a: &str, b: &str| {
-                    let (ga, gb) = (group_of(&ranked, &groups, a), group_of(&ranked, &groups, b));
+                    let (ga, gb) = (crate::ranking::group_of2(&ranked, &groups, a), crate::ranking::group_of2(&ranked, &groups, b));
                     crate::ranking::fold_similarity(&sims, a, b, ga, gb)
                 },
                 req.lambda.unwrap_or(0.5),
@@ -520,6 +520,39 @@ pub fn invoke(
             }
             if !ap.diagnostics.is_empty() { out["plugin_diagnostics"] = serde_json::to_value(&ap.diagnostics)?; }
             out
+        }
+        "selection.preview" => {
+            // Selection-effects introspection (§123.14): per-stage
+            // survivors through the DEFAULT chain (MMR → quotas →
+            // budget) over caller-supplied rows. Default math only, no
+            // plugin policies — shows WHERE each id drops out.
+            let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
+            let ranked: Vec<(String, f64)> = req.ranked.iter().map(|e| (e.id.clone(), e.value)).collect();
+            let groups: Vec<Option<String>> = req.ranked.iter().map(|e| e.group.clone()).collect();
+            let sim = |a: &str, b: &str| {
+                let (ga, gb) = (crate::ranking::group_of2(&ranked, &groups, a), crate::ranking::group_of2(&ranked, &groups, b));
+                crate::ranking::default_similarity(ga, gb)
+            };
+            let after_mmr = scc_context::selector::mmr_diversify(
+                &ranked, sim, req.lambda.unwrap_or(0.5), ranked.len());
+            let rows: Vec<(String, String, f64, usize)> = req.ranked.iter()
+                .map(|e| (e.id.clone(), e.kind.clone(), e.value, e.token_cost)).collect();
+            let quotas: Vec<(String, f64)> = req.quotas.unwrap_or_default().iter()
+                .map(|q| (q.kind.clone(), q.fraction)).collect();
+            let budget: usize = req.ranked.iter().map(|e| e.token_cost).sum();
+            let after_quotas = crate::ranking::apply_quotas(&rows, &quotas, budget);
+            let qset: std::collections::BTreeSet<&str> =
+                after_quotas.iter().map(|x| x.as_str()).collect();
+            let items: Vec<scc_core::ContextItem> = req.ranked.iter()
+                .filter(|e| qset.contains(e.id.as_str()))
+                .map(|e| scc_core::ContextItem { id: e.id.clone(), value: e.value,
+                    token_cost: e.token_cost, required: false, group: e.group.clone() }).collect();
+            let keep = crate::ranking::select_with_budget(&items, budget, budget);
+            let after_budget: Vec<String> = keep.into_iter().map(|i| items[i].id.clone()).collect();
+            serde_json::json!({
+                "after_mmr": after_mmr, "after_quotas": after_quotas,
+                "after_budget": after_budget,
+            })
         }
         "selection.budget" | "surface.select" => {
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
@@ -671,11 +704,6 @@ pub fn invoke(
         }
     };
     Ok(out)
-}
-
-// trace:exempt reason=internal-detail
-fn group_of<'a>(ranked: &[(String, f64)], groups: &'a [Option<String>], id: &str) -> Option<&'a str> {
-    ranked.iter().position(|(rid, _)| rid == id).and_then(|i| groups.get(i).and_then(|g| g.as_deref()))
 }
 
 // trace:exempt reason=internal-detail

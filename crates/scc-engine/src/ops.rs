@@ -130,6 +130,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "selection.mmr", description: "MMR diversification over a ranked list", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "selection.quotas", description: "Token-fraction quota selection over ranked rows", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "selection.budget", description: "Value/token budget selection", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "selection.preview", description: "Per-stage selection survivors (MMR → quotas → budget) over caller rows; default math only", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     // source
     OperationDescriptor { id: "source.structural", description: "Alias for context.structural", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     // embeddings (optional semantic ranker)

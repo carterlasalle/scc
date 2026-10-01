@@ -441,6 +441,12 @@ pub fn default_similarity(a_group: Option<&str>, b_group: Option<&str>) -> f64 {
     }
 }
 
+/// Group lookup for a ranked id (parallel groups vec).
+// trace:exempt reason=internal-detail
+pub fn group_of2<'a>(ranked: &[(String, f64)], groups: &'a [Option<String>], id: &str) -> Option<&'a str> {
+    ranked.iter().position(|(rid, _)| rid == id).and_then(|i| groups.get(i).and_then(|g| g.as_deref()))
+}
+
 /// Fold chained similarity providers over one pair: first nonzero wins.
 /// Falls back to [`default_similarity`] when no provider fires.
 // trace:exempt reason=internal-detail
