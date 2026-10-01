@@ -46,6 +46,16 @@ impl<'a> Ranker<'a> {
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
     }
 
+    /// Normalized reference graph (§123 intermediate): trusted
+    /// relationships mapped to reference kinds (call/read/write/…).
+    /// Read-only projection — the reference surface `SystemRanker`
+    /// diffuses over, with per-edge provenance and confidence.
+    // trace:exempt reason=internal-detail
+    pub fn reference_graph(&self) -> crate::Result<Vec<scc_core::ReferenceEdge>> {
+        let ctx = self.ctx();
+        Ok(scc_context::pagerank::build_reference_graph(&ctx.view))
+    }
+
     /// Rank-universe nodes (§123 intermediate): (id, kind) over the
     /// full heterogeneous universe in rank order. Same nodes every
     /// vector is indexed by — the node table for pagerank.global/task.

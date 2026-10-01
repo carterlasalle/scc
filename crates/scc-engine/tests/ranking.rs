@@ -184,6 +184,28 @@ fn seeds_op_merges_lexical_and_plugin() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-ranking.reference-graph-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn reference_graph_op_normalizes_trusted_rels() {
+    // `ranking.reference_graph`: every edge traces to one trusted
+    // relationship — endpoints are known universe nodes.
+    let (_dir, store) = fixture();
+    let syms: Vec<String> = store.all_entities().unwrap().into_iter()
+        .filter(|e| e.kind == scc_core::kinds::SYMBOL).map(|e| e.id).collect();
+    let rel = scc_core::Relationship::new(
+        "rel-0", syms[0].clone(), scc_core::predicates::CALLS, syms[1].clone(),
+        scc_core::Provenance::Extracted);
+    store.insert_relationship(&rel, "a/mod.py").unwrap();
+    let (_g, _c, _s, engine) = ranker_of(&store);
+    let edges = engine.ranking().reference_graph().unwrap();
+    assert_eq!(edges.len(), 1, "{edges:?}");
+    assert_eq!(edges[0].kind, scc_core::ReferenceKind::Call);
+    let nodes: std::collections::BTreeSet<String> =
+        engine.ranking().universe().unwrap().into_iter().map(|(id, _)| id).collect();
+    assert!(nodes.contains(&edges[0].source_symbol));
+    assert!(nodes.contains(&edges[0].target_symbol));
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-ranking.universe-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
 fn universe_op_lists_nodes_with_kinds() {
     // `ranking.universe`: the node table every vector is indexed by.
