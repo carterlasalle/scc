@@ -261,10 +261,10 @@ export class SCC {
 
   /** Multi-step graph traversal (§16): dir out|in|both, optional predicate + where_kind. */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.traverse work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-  async traverse(args: { kind?: string; name?: string; from_ids?: string[]; steps?: Array<{ dir: string; predicate?: string; where_kind?: string; limit?: number }>; limit?: number }): Promise<{ entities: unknown[]; relationships: unknown[] }> {
+  async traverse(args: { kind?: string; name?: string; from_ids?: string[]; steps?: Array<{ dir: string; predicate?: string; where_kind?: string; limit?: number }>; limit?: number; trusted_only?: boolean }): Promise<{ entities: unknown[]; relationships: unknown[]; trusted_only: boolean }> {
     return this.invoke("graph.traverse", {
       kind: args.kind ?? null, name: args.name ?? null,
-      from_ids: args.from_ids ?? [], steps: args.steps ?? [], limit: args.limit ?? 100,
+      from_ids: args.from_ids ?? [], steps: args.steps ?? [], limit: args.limit ?? 100, trusted_only: args.trusted_only ?? true,
     });
   }
 

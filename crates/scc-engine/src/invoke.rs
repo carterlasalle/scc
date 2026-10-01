@@ -90,8 +90,9 @@ pub fn invoke(
         }
         "graph.traverse" => {
             let req: scc_api::TraverseRequest = serde_json::from_value(input)?;
-            let (entities, relationships) = crate::graph::traverse(&store, &req)?;
-            serde_json::json!({"entities": entities, "relationships": relationships})
+            let cc = ctx.engine.ctx();
+            let (entities, relationships) = crate::graph::traverse(&cc, &req)?;
+            serde_json::json!({"entities": entities, "relationships": relationships, "trusted_only": req.trusted_only})
         }
         "graph.entities" | "architecture.components" => serde_json::to_value(crate::graph::components(&store)?)?,
         "graph.flows" | "architecture.flows" => serde_json::to_value(crate::graph::flows(&store)?)?,

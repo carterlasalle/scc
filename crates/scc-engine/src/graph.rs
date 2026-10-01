@@ -65,9 +65,10 @@ pub fn relationships(
 /// Unknown directions fail loudly — never silently walk the wrong way.
 // trace:v1 id=impl.scc-engine-graph.traverse work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn traverse(
-    store: &scc_store::Store,
+    compiler: &scc_context::ContextCompiler<'_>,
     req: &scc_api::TraverseRequest,
 ) -> crate::Result<(Vec<scc_core::Entity>, Vec<scc_core::Relationship>)> {
+    let store = compiler.store;
     use std::collections::{BTreeMap, BTreeSet};
     let mut start_ids: BTreeSet<String> = BTreeSet::new();
     if let Some(kind) = req.kind.as_deref().filter(|k| !k.is_empty()) {
@@ -113,19 +114,37 @@ pub fn traverse(
         let mut step_rels: Vec<scc_core::Relationship> = Vec::new();
         // Deterministic: store queries order by id; frontier is a BTreeSet.
         for id in &frontier {
-            let mut edges: Vec<scc_core::Relationship> = match step.dir.as_str() {
-                "out" => store.relationships_for(id)?,
-                "in" => store.relationships_to(id)?,
-                "both" => {
-                    let mut e = store.relationships_for(id)?;
-                    e.extend(store.relationships_to(id)?);
-                    e.sort_by(|a, b| a.id.cmp(&b.id));
-                    e
+            // Trusted (default): the compiler's TrustedGraphView filters
+            // STALE / low-confidence INFERRED / disallowed provenance —
+            // the same authority every context consumer traverses (§§1.2,
+            // 125). Raw (trusted_only=false) walks store edges verbatim,
+            // explicitly — never silently.
+            let mut edges: Vec<scc_core::Relationship> = if req.trusted_only {
+                match step.dir.as_str() {
+                    "out" => compiler.view.out_edges(id),
+                    "in" => compiler.view.in_edges(id),
+                    "both" => {
+                        let mut e = compiler.view.out_edges(id);
+                        e.extend(compiler.view.in_edges(id));
+                        e.sort_by(|a, b| a.id.cmp(&b.id));
+                        e
+                    }
+                    _ => unreachable!("direction validated above"),
                 }
-                other => {
-                    return Err(crate::EngineError::Other(format!(
-                        "unknown traverse direction '{other}' (use out|in|both)"
-                    )));
+                .into_iter()
+                .cloned()
+                .collect()
+            } else {
+                match step.dir.as_str() {
+                    "out" => store.relationships_for(id)?,
+                    "in" => store.relationships_to(id)?,
+                    "both" => {
+                        let mut e = store.relationships_for(id)?;
+                        e.extend(store.relationships_to(id)?);
+                        e.sort_by(|a, b| a.id.cmp(&b.id));
+                        e
+                    }
+                    _ => unreachable!("direction validated above"),
                 }
             };
             if let Some(p) = step.predicate.as_deref().filter(|s| !s.is_empty()) {

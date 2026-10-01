@@ -192,7 +192,14 @@ pub struct TraverseRequest {
     /// Max entities returned (default 100).
     #[serde(default)]
     pub limit: usize,
+    /// Filter edges/entities through TrustedGraphView (default true).
+    /// False exposes the raw graph explicitly — never silently.
+    #[serde(default = "trusted_on")]
+    pub trusted_only: bool,
 }
+
+// trace:exempt reason=internal-detail
+fn trusted_on() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail

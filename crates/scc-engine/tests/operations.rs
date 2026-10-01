@@ -228,3 +228,21 @@ fn traverse_walks_edges_and_rejects_bad_dir() {
     .unwrap();
     assert!(v.get("entities").is_some() && v.get("relationships").is_some(), "{v}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.traverse-trust-modes verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-graph.traverse
+fn traverse_trusted_only_false_exposes_raw_superset() {
+    let (_dir, root) = fixture();
+    let base = json!({"steps": [{"dir": "both"}], "limit": 50});
+    let mut trusted_in = base.clone();
+    trusted_in["trusted_only"] = json!(true);
+    let mut raw_in = base.clone();
+    raw_in["trusted_only"] = json!(false);
+    let t = scc_engine::invoke(&root, "graph.traverse", trusted_in).unwrap();
+    let r = scc_engine::invoke(&root, "graph.traverse", raw_in).unwrap();
+    assert_eq!(r["trusted_only"], json!(false));
+    assert_eq!(t["trusted_only"], json!(true));
+    let tn = t["relationships"].as_array().map(|a| a.len()).unwrap_or(0);
+    let rn = r["relationships"].as_array().map(|a| a.len()).unwrap_or(0);
+    assert!(rn >= tn, "raw exposes a superset of trusted ({rn} vs {tn}): {t} / {r}");
+}

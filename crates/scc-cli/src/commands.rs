@@ -883,14 +883,19 @@ pub fn cmd_traverse(
         });
     }
     let store = open_store(root)?;
+    let config = load_config(root)?;
+    let stale = crate::stale_paths(&store)?;
+    let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
+    let cc = engine.ctx();
     let (entities, rels) = scc_engine::graph::traverse(
-        &store,
+        &cc,
         &scc_api::TraverseRequest {
             kind: kind.map(str::to_string),
             name: name.map(str::to_string),
             from_ids: from.to_vec(),
             steps: parsed,
             limit,
+            trusted_only: true,
         },
     )
     .map_err(engine_err)?;

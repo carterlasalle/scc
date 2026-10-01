@@ -207,12 +207,13 @@ class SCC:
         """List registered engine operations (introspection, via RPC)."""
         return self.invoke("operations.list", {})
 
-    def traverse(self, kind=None, name=None, from_ids=None, steps=None, limit=100):
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.traverse work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def traverse(self, kind=None, name=None, from_ids=None, steps=None, limit=100, trusted_only=True):
         """Multi-step graph traversal (§16). Steps: dicts with
         dir (out|in|both), optional predicate, optional where_kind."""
         return self.invoke("graph.traverse", {
             "kind": kind, "name": name, "from_ids": from_ids or [],
-            "steps": steps or [], "limit": limit,
+            "steps": steps or [], "limit": limit, "trusted_only": trusted_only,
         })
 
     def query(self, kind=None, name=None):
