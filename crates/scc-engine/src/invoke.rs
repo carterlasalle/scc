@@ -463,6 +463,22 @@ pub fn invoke(
             let s = scc_context::pagerank::final_importance(f("task_ppr"), f("global_ppr"), f("lexical"), f("semantic"), f("confidence"), f("criticality"), f("change_risk"), f("novelty"), has_task);
             serde_json::json!({"score": s})
         }
+        "ranking.score_entries" => {
+            let rows: Vec<crate::ranking::ScoreRow> = input.get("entries")
+                .and_then(|v| v.as_array()).map(|arr| arr.iter().map(|e| {
+                    let f = |k: &str| e.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    crate::ranking::ScoreRow {
+                        id: e.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                        task_ppr: f("task_ppr"), global_ppr: f("global_ppr"),
+                        lexical: f("lexical"), semantic: f("semantic"),
+                        confidence: f("confidence"), criticality: f("criticality"),
+                        change_risk: f("change_risk"), novelty: f("novelty"),
+                        has_task: e.get("has_task").and_then(|v| v.as_bool()).unwrap_or(true),
+                    }
+                }).collect()).unwrap_or_default();
+            let out = crate::ranking::score_entries(&rows);
+            serde_json::json!({"scores": out.iter().map(|(id, s)| serde_json::json!({"id": id, "score": s})).collect::<Vec<_>>()})
+        }
         "ranking.edge_weight" => {
             let predicate = input.get("predicate").and_then(|v| v.as_str()).unwrap_or("calls");
             let confidence = input.get("confidence").and_then(|v| v.as_f64()).unwrap_or(1.0);

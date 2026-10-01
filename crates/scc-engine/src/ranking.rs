@@ -471,6 +471,37 @@ pub fn apply_edge_weight(base: f64, mode: &str, value: f64) -> f64 {
 }
 
 
+/// One explicit feature row for [`score_entries`]: all eight core
+/// inputs plus the task-mode flag, keyed by id.
+// trace:exempt reason=internal-detail
+pub struct ScoreRow<'a> {
+    pub id: &'a str,
+    pub task_ppr: f64,
+    pub global_ppr: f64,
+    pub lexical: f64,
+    pub semantic: f64,
+    pub confidence: f64,
+    pub criticality: f64,
+    pub change_risk: f64,
+    pub novelty: f64,
+    pub has_task: bool,
+}
+
+/// Pure per-entry blend (§123 intermediate `ranking.score_entries`):
+/// `final_importance` over each explicit row. No store, no hooks — the
+/// same math `symbols_with_hooks` blends from, exposed for audit and
+/// for callers scoring their own feature rows.
+// trace:exempt reason=internal-detail
+pub fn score_entries(rows: &[ScoreRow<'_>]) -> Vec<(String, f64)> {
+    rows.iter().map(|r| (
+        r.id.to_string(),
+        scc_context::pagerank::final_importance(
+            r.task_ppr, r.global_ppr, r.lexical, r.semantic,
+            r.confidence, r.criticality, r.change_risk, r.novelty, r.has_task,
+        ),
+    )).collect()
+}
+
 // trace:exempt reason=internal-detail
 pub fn mmr_select(ranked: &[(String, f64)], similar: &dyn Fn(&str, &str) -> f64, lambda: f64, budget: usize) -> Vec<String> {
     scc_context::selector::mmr_diversify(ranked, similar, lambda, budget.max(1))

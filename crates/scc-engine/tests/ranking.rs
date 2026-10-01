@@ -184,6 +184,25 @@ fn seeds_op_merges_lexical_and_plugin() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-ranking.score-entries-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn score_entries_op_matches_single_blend() {
+    // `ranking.score_entries`: batched pure blend — one row scores
+    // exactly what ranking.final_importance gives for the same inputs,
+    // and all-zeros scores 0.
+    use scc_engine::ranking::{score_entries, ScoreRow};
+    let rows = vec![
+        ScoreRow { id: "a", task_ppr: 0.9, global_ppr: 0.5, lexical: 0.8, semantic: 0.7, confidence: 0.9, criticality: 1.0, change_risk: 0.4, novelty: 0.5, has_task: true },
+        ScoreRow { id: "b", task_ppr: 0.0, global_ppr: 0.0, lexical: 0.0, semantic: 0.0, confidence: 0.0, criticality: 0.0, change_risk: 0.0, novelty: 0.0, has_task: true },
+    ];
+    let out = score_entries(&rows);
+    assert_eq!(out.len(), 2);
+    let single = scc_context::pagerank::final_importance(0.9, 0.5, 0.8, 0.7, 0.9, 1.0, 0.4, 0.5, true);
+    assert!((out[0].1 - single).abs() < 1e-12, "{out:?}");
+    assert_eq!(out[1].1, 0.0);
+    assert_eq!(out[0].0, "a");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-ranking.project-symbols-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
 fn project_symbols_op_maps_universe_to_symbols() {
     // `ranking.project_symbols`: projecting the global vector gives
