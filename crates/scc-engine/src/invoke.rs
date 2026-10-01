@@ -104,8 +104,8 @@ pub fn invoke(
             let (entities, relationships) = crate::graph::traverse(&cc, &req)?;
             serde_json::json!({"entities": entities, "relationships": relationships, "trusted_only": req.trusted_only})
         }
-        "graph.entities" | "architecture.components" | "model.components" => serde_json::to_value(crate::graph::components(&store)?)?,
-        "graph.flows" | "architecture.flows" | "model.flows" => serde_json::to_value(crate::graph::flows(&store)?)?,
+        "graph.entities" | "architecture.components" => serde_json::to_value(crate::graph::components(&store)?)?,
+        "graph.flows" | "architecture.flows" => serde_json::to_value(crate::graph::flows(&store)?)?,
         "graph.relationships" => {
             let subject = input.get("subject").and_then(|v| v.as_str());
             let predicate = input.get("predicate").and_then(|v| v.as_str());
@@ -211,7 +211,7 @@ pub fn invoke(
             let session: crate::workspace::Session = serde_json::from_value(input.get("session").cloned().unwrap_or(serde_json::Value::Null))?;
             serde_json::json!({"current": crate::workspace::session_is_current(&store, &config, &session)?})
         }
-        "index.status" | "index.paths" => {
+        "index.status" => {
             let s = status_value(&store)?;
             serde_json::to_value(&s)?
         }
@@ -253,7 +253,7 @@ pub fn invoke(
             let (pairs, enriched) = crate::misc::cochange(root, min)?;
             serde_json::json!({"pairs": pairs, "enriched": enriched})
         }
-        "integrity.invariants" | "architecture.invariants" | "model.invariants" => serde_json::to_value(crate::misc::check_invariants(&store)?)?,
+        "integrity.invariants" | "architecture.invariants" => serde_json::to_value(crate::misc::check_invariants(&store)?)?,
         "integrity.ci" => {
             let max = input.get("max_severity").and_then(|v| v.as_str()).unwrap_or("medium");
             let violations = crate::misc::check_invariants(&store)?;
