@@ -184,6 +184,24 @@ fn seeds_op_merges_lexical_and_plugin() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-ranking.universe-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn universe_op_lists_nodes_with_kinds() {
+    // `ranking.universe`: the node table every vector is indexed by.
+    // Kinds let callers walk the symbol slice; nodes match pagerank.global.
+    let (_dir, store) = fixture();
+    let (_g, _c, _s, engine) = ranker_of(&store);
+    let r = engine.ranking();
+    let nodes = r.universe().unwrap();
+    assert_eq!(nodes.len(), 20, "universe = 20 fixture symbols");
+    assert!(nodes.iter().all(|(_, k)| k == "symbol"), "{nodes:?}");
+    let gv = r.pagerank_global().unwrap();
+    assert_eq!(nodes.len(), gv.len(), "universe is the vector index");
+    for ((id, _), (gid, _)) in nodes.iter().zip(gv.iter()) {
+        assert_eq!(id, gid, "same order, same ids");
+    }
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-ranking.edges-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
 fn edges_op_lists_universe() {
     // §123.12: `ranking.edges` serves the structure the vectors diffuse

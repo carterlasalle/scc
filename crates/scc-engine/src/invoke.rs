@@ -403,6 +403,10 @@ pub fn invoke(
                 "specificity": i.specificity, "plugin_features": i.plugin_features,
             })).collect::<Vec<_>>()})
         }
+        "ranking.universe" => {
+            let nodes = engine.ranking().universe()?;
+            serde_json::json!({"nodes": nodes.iter().map(|(id, k)| serde_json::json!({"id": id, "kind": k})).collect::<Vec<_>>()})
+        }
         "ranking.edges" => {
             let edges = engine.ranking().rank_edges()?;
             serde_json::json!({"edges": edges.iter().map(|(s, p, o, w)| serde_json::json!({"subject": s, "predicate": p, "object": o, "weight": w})).collect::<Vec<_>>()})

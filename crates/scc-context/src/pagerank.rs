@@ -775,6 +775,13 @@ impl<'a> SystemRanker<'a> {
         &self.nodes
     }
 
+    /// Entity kinds parallel to [`SystemRanker::nodes`] (index i in
+    /// every vector maps to `kinds()[i]`). Powers `ranking.universe`.
+    // trace:exempt reason=internal-detail
+    pub fn kinds(&self) -> &[String] {
+        &self.kinds
+    }
+
     /// Surviving rank-universe edges as (subject, predicate, object,
     /// base weight): pre-aggregation triples, id-resolved. Deterministic
     /// (construction order). Powers `ranking.edges` (§123.12).

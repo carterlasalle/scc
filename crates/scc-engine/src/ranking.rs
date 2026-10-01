@@ -46,6 +46,16 @@ impl<'a> Ranker<'a> {
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
     }
 
+    /// Rank-universe nodes (§123 intermediate): (id, kind) over the
+    /// full heterogeneous universe in rank order. Same nodes every
+    /// vector is indexed by — the node table for pagerank.global/task.
+    // trace:exempt reason=internal-detail
+    pub fn universe(&self) -> crate::Result<Vec<(String, String)>> {
+        let ctx = self.ctx();
+        let ranker = scc_context::pagerank::SystemRanker::new(&ctx.view);
+        Ok(ranker.nodes().iter().cloned().zip(ranker.kinds().iter().cloned()).collect())
+    }
+
     /// Raw rank-universe edges (§123.12): (subject, predicate, object,
     /// base weight), pre-aggregation. No plugin hooks by contract — the
     /// structure the vectors diffuse over.
