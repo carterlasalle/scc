@@ -176,6 +176,29 @@ fn registry_covers_every_invoke_arm() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.selection-required verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.budget-selection
+fn selection_required_unions_engine_and_plugin() {
+    // `selection.required`: engine never-omit set + plugin coverage
+    // union. Empty repo ⇒ empty engine set; a coverage provider adds one.
+    let (_dir, root) = fixture();
+    let base = scc_engine::invoke(&root, "selection.required",
+        serde_json::json!({"goal": "hello"})).unwrap();
+    assert_eq!(base["plugin_contributed"], serde_json::json!(0), "{base}");
+    let plugdir = root.join(".scc").join("plugins").join("acme.cov");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.cov\"\nname = \"Cov\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.coverage\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"coverage:acme.req\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    std::fs::write(plugdir.join("plugin.py"),
+        "import json, sys\nprint(json.dumps({\"output\": {\"required\": [\"entry:acme\"]}}))\n").unwrap();
+    let out = scc_engine::invoke(&root, "selection.required",
+        serde_json::json!({"goal": "hello"})).unwrap();
+    assert!(out["required"].as_array().unwrap().iter().any(|x| x == "entry:acme"), "{out}");
+    assert_eq!(out["plugin_contributed"], serde_json::json!(1), "{out}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.selection-preview verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.budget-selection
 fn selection_preview_shows_stage_survivors() {
     // §123.14: `selection.preview` reports per-stage survivors through

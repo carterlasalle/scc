@@ -521,6 +521,25 @@ pub fn invoke(
             if !ap.diagnostics.is_empty() { out["plugin_diagnostics"] = serde_json::to_value(&ap.diagnostics)?; }
             out
         }
+        "selection.required" => {
+            // Required-coverage set (§123: never-omit entries): engine
+            // required_ids + plugin coverage providers, unioned. Same
+            // inputs symbols_with_hooks blends criticality from.
+            let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, goal);
+            let mut required = engine.ranking().required_with(&hooks)?;
+            let mut contributed = 0usize;
+            for cov in &hooks.coverage {
+                for id in cov(goal) {
+                    if required.insert(id) { contributed += 1; }
+                }
+            }
+            let mut ids: Vec<String> = required.into_iter().collect();
+            ids.sort();
+            serde_json::json!({"required": ids, "plugin_contributed": contributed})
+        }
         "selection.preview" => {
             // Selection-effects introspection (§123.14): per-stage
             // survivors through the DEFAULT chain (MMR → quotas →

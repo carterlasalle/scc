@@ -112,6 +112,16 @@ impl<'a> Ranker<'a> {
         (acc, applied)
     }
 
+    /// Engine required-coverage base set (entry ids `build_surface`
+    /// partitions on): invariant/invocation/flow/state-owner entries.
+    /// The op unions plugin coverage providers over this.
+    // trace:exempt reason=internal-detail
+    pub fn required_with(&self, _hooks: &RankHooks) -> crate::Result<std::collections::BTreeSet<String>> {
+        let ctx = self.ctx();
+        let map = scc_context::surface::compile_surface_map(&ctx);
+        Ok(scc_context::surface::required_ids(&map, &ctx))
+    }
+
     /// Task-seed merge for goal (§123.11): lexical seeds + plugin
     /// providers, weights summed by id. Shared by `ranking.seeds` and
     /// `symbols_with_hooks` — one merge, two callers.
