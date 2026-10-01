@@ -237,6 +237,34 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.viewer-panel verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.viewer-panels
+fn viewer_panel_plugin_returns_structured_data() {
+    // §124 item 32: a `viewer-panel:*` extension returns structured
+    // title/html through `viewer.panels`, provenance-tagged. Empty html
+    // contributes nothing (no empty panels).
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.pan");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.pan\"\nname = \"Pan\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"viewer.panel\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"viewer-panel:acme.taint\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nprint(json.dumps({\"output\": {\"title\": \"Taint\", \"html\": \"<p>tainted</p>\"}}))\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let out = scc_engine::invoke(&root, "viewer.panels", serde_json::json!({})).unwrap();
+    let panels = out["panels"].as_array().unwrap();
+    assert_eq!(panels.len(), 1, "{out}");
+    assert_eq!(panels[0]["id"], serde_json::json!("acme.taint"), "{out}");
+    assert_eq!(panels[0]["plugin"], serde_json::json!("acme.pan"), "{out}");
+    assert!(panels[0]["html"].as_str().unwrap().contains("tainted"), "{out}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.exporter verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-invoke.exporter-plugins
 fn exporter_plugin_renders_unknown_format() {
     // §124 item 31: an `exporter:<format>` extension renders a format the

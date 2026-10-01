@@ -207,6 +207,63 @@ pub fn verify_diagnostics(
     (out, notes)
 }
 
+/// Viewer-panel contributions (§124 item 32): every `viewer-panel:*`
+/// extension contributes one structured data panel to the viewer via the
+/// plugin's `viewer.panel` op (input: panel id). Output is data the CLI
+/// renders into the viewer nav/pages — never arbitrary JS (spec §104).
+/// Each panel carries provenance (plugin id + extension); required-panel
+/// failure is an inline error panel, else the panel is skipped with a note.
+// trace:v1 id=impl.scc-engine-plugins.viewer-panels work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn viewer_panels(
+    root: &std::path::Path,
+    config: &scc_indexer::Config,
+) -> (Vec<serde_json::Value>, Vec<String>) {
+    let ap = active(root, config);
+    let mut panels = Vec::new();
+    let mut notes = Vec::new();
+    let specs: Vec<(String, String, String)> = ap
+        .plugins
+        .iter()
+        .flat_map(|pl| {
+            pl.manifest.extensions.iter()
+                .filter(|e| e.extension_type == "viewer-panel")
+                .map(|e| (pl.manifest.id.clone(), e.id.clone(), pl.manifest.failure_policy.clone()))
+        })
+        .collect();
+    for (pid, ext_id, policy) in specs {
+        let plug = match ap.plugins.iter().find(|pl| pl.manifest.id == pid).cloned() {
+            Some(pl) => pl,
+            None => continue,
+        };
+        match scc_plugin_host::call(&plug, "viewer.panel", serde_json::json!({"panel": ext_id}), None) {
+            Ok(v) => {
+                let title = v.get("title").and_then(|x| x.as_str()).unwrap_or(&ext_id).to_string();
+                let html = v.get("html").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                // Spec §104: no arbitrary plugin JS in the viewer by
+                // default. Script-bearing panels are dropped loudly.
+                if html.to_lowercase().contains("<script") {
+                    notes.push(format!("viewer panel {ext_id} from {pid} skipped (inline <script> not allowed)"));
+                } else if !html.trim().is_empty() {
+                    panels.push(serde_json::json!({
+                        "id": ext_id, "plugin": pid, "title": title, "html": html,
+                    }));
+                }
+            }
+            Err(e) => {
+                if policy == "required" {
+                    panels.push(serde_json::json!({
+                        "id": ext_id, "plugin": pid, "title": ext_id,
+                        "html": format!("panel failed: {e}"),
+                    }));
+                } else {
+                    notes.push(format!("viewer panel {ext_id} from {pid} skipped ({e})"));
+                }
+            }
+        }
+    }
+    (panels, notes)
+}
+
 /// Deterministic extension order (§19): priority ascending, plugin id
 /// ascending, then before/after DAG edges. Unknown references and cycles
 /// are startup errors — never silent misordering.

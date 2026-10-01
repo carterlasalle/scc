@@ -179,6 +179,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "export.snap", description: "Alias for export.system_ir format=capsule.md", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "export.capsule", description: "Alias for export.system_ir format=capsule.md", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "diagram.render", description: "Alias for export.diagram", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "viewer.panels", description: "Plugin viewer data panels (structured title/html + provenance)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "viewer.snapshot", description: "Viewer snapshots are CLI-local browser capture; not an engine operation", mutation: MutationClass::Read, streaming: false , stability: Stability::Internal },
     // integrity / integrations / lessons / setup
     OperationDescriptor { id: "integrity.invariants", description: "Alias for architecture.invariants", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
@@ -285,7 +286,7 @@ pub fn capabilities() -> serde_json::Value {
         "extension_points": [
             "candidate-provider", "seed-provider", "rank-feature", "edge-weight",
             "reranker", "similarity", "blend-profile", "coverage", "verify-diagnostic",
-            "context-section", "startup-section", "exporter",
+            "context-section", "startup-section", "exporter", "viewer-panel",
             "operation",
         ],
         "mutation_classes": ["Read", "Write", "Watch"],

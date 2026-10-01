@@ -295,6 +295,13 @@ pub fn invoke(
             serde_json::to_value(crate::state::lessons_list(root, limit)?)?
         }
         "beads.list" | "beads.active" => serde_json::to_value(crate::state::beads(root, 20)?)?,
+        "viewer.panels" => {
+            // Plugin viewer panels (§124 item 32): structured data the CLI
+            // renders into viewer pages — same provenance pattern as the
+            // other contribution points, one seam every transport inherits.
+            let (panels, notes) = crate::plugins::viewer_panels(root, &config);
+            serde_json::json!({"panels": panels, "skipped": notes})
+        }
         "viewer.snapshot" => {
             return Err(crate::EngineError::Other("viewer.snapshot is CLI-local browser capture; not an engine operation".into()));
         }
