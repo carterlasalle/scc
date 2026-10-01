@@ -237,6 +237,29 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.verify-diagnostic verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.verify-diagnostics
+fn verify_diagnostic_plugin_appends_provenance_section() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    let plugdir = root.join(".scc").join("plugins").join("acme.ver");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.ver\"\nname = \"Ver\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"verify.diagnostic\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"verify-diagnostic:acme.stale\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nprint(json.dumps({\"output\": {\"diagnostic\": \"stale: x\"}}))\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let out = scc_engine::invoke(&root, "context.verify", serde_json::json!({})).unwrap();
+    let content = out["content"].as_str().unwrap_or("");
+    assert!(content.contains("# PLUGIN VERIFY DIAGNOSTIC acme.stale (from acme.ver"), "{content}");
+    assert!(content.contains("stale: x"), "{content}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.startup-section verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.startup-sections
 fn startup_section_plugin_appends_provenance_section() {
     use std::io::Write;

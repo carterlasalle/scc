@@ -157,6 +157,56 @@ pub fn startup_sections(
     (out, notes)
 }
 
+/// Verify-diagnostic contributions (§124 item 30): every
+/// `verify-diagnostic:*` extension renders one findings section into the
+/// verify pack via the plugin's `verify.diagnostic` op (no input).
+/// Output `diagnostic` markdown is spliced verbatim under a provenance
+/// header. Failures follow policy: required = hard error text inline,
+/// else skipped with a diagnostic note.
+// trace:v1 id=impl.scc-engine-plugins.verify-diagnostics work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn verify_diagnostics(
+    root: &std::path::Path,
+    config: &scc_indexer::Config,
+) -> (String, Vec<String>) {
+    let ap = active(root, config);
+    let mut out = String::new();
+    let mut notes: Vec<String> = Vec::new();
+    let specs: Vec<(String, String, String)> = ap
+        .plugins
+        .iter()
+        .flat_map(|p| {
+            p.manifest.extensions.iter().filter(|e| e.extension_type == "verify-diagnostic").map(|e| {
+                (p.manifest.id.clone(), e.id.clone(), p.manifest.failure_policy.clone())
+            })
+        })
+        .collect();
+    for (pid, ext_id, policy) in specs {
+        let plug = match ap.plugins.iter().find(|p| p.manifest.id == pid).cloned() {
+            Some(p) => p,
+            None => continue,
+        };
+        let input = serde_json::json!({"diagnostic": ext_id});
+        match scc_plugin_host::call(&plug, "verify.diagnostic", input, None) {
+            Ok(v) => {
+                let text = v.get("diagnostic").and_then(|s| s.as_str()).unwrap_or("");
+                if !text.trim().is_empty() {
+                    out.push_str(&format!("\n# PLUGIN VERIFY DIAGNOSTIC {ext_id} (from {pid} — plugin content, not verified facts)\n"));
+                    out.push_str(text.trim());
+                    out.push('\n');
+                }
+            }
+            Err(e) => {
+                if policy == "required" {
+                    out.push_str(&format!("\n# PLUGIN VERIFY DIAGNOSTIC {ext_id} from {pid} FAILED: {e}\n"));
+                } else {
+                    notes.push(format!("verify diagnostic {ext_id} from {pid} skipped ({e})"));
+                }
+            }
+        }
+    }
+    (out, notes)
+}
+
 /// Deterministic extension order (§19): priority ascending, plugin id
 /// ascending, then before/after DAG edges. Unknown references and cycles
 /// are startup errors — never silent misordering.

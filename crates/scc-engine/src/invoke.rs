@@ -767,7 +767,16 @@ fn invoke_context(
         }
         "context.verify" => {
             let unbounded = input.get("unbounded").and_then(|v| v.as_bool()).unwrap_or(false);
-            serde_json::to_value(ctx.verify(unbounded)?)?
+            let mut pack = ctx.verify(unbounded)?;
+            // Plugin verify diagnostics (§124 item 30): appended by the
+            // engine so every transport delivers them. Notes inline (the
+            // verify pack surfaces warnings as content).
+            let (sections, notes) = crate::plugins::verify_diagnostics(&store.root, config);
+            pack.content.push_str(&sections);
+            for n in notes {
+                pack.content.push_str(&format!("\n(verify diagnostic skipped: {n})\n"));
+            }
+            serde_json::to_value(pack)?
         }
         "context.structural" | "source.structural" => {
             let req: scc_api::StructuralRequest = serde_json::from_value(input)?;
