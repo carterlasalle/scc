@@ -159,6 +159,29 @@ test("operations() lists the registry via RPC", { skip: skip ? skipReason : fals
   assert.ok(out.operations.includes("viewer.panels"));
 });
 
+test("taskContext({recordVisibility:false}) skips the ledger", { skip: skip ? skipReason : false }, async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "scc-sdk-vis-"));
+  mkdirSync(join(dir, ".git"));
+  writeFileSync(join(dir, "a.py"), "def add(a, b):\n    return a + b\n");
+  const client = new SCC({ bin: sccBin ?? undefined, cwd: dir });
+  clients.push(client);
+  await client.index();
+  try {
+    const first = await client.taskContext("add numbers", { recordVisibility: false });
+    assert.ok(first.delta_ids.length > 0);
+    const second = await client.taskContext("add numbers", { recordVisibility: false });
+    assert.deepEqual(first.delta_ids, second.delta_ids);
+    const third = await client.taskContext("add numbers");
+    assert.deepEqual(first.delta_ids, third.delta_ids);
+    const fourth = await client.taskContext("add numbers");
+    assert.ok(fourth.delta_ids.length < third.delta_ids.length);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("non-zero scc exit rejects with stderr", { skip: skip ? skipReason : false }, async () => {
   // A fake binary that fails with a distinctive stderr message.
   const fakeBin = join(fixtureDir!, "fake-scc");

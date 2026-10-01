@@ -152,6 +152,35 @@ class TestSCCSDK(unittest.TestCase):
             self.assertIn(feat, first["features"], f"missing feature {feat}: {first['features']}")
 
     # trace:exempt reason=unit-test
+    # trace:exempt reason=unit-test
+    def test_task_context_record_visibility_false_skips_ledger(self):
+        # Fresh repo: nothing visible yet, so the delta is non-empty.
+        tmp = tempfile.mkdtemp(prefix="scc-sdk-vis-")
+        (Path(tmp) / ".git").mkdir()
+        (Path(tmp) / "a.py").write_text(A_PY)
+        vis = SCC(bin=BIN, cwd=tmp)
+        vis.index()
+        try:
+            first = vis.taskContext("add numbers", recordVisibility=False)
+            self.assertTrue(first["delta_ids"], f"expected delta ids: {first}")
+            second = vis.taskContext("add numbers", recordVisibility=False)
+            self.assertEqual(first["delta_ids"], second["delta_ids"],
+                             "unrecorded ids resurface verbatim")
+            # Recording consumes the delta: a default call then sees less.
+            third = vis.taskContext("add numbers")
+            self.assertEqual(first["delta_ids"], third["delta_ids"],
+                             "default sees the same unrecorded ids")
+            fourth = vis.taskContext("add numbers")
+            self.assertTrue(
+                set(fourth["delta_ids"]) < set(third["delta_ids"]),
+                f"recorded ids must shrink the next delta: {third['delta_ids']} vs {fourth['delta_ids']}",
+            )
+        finally:
+            try:
+                vis.close()
+            except Exception:
+                pass
+
     def test_operations_lists_registry(self):
         out = self.scc.operations()
         self.assertIn("context.task", out["operations"])
