@@ -204,8 +204,17 @@ pub fn invoke(
         },
         "graph.entity.get" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let all = store.all_entities()?;
-            serde_json::to_value(all.into_iter().find(|e| e.id == id))?
+            let found = store.all_entities()?.into_iter().find(|e| e.id == id);
+            match found {
+                None => serde_json::json!({"entity": null, "trusted": false, "reason": "unknown id"}),
+                Some(e) => {
+                    let cc = ctx.engine.ctx();
+                    match cc.view.entity(&e.id) {
+                        Some(_) => serde_json::json!({"entity": e, "trusted": true, "reason": null}),
+                        None => serde_json::json!({"entity": e, "trusted": false, "reason": "hidden by TrustedGraphView (stale evidence or below trust floor)"}),
+                    }
+                }
+            }
         }
         "architecture.drift" => serde_json::to_value(crate::misc::drift(&store)?)?,
         "architecture.cochange" => {

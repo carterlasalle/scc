@@ -246,3 +246,17 @@ fn traverse_trusted_only_false_exposes_raw_superset() {
     let rn = r["relationships"].as_array().map(|a| a.len()).unwrap_or(0);
     assert!(rn >= tn, "raw exposes a superset of trusted ({rn} vs {tn}): {t} / {r}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.entity-get-trust verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-graph.traverse
+fn entity_get_reports_trust_envelope() {
+    let (_dir, root) = fixture();
+    let rels = scc_engine::invoke(&root, "graph.relationships", json!({"limit": 5})).unwrap();
+    let id = rels.as_array().and_then(|a| a.first()).and_then(|r| r.get("subject")).and_then(|s| s.as_str()).unwrap_or("missing");
+    let v = scc_engine::invoke(&root, "graph.entity.get", json!({"id": id})).unwrap();
+    assert_eq!(v["trusted"], json!(true), "fresh entity is trusted: {v}");
+    assert!(v["entity"]["id"] == json!(id), "{v}");
+    let v = scc_engine::invoke(&root, "graph.entity.get", json!({"id": "no-such-id"})).unwrap();
+    assert_eq!(v["trusted"], json!(false), "{v}");
+    assert!(v["entity"].is_null(), "{v}");
+}
