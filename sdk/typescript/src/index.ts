@@ -53,6 +53,26 @@ export interface TaskContextArtifact {
   token_count: number;
 }
 
+/** Per-symbol feature decomposition behind one ranked entry (plus plugin features). */
+// trace:v1 id=impl.sdk-typescript-src-index.rank-features work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+export interface RankFeatures {
+  task_ppr: number; global_ppr: number; lexical: number; semantic: number;
+  confidence: number; criticality: number; change_risk: number; novelty: number;
+}
+
+/** One ranked symbol: blended score, position, decomposition, plugin features. */
+// trace:v1 id=impl.sdk-typescript-src-index.rank-item work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+export interface RankItem {
+  id: string; rank: number; position: number; features: RankFeatures;
+  specificity: number; reasons: string[]; plugin_features: Record<string, number>;
+}
+
+/** Verbatim `ranking.symbols` envelope: items plus omission diagnostics. */
+// trace:v1 id=impl.sdk-typescript-src-index.rank-result work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+export interface RankResult {
+  items: RankItem[]; omitted_ids: string[]; warnings: string[];
+}
+
 /** Result of `scc index`. */
 // trace:v1 id=impl.sdk-typescript-src-index.index-result work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
 export interface IndexResult {
@@ -242,6 +262,21 @@ export class SCC {
   // trace:v1 id=impl.sdk-typescript-src-index-scc.surface-map work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async surfaceMap(goal?: string, budget?: number): Promise<{ text: string; result: unknown }> {
     return this.invoke("surface.build", { task: goal ?? null, budget, explain: false });
+  }
+
+  /**
+   * Rank symbols for a goal through the full blend (task/global PPR,
+   * lexical/semantic, confidence, criticality, change risk, novelty,
+   * plus any active plugin features). Returns the RankResult envelope
+   * verbatim: `{items: [{id, rank, position, features, specificity,
+   * reasons, plugin_features}], omitted_ids, warnings}`.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async ranking(args: { goal?: string; limit?: number; explain?: boolean; profile?: string }): Promise<RankResult> {
+    return this.invoke("ranking.symbols", {
+      goal: args.goal ?? null, limit: args.limit ?? 50,
+      explain: args.explain ?? false, profile: args.profile ?? null,
+    });
   }
 
   /**

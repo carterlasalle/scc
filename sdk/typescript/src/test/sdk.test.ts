@@ -138,6 +138,18 @@ test("structuralSource() renders units for files and goals", { skip: skip ? skip
   assert.match(byGoal, /representation:/);
 });
 
+test("ranking() returns items with feature decomposition", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().ranking({ goal: "add numbers", limit: 5 });
+  assert.ok(out.items.length > 0);
+  const first = out.items[0];
+  assert.ok(first.id);
+  assert.equal(typeof first.rank, "number");
+  for (const feat of ["task_ppr", "global_ppr", "lexical", "semantic", "confidence", "criticality", "change_risk", "novelty"] as const) {
+    assert.equal(typeof first.features[feat], "number", `missing feature ${feat}`);
+  }
+  assert.ok(first.plugin_features !== undefined);
+});
+
 test("operations() lists the registry via RPC", { skip: skip ? skipReason : false }, async () => {
   const out = await scc().operations();
   assert.ok(out.operations.length > 50);

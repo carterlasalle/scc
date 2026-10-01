@@ -141,6 +141,17 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("representation:", by_goal)
 
     # trace:exempt reason=unit-test
+    def test_ranking_returns_items_with_feature_decomposition(self):
+        out = self.scc.ranking(goal="add numbers", limit=5)
+        self.assertIn("items", out)
+        self.assertTrue(out["items"], f"empty ranking: {out}")
+        first = out["items"][0]
+        for key in ("id", "rank", "position", "features", "specificity", "reasons", "plugin_features"):
+            self.assertIn(key, first, f"missing {key}: {first}")
+        for feat in ("task_ppr", "global_ppr", "lexical", "semantic", "confidence", "criticality", "change_risk", "novelty"):
+            self.assertIn(feat, first["features"], f"missing feature {feat}: {first['features']}")
+
+    # trace:exempt reason=unit-test
     def test_operations_lists_registry(self):
         out = self.scc.operations()
         self.assertIn("context.task", out["operations"])

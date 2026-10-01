@@ -178,6 +178,27 @@ class SCC:
             "explain": False,
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def ranking(
+        self,
+        goal: str | None = None,
+        limit: int = 50,
+        explain: bool = False,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Rank symbols for a goal through the full blend (task/global PPR,
+        lexical/semantic, confidence, criticality, change risk, novelty,
+        plus any active plugin features). Returns the RankResult envelope
+        verbatim: ``{"items": [{"id", "rank", "position", "features",
+        "specificity", "reasons", "plugin_features"}], "omitted_ids",
+        "warnings"}``."""
+        return self.invoke("ranking.symbols", {
+            "goal": goal,
+            "limit": limit,
+            "explain": explain,
+            "profile": profile,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,
