@@ -687,7 +687,7 @@ impl<'a> SystemRanker<'a> {
 
         // Rank-edge introspection (§123.12): snapshot the surviving
         // triples before aggregation moves `edges`.
-        let edge_list: Vec<(usize, usize, String, f64)> = edges.iter().cloned().collect();
+        let edge_list: Vec<(usize, usize, String, f64)> = edges.to_vec();
         // Aggregate parallel edges (sum weights), apply rarity, row-normalize.
         let mut agg: Vec<HashMap<usize, f64>> = vec![HashMap::new(); n];
         for (si, ti, _pred, w) in edges.iter() {

@@ -241,7 +241,6 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 fn seeds_op_serves_plugin_merge() {
     // Live-RPC proof: `ranking.seeds` merges lexical + provider weights
     // through the real invoke path (same hook wiring as ranking.symbols).
-    use std::io::Write;
     let dir = tempfile::TempDir::new().unwrap();
     let root = dir.path().join("repo");
     std::fs::create_dir_all(&root).unwrap();
