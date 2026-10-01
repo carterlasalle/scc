@@ -701,3 +701,18 @@ fn transports_implement_nothing() {
         );
     }
 }
+
+#[test]
+// trace:v1 id=test.scc-cli-interfaces.operations-describe-shows-schema verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-cli-src-commands.cmd-operations
+fn operations_describe_shows_schema() {
+    // `scc operations --describe <id>` prints descriptor + input schema
+    // in one view (discovery: what it does + what to send it).
+    let repo = copy_fixture("http-service-python");
+    let out = run_ok(&workdir(repo.path()), &["operations", "--describe", "ranking.symbols"]);
+    assert!(out.contains("ranking.symbols"), "{out}");
+    assert!(out.contains("limit") || out.contains("goal"), "{out}");
+    let out = run_ok(&workdir(repo.path()), &["operations", "--describe", "surface.compile"]);
+    assert!(out.contains("surface.compile"), "{out}");
+    let out = run_ok(&workdir(repo.path()), &["operations", "--describe", "nope.nope"]);
+    assert!(out.contains("unknown operation"), "{out}");
+}

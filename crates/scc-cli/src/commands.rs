@@ -1550,7 +1550,13 @@ pub fn cmd_rpc(root: &Path, _stdio: bool) -> crate::Result<()> {
 pub fn cmd_operations(describe: Option<&str>) -> crate::Result<()> {
     if let Some(id) = describe {
         match scc_engine::ops::describe(id) {
-            Some(d) => println!("{}", serde_json::to_string_pretty(&d)?),
+            Some(d) => {
+                println!("{}", serde_json::to_string_pretty(&d)?);
+                match scc_engine::ops::input_schema(id) {
+                    Some(s) => println!("{}", serde_json::to_string_pretty(&s)?),
+                    None => println!("(no typed input schema: free-form object)"),
+                }
+            }
             None => println!("unknown operation '{id}' (see `scc operations`)"),
         }
         return Ok(());
