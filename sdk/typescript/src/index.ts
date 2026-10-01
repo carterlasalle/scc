@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * One canonical entity by id (§15) plus its trust verdict:
+   * `{entity, trusted, reason}`. `entity` is the raw Reality Graph
+   * node; `trusted` reports the TrustedGraphView decision.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.graph-entity work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async graphEntity(id: string): Promise<{ entity: unknown; trusted: boolean; reason: string | null }> {
+    return this.invoke("graph.entity.get", { id });
+  }
+
+  /**
    * Full model access (§14): everything SCC knows as structured state
    * — repository, entities, relationships, evidence, components, flows,
    * invariants. Not a rendered Atlas.

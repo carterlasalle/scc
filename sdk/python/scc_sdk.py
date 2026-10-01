@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-entity work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def graphEntity(self, id: str) -> dict[str, Any]:
+        """One canonical entity by id (§15) plus its trust verdict:
+        ``{entity, trusted, reason}``. ``entity`` is the raw Reality
+        Graph node; ``trusted`` reports the TrustedGraphView decision."""
+        return self.invoke("graph.entity.get", {"id": id})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.model-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def modelGet(self) -> dict[str, Any]:
         """Full model access (§14): everything SCC knows as structured

@@ -73,6 +73,15 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_graph_entity_reports_trust_verdict(self):
+        syms = self.scc.ranking(goal="add numbers", limit=5)
+        self.assertTrue(syms["items"], f"no ranked items: {syms}")
+        got = self.scc.graphEntity(syms["items"][0]["id"])
+        self.assertIn("entity", got, f"missing entity: {got}")
+        self.assertIn("trusted", got, f"missing trusted: {got}")
+        self.assertIsNotNone(got["entity"], f"null entity: {got}")
+
+    # trace:exempt reason=unit-test
     def test_model_get_returns_structured_state(self):
         model = self.scc.modelGet()
         self.assertIsInstance(model, dict, f"not a dict: {model}")

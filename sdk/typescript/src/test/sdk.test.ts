@@ -70,6 +70,14 @@ test("systemOverview() content identifies the repository", { skip: skip ? skipRe
   assert.ok(Array.isArray(pack.entity_ids));
 });
 
+test("graphEntity() reports the trust verdict", { skip: skip ? skipReason : false }, async () => {
+  const syms = await scc().ranking({ goal: "add numbers", limit: 5 });
+  assert.ok(syms.items.length > 0);
+  const got = await scc().graphEntity(syms.items[0].id);
+  assert.ok("entity" in got && got.entity !== null);
+  assert.equal(typeof got.trusted, "boolean");
+});
+
 test("modelGet() returns structured state", { skip: skip ? skipReason : false }, async () => {
   const model = await scc().modelGet() as Record<string, unknown>;
   assert.equal(typeof model, "object");
