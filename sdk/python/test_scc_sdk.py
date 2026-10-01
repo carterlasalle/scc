@@ -201,6 +201,12 @@ class TestSCCSDK(unittest.TestCase):
 
     # trace:exempt reason=unit-test
     # trace:exempt reason=unit-test
+    def test_project_symbols_maps_universe_vector(self):
+        out = self.scc.projectSymbols(source="global")
+        self.assertIn("symbols", out, f"missing symbols: {out}")
+        self.assertIsInstance(out["symbols"], list)
+
+    # trace:exempt reason=unit-test
     def test_selection_required_returns_never_omit_set(self):
         out = self.scc.selectionRequired(goal="add numbers")
         self.assertIn("required", out, f"missing required: {out}")

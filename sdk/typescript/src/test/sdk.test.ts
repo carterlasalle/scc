@@ -193,6 +193,11 @@ test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : 
   assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
 });
 
+test("projectSymbols() maps a universe vector to symbols", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().projectSymbols({ source: "global" });
+  assert.ok(Array.isArray(out.symbols));
+});
+
 test("selectionRequired() returns the never-omit set", { skip: skip ? skipReason : false }, async () => {
   const out = await scc().selectionRequired("add numbers");
   assert.ok(Array.isArray(out.required));

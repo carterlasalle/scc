@@ -393,6 +393,19 @@ export class SCC {
   }
 
   /**
+   * Projection introspection (§123 intermediate): map a universe vector
+   * to per-symbol scores. Pass explicit `vector` rows, or
+   * `source: "global"`, or a task `goal`. Same projection
+   * ranking.symbols blends from.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.project-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async projectSymbols(args?: { vector?: Array<{ id: string; score: number }>; source?: string; goal?: string }): Promise<{ symbols: Array<{ id: string; score: number }> }> {
+    return this.invoke("ranking.project_symbols", {
+      vector: args?.vector ?? null, source: args?.source ?? null, goal: args?.goal ?? null,
+    });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).

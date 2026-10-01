@@ -325,6 +325,23 @@ class SCC:
         ranking.symbols blends criticality from."""
         return self.invoke("selection.required", {"goal": goal})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.project-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def projectSymbols(
+        self,
+        vector: list[dict[str, Any]] | None = None,
+        source: str | None = None,
+        goal: str | None = None,
+    ) -> dict[str, Any]:
+        """Projection introspection (§123 intermediate): map a universe
+        vector to per-symbol scores. Pass explicit ``vector`` rows
+        ``[{id, score}]``, or ``source="global"``, or a task ``goal``
+        (task vector). Same projection ranking.symbols blends from."""
+        return self.invoke("ranking.project_symbols", {
+            "vector": vector,
+            "source": source,
+            "goal": goal,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,
