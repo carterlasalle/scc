@@ -218,6 +218,21 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("rank", entry, f"missing rank: {entry}")
 
     # trace:exempt reason=unit-test
+    def test_score_entries_blends_explicit_rows(self):
+        rows = [
+            {"id": "a", "task_ppr": 0.9, "global_ppr": 0.5, "lexical": 0.8,
+             "semantic": 0.7, "confidence": 0.9, "criticality": 1.0,
+             "change_risk": 0.4, "novelty": 0.5, "has_task": True},
+            {"id": "b", "task_ppr": 0.1, "global_ppr": 0.1, "lexical": 0.1,
+             "semantic": 0.1, "confidence": 0.1, "criticality": 0.0,
+             "change_risk": 0.0, "novelty": 0.0, "has_task": True},
+        ]
+        out = self.scc.scoreEntries(rows)
+        self.assertIn("scores", out, f"missing scores: {out}")
+        by_id = {r["id"]: r["score"] for r in out["scores"]}
+        self.assertGreater(by_id["a"], by_id["b"], f"blend order wrong: {out}")
+
+    # trace:exempt reason=unit-test
     def test_selection_optimize_picks_value_density(self):
         rows = [
             {"id": "a", "value": 3.0, "token_cost": 10},

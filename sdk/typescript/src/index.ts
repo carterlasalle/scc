@@ -425,6 +425,16 @@ export class SCC {
   }
 
   /**
+   * Pure per-entry blend (§123 intermediate) over explicit feature
+   * rows. No store, no hooks — the same math ranking.symbols blends
+   * from, exposed for audit and for callers scoring own rows.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.score-entries work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async scoreEntries(entries: Array<{ id: string; task_ppr?: number; global_ppr?: number; lexical?: number; semantic?: number; confidence?: number; criticality?: number; change_risk?: number; novelty?: number; has_task?: boolean }>): Promise<{ scores: Array<{ id: string; score: number }> }> {
+    return this.invoke("ranking.score_entries", { entries });
+  }
+
+  /**
    * Budget-optimizer stage (§124 item 27) over caller rows:
    * value-density knapsack (value/token_cost desc). At most one plugin
    * declarer replaces it with the full selected id list.

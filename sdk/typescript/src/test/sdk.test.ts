@@ -209,6 +209,16 @@ test("rankingEntry() returns the Surface object", { skip: skip ? skipReason : fa
   assert.ok("rank" in entry);
 });
 
+test("scoreEntries() blends explicit feature rows", { skip: skip ? skipReason : false }, async () => {
+  const rows = [
+    { id: "a", task_ppr: 0.9, global_ppr: 0.5, lexical: 0.8, semantic: 0.7, confidence: 0.9, criticality: 1.0, change_risk: 0.4, novelty: 0.5, has_task: true },
+    { id: "b", task_ppr: 0.1, global_ppr: 0.1, lexical: 0.1, semantic: 0.1, confidence: 0.1, criticality: 0.0, change_risk: 0.0, novelty: 0.0, has_task: true },
+  ];
+  const out = await scc().scoreEntries(rows);
+  const byId = Object.fromEntries(out.scores.map((r) => [r.id, r.score]));
+  assert.ok(byId["a"] > byId["b"]);
+});
+
 test("selectionOptimize() picks by value density", { skip: skip ? skipReason : false }, async () => {
   const rows = [
     { id: "a", value: 3.0, token_cost: 10 },

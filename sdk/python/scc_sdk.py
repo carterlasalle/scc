@@ -367,6 +367,17 @@ class SCC:
         programmatic Surface object (§123.7 needs entry-level access)."""
         return self.invoke("ranking.entry", {"id": id})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.score-entries work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def scoreEntries(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Pure per-entry blend (§123 intermediate) over explicit rows
+        ``[{id, task_ppr, global_ppr, lexical, semantic, confidence,
+        criticality, change_risk, novelty, has_task}]``. No store, no
+        hooks — the same math ranking.symbols blends from."""
+        return self.invoke("ranking.score_entries", {"entries": entries})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-optimize work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def selectionOptimize(
         self,
