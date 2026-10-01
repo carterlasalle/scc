@@ -193,6 +193,16 @@ test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : 
   assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
 });
 
+test("selectionQuotas() caps per-kind fractions", { skip: skip ? skipReason : false }, async () => {
+  const rows = [
+    { id: "a", value: 3.0, token_cost: 10, kind: "symbol" },
+    { id: "b", value: 2.0, token_cost: 10, kind: "symbol" },
+    { id: "c", value: 1.0, token_cost: 10, kind: "test" },
+  ];
+  const out = await scc().selectionQuotas(rows);
+  assert.deepEqual(new Set(out.selected), new Set(["a", "b", "c"]));
+});
+
 test("selectionMmr() selects diverse ids", { skip: skip ? skipReason : false }, async () => {
   const rows = [
     { id: "a", value: 3.0, group: "x" },

@@ -329,6 +329,20 @@ class SCC:
             req["lambda"] = lam
         return self.invoke("selection.mmr", req)
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-quotas work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def selectionQuotas(
+        self,
+        ranked: list[dict[str, Any]],
+        quotas: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Quota stage (§124 item 25) over caller rows
+        ``[{id, value, token_cost, kind}]`` with per-kind fraction caps
+        ``[{kind, fraction}]``. Rank order preserved, unknown kinds
+        uncapped; plugin quota overrides merged first (one math path)."""
+        return self.invoke("selection.quotas", {
+            "ranked": ranked, "budget": 0, "quotas": quotas,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-required work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def selectionRequired(
         self,

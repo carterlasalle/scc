@@ -201,6 +201,17 @@ class TestSCCSDK(unittest.TestCase):
 
     # trace:exempt reason=unit-test
     # trace:exempt reason=unit-test
+    def test_selection_quotas_caps_per_kind(self):
+        rows = [
+            {"id": "a", "value": 3.0, "token_cost": 10, "kind": "symbol"},
+            {"id": "b", "value": 2.0, "token_cost": 10, "kind": "symbol"},
+            {"id": "c", "value": 1.0, "token_cost": 10, "kind": "test"},
+        ]
+        out = self.scc.selectionQuotas(rows)
+        self.assertIn("selected", out, f"missing selected: {out}")
+        self.assertEqual(set(out["selected"]), {"a", "b", "c"})
+
+    # trace:exempt reason=unit-test
     def test_selection_mmr_selects_diverse_ids(self):
         rows = [
             {"id": "a", "value": 3.0, "group": "x"},

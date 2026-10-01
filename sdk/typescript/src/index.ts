@@ -393,6 +393,16 @@ export class SCC {
   }
 
   /**
+   * Quota stage (§124 item 25) over caller rows with per-kind fraction
+   * caps. Rank order preserved, unknown kinds uncapped; plugin quota
+   * overrides merged first (one math path).
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.selection-quotas work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async selectionQuotas(ranked: Array<{ id: string; value: number; token_cost?: number; kind?: string; group?: string | null }>, quotas?: Array<{ kind: string; fraction: number }>): Promise<{ selected: string[] }> {
+    return this.invoke("selection.quotas", { ranked, budget: 0, quotas: quotas ?? null });
+  }
+
+  /**
    * Required-coverage set (§123 never-omit): engine required_ids plus
    * plugin coverage providers, unioned. Same inputs ranking.symbols
    * blends criticality from.
