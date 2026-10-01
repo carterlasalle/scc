@@ -274,6 +274,30 @@ export class SCC {
     return new GraphQuery(this, args?.kind, args?.name);
   }
 
+  /** Overlay diagnostics: every assertion behind one edge plus the trusted verdict. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.explain work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async explain(subject: string, predicate: string, object: string): Promise<unknown> {
+    return this.invoke("graph.explain", { subject, predicate, object });
+  }
+
+  /** JSON Schema for one operation's input (from request types). */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.schema work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async operationSchema(id: string): Promise<unknown> {
+    return this.invoke("operations.schema", { id });
+  }
+
+  /** Capability vocabulary: permissions, extension points, versions. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.capabilities work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async capabilities(): Promise<unknown> {
+    return this.invoke("operations.capabilities", {});
+  }
+
+  /** Deterministic extension order per type. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.plugin-graph work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async pluginGraph(): Promise<{ groups: Record<string, unknown[]> }> {
+    return this.invoke("plugins.graph", {});
+  }
+
   /** Index the repository (idempotent; incremental after the first run). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.index work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async index(): Promise<IndexResult> {

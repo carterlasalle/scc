@@ -220,6 +220,26 @@ class SCC:
         """Start a fluent traversal: SCC(store).query(kind, name).out(...)."""
         return _Query(self, kind=kind, name=name)
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.explain work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def explain(self, subject, predicate, object):
+        """Overlay diagnostics: every assertion behind one edge plus verdict."""
+        return self.invoke("graph.explain", {"subject": subject, "predicate": predicate, "object": object})
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.schema work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def operation_schema(self, op_id):
+        """JSON Schema for one operation's input (from request types)."""
+        return self.invoke("operations.schema", {"id": op_id})
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.capabilities work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def capabilities(self):
+        """Capability vocabulary: permissions, extension points, versions."""
+        return self.invoke("operations.capabilities", {})
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.plugin-graph work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def plugin_graph(self):
+        """Deterministic extension order per type."""
+        return self.invoke("plugins.graph", {})
+
 
 # trace:v1 id=impl.sdk-python-scc-sdk.query-builder work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 class _Query:
