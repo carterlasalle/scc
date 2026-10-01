@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.history-list work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def historyList(self) -> dict[str, Any]:
+        """Index revision ledger (history.list): rev, created_at,
+        file/entity/relationship counts per revision. Read-only
+        provenance for what changed when."""
+        return {"revisions": self.invoke("history.list", {})}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def graphSearch(self, query: str, limit: int = 100) -> dict[str, Any]:
         """FTS entity search with LIKE fallback (graph.search): raw

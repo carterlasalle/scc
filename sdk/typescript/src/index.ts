@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * Index revision ledger (history.list): rev, created_at,
+   * file/entity/relationship counts per revision. Read-only provenance
+   * for what changed when.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.history-list work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async historyList(): Promise<{ revisions: Array<{ rev: number; created_at: string; file_count: number; entity_count: number; rel_count: number }> }> {
+    return { revisions: await this.invoke("history.list", {}) as Array<{ rev: number; created_at: string; file_count: number; entity_count: number; rel_count: number }> };
+  }
+
+  /**
    * FTS entity search with LIKE fallback (graph.search): raw Reality
    * Graph entities matching the query. Lexical lookup — use
    * traverse()/query() for structured multi-step traversal.
