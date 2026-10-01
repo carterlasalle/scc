@@ -184,6 +184,24 @@ fn seeds_op_merges_lexical_and_plugin() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-ranking.project-symbols-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn project_symbols_op_maps_universe_to_symbols() {
+    // `ranking.project_symbols`: projecting the global vector gives
+    // per-symbol scores; projecting a one-hot vector on a symbol keeps
+    // that symbol top (projection only adds non-negative bonuses).
+    let (_dir, store) = fixture();
+    let (_g, _c, _s, engine) = ranker_of(&store);
+    let r = engine.ranking();
+    let gv = r.pagerank_global().unwrap();
+    let syms = r.project_symbols(&gv).unwrap();
+    assert_eq!(syms.len(), 20, "all fixture symbols projected");
+    let hot: Vec<(String, f64)> = vec![(gv[0].0.clone(), 1.0)];
+    let out = r.project_symbols(&hot).unwrap();
+    let top = out.iter().max_by(|a, b| a.1.partial_cmp(&b.1).unwrap()).unwrap();
+    assert_eq!(top.0, gv[0].0, "one-hot symbol stays top: {out:?}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-ranking.reference-graph-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
 fn reference_graph_op_normalizes_trusted_rels() {
     // `ranking.reference_graph`: every edge traces to one trusted

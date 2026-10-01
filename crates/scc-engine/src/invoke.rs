@@ -384,6 +384,26 @@ pub fn invoke(
             let cands = engine.ranking().candidates_with(goal, limit, &hooks)?;
             serde_json::json!({"candidates": cands.iter().map(|c| serde_json::json!({"id": c.id, "kind": c.kind, "name": c.name, "score": c.score, "reason": c.reason})).collect::<Vec<_>>()})
         }
+        "ranking.project_symbols" => {
+            // Projection introspection (§123 intermediate): map a
+            // universe vector to per-symbol scores. `vector`: explicit
+            // (id, score) rows; or `source`: "global" / task `goal`.
+            let rows: Vec<(String, f64)> = match input.get("vector").and_then(|v| v.as_array()) {
+                Some(arr) => arr.iter().map(|r| (
+                    r.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    r.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                )).collect(),
+                None => match input.get("source").and_then(|v| v.as_str()) {
+                    Some("global") => engine.ranking().pagerank_global()?,
+                    _ => {
+                        let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+                        engine.ranking().pagerank_task(goal)?
+                    }
+                },
+            };
+            let out = engine.ranking().project_symbols(&rows)?;
+            serde_json::json!({"symbols": out.iter().map(|(id, s)| serde_json::json!({"id": id, "score": s})).collect::<Vec<_>>()})
+        }
         "ranking.features" => {
             // Feature-score introspection (§123.13): per-symbol core +
             // plugin feature decomposition before the blend. Same hooks

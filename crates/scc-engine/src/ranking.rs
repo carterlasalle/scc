@@ -66,6 +66,21 @@ impl<'a> Ranker<'a> {
         Ok(ranker.nodes().iter().cloned().zip(ranker.kinds().iter().cloned()).collect())
     }
 
+    /// Project a universe vector to per-symbol scores (§123
+    /// intermediate): entity importance reaching owner/handler symbols.
+    /// `vector` is (id, score) pairs over universe ids (e.g. a
+    /// pagerank.global/task row); unknown ids score 0. Same projection
+    /// `symbols_with_hooks` blends from — exposed for debuggability.
+    // trace:exempt reason=internal-detail
+    pub fn project_symbols(&self, vector: &[(String, f64)]) -> crate::Result<Vec<(String, f64)>> {
+        let ctx = self.ctx();
+        let ranker = scc_context::pagerank::SystemRanker::new(&ctx.view);
+        let by_id: std::collections::BTreeMap<&str, f64> =
+            vector.iter().map(|(id, s)| (id.as_str(), *s)).collect();
+        let full: Vec<f64> = ranker.nodes().iter().map(|id| by_id.get(id.as_str()).copied().unwrap_or(0.0)).collect();
+        Ok(ranker.project_to_symbols(&full))
+    }
+
     /// Raw rank-universe edges (§123.12): (subject, predicate, object,
     /// base weight), pre-aggregation. No plugin hooks by contract — the
     /// structure the vectors diffuse over.
