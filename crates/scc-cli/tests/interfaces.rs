@@ -628,6 +628,13 @@ fn http_daemon_endpoints() {
     let (s, body) = post("/v1/operations/ranking.seeds", r#"{"goal":"transcript"}"#);
     assert_eq!(s, 200);
     assert!(body.contains("\"seeds\""), "{body}");
+    // Spec §10: per-operation GET describes one op + its input schema.
+    let (s, body) = get("/v1/operations/ranking.symbols");
+    assert_eq!(s, 200);
+    assert!(body.contains("ranking.symbols"), "{body}");
+    assert!(body.contains("limit") || body.contains("goal"), "{body}");
+    let (s, _) = get("/v1/operations/nope.nope");
+    assert_eq!(s, 404);
     let (s, _) = get("/v1/nope");
     assert_eq!(s, 404);
     drop(_child);

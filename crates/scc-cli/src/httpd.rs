@@ -277,6 +277,21 @@ fn route(
                 "operations": ids,
             }))?))
         }
+        ("GET", p) if p.starts_with("/v1/operations/") => {
+            let id = p.trim_start_matches("/v1/operations/");
+            match scc_engine::ops::describe(id) {
+                None => json_err(404, format!("unknown operation '{id}' (see GET /v1/operations)")),
+                Some(d) => {
+                    let schema = scc_engine::ops::input_schema(id);
+                    Ok((200, "application/json".to_string(), serde_json::to_string(&serde_json::json!({
+                        "api_version": scc_api::API_VERSION,
+                        "scc_version": env!("CARGO_PKG_VERSION"),
+                        "operation": serde_json::to_value(d)?,
+                        "input_schema": schema,
+                    }))?))
+                }
+            }
+        }
         ("POST", p) if p.starts_with("/v1/operations/") => {
             let id = p.trim_start_matches("/v1/operations/");
             if scc_engine::ops::describe(id).is_none() {
