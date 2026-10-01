@@ -403,6 +403,16 @@ export class SCC {
   }
 
   /**
+   * Budget-optimizer stage (§124 item 27) over caller rows:
+   * value-density knapsack (value/token_cost desc). At most one plugin
+   * declarer replaces it with the full selected id list.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.selection-optimize work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async selectionOptimize(ranked: Array<{ id: string; value: number; token_cost?: number; kind?: string; group?: string | null }>): Promise<{ selected: string[] }> {
+    return this.invoke("selection.optimize", { ranked, budget: 0 });
+  }
+
+  /**
    * Required-coverage set (§123 never-omit): engine required_ids plus
    * plugin coverage providers, unioned. Same inputs ranking.symbols
    * blends criticality from.

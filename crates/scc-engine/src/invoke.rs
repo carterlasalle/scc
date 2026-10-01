@@ -653,7 +653,11 @@ pub fn invoke(
                     if !ap.diagnostics.is_empty() { out["plugin_diagnostics"] = serde_json::to_value(&ap.diagnostics)?; }
                     out
                 }
-                None => serde_json::json!({"selected": crate::ranking::select_with_budget(&items, budget, budget)}),
+                None => {
+                    let keep = crate::ranking::select_with_budget(&items, budget, budget);
+                    let ids: Vec<&str> = keep.into_iter().map(|i| items[i].id.as_str()).collect();
+                    serde_json::json!({"selected": ids})
+                }
             }
         }
         "plugins.list" => {

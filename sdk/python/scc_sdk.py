@@ -343,6 +343,17 @@ class SCC:
             "ranked": ranked, "budget": 0, "quotas": quotas,
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-optimize work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def selectionOptimize(
+        self,
+        ranked: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Budget-optimizer stage (§124 item 27) over caller rows
+        ``[{id, value, token_cost, group}]``: value-density knapsack
+        (value/token_cost desc). At most one plugin declarer replaces
+        it with the full selected id list."""
+        return self.invoke("selection.optimize", {"ranked": ranked, "budget": 0})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-required work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def selectionRequired(
         self,
