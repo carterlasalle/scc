@@ -682,10 +682,10 @@ pub fn render_startup(s: &StartupContext) -> String {
 fn assemble_body(atlas: &str, skeleton: &str, surface: &str, important: &str, coverage: &[String], omissions: &[String]) -> String {
     let mut out = String::new();
     out.push_str("## HOW TO READ THIS PACK\n");
-    out.push_str("What this is: machine-generated system context for this repo, fused from the local index. Work within it; do not re-derive what it states.\n");
-    out.push_str("Sections: SYSTEM ATLAS = architecture (purpose, components, stores, flows, invariants). REPOSITORY SKELETON = physical file layout. SYSTEM SURFACE MAP = callable API layer ranked by global importance (entry format: `name [role] -- kind: details`, grouped by component). SYSTEM-CRITICAL SYMBOLS = highest-attention symbols first. MODEL COVERAGE = index warnings (stale files, drift). OMISSIONS = what the budget cut (never silently dropped).\n");
-    out.push_str("Authority: source/runtime > this pack > checkpoint > hindsight > model assumption. Bracketed DOCUMENTATION labels are claims from docs, not verified facts. Verify before trusting: `scc verify`; re-index with `scc index` when stale.\n");
-    out.push_str("Next: task slice via `scc context task \"<goal>\"`; change blast radius via `scc impact <files>`; cross-layer edits check `scc drift` and `scc ci check`.\n");
+    out.push_str("Machine-generated system context; work within it, do not re-derive.\n");
+    out.push_str("ATLAS=architecture, SKELETON=file layout, SURFACE=ranked APIs, SYMBOLS=top attention, COVERAGE=warnings, OMISSIONS=budget cuts.\n");
+    out.push_str("Authority: source/runtime > pack > checkpoint > hindsight > assumption. DOCUMENTATION labels are unverified. Verify: `scc verify`; stale: `scc index`.\n");
+    out.push_str("Next: `scc context task <goal>`, `scc impact <files>`, `scc drift`, `scc ci check`.\n");
     out.push_str("\n## SYSTEM ATLAS\n");
     out.push_str(atlas.trim_end());
     out.push_str("\n\n## REPOSITORY SKELETON\n");
