@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * FTS entity search with LIKE fallback (graph.search): raw Reality
+   * Graph entities matching the query. Lexical lookup — use
+   * traverse()/query() for structured multi-step traversal.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.graph-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async graphSearch(query: string, limit?: number): Promise<{ entities: Array<{ id: string; kind: string; name: string }> }> {
+    return { entities: await this.invoke("graph.search", { query, limit: limit ?? 100 }) as Array<{ id: string; kind: string; name: string }> };
+  }
+
+  /**
    * Raw relationship facts (§15): the verbatim edge list behind
    * traverse(). Use graphEntity/explain for trust verdicts.
    */

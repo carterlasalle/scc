@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def graphSearch(self, query: str, limit: int = 100) -> dict[str, Any]:
+        """FTS entity search with LIKE fallback (graph.search): raw
+        Reality Graph entities matching ``query``. Lexical lookup —
+        use traverse()/query() for structured multi-step traversal."""
+        return {"entities": self.invoke("graph.search", {"query": query, "limit": limit})}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-relationships work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def graphRelationships(self) -> dict[str, Any]:
         """Raw relationship facts (§15): ``[{subject, predicate, object,

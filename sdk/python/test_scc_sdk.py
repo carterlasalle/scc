@@ -73,6 +73,13 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_graph_search_finds_fixture_entity(self):
+        got = self.scc.graphSearch("add")
+        self.assertIn("entities", got, f"missing entities: {got}")
+        ids = [e["id"] for e in got["entities"]]
+        self.assertTrue(any("add" in i for i in ids), f"no add hit: {ids}")
+
+    # trace:exempt reason=unit-test
     def test_graph_relationships_lists_edges(self):
         got = self.scc.graphRelationships()
         self.assertIn("relationships", got, f"missing rels: {got}")
