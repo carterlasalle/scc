@@ -400,3 +400,26 @@ fn stability_classes_gate_registry() {
         assert_eq!(v["stability"], serde_json::json!(want), "{op}: {v}");
     }
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.mutation-classes verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ops.input-schema
+fn mutation_classes_name_side_effects() {
+    let (_dir, root) = fixture();
+    // §78 examples: task/startup record visibility, index mutates the
+    // model, init mutates external config. Agents reason from these.
+    for (op, want) in [
+        ("context.task", "SessionMutation"),
+        ("context.startup", "SessionMutation"),
+        ("checkpoint.save", "SessionMutation"),
+        ("index.full", "ModelMutation"),
+        ("runtime.ingest", "ModelMutation"),
+        ("plugins.contribute", "ModelMutation"),
+        ("workspace.init", "ExternalMutation"),
+        ("plugins.lock", "ExternalMutation"),
+        ("graph.traverse", "Read"),
+        ("ranking.symbols", "Read"),
+    ] {
+        let v = scc_engine::invoke(&root, "operations.describe", serde_json::json!({"id": op})).unwrap();
+        assert_eq!(v["mutation"], serde_json::json!(want), "{op}: {v}");
+    }
+}
