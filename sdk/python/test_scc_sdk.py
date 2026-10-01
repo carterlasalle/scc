@@ -145,6 +145,9 @@ class TestSCCSDK(unittest.TestCase):
         out = self.scc.operations()
         self.assertIn("context.task", out["operations"])
         self.assertIn("ranking.symbols", out["operations"])
+        self.assertIn("sidecar.put", out["operations"])
+        self.assertIn("plugins.promote", out["operations"])
+        self.assertIn("viewer.panels", out["operations"])
 
     # trace:exempt reason=internal-detail  # sdk parity test; behavior traced at impl.crates-scc-cli-src-commands.build-task-context
     def test_task_context_mirrors_cli_json_exactly(self):

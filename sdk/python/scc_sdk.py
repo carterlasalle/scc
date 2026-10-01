@@ -240,6 +240,31 @@ class SCC:
         """Deterministic extension order per type."""
         return self.invoke("plugins.graph", {})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.sidecar-put work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def sidecar_put(self, plugin, graph, key, value):
+        """Write one raw sidecar fact (never authoritative; promote explicitly)."""
+        return self.invoke("sidecar.put", {"plugin": plugin, "graph": graph, "key": key, "value": value})
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.sidecar-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def sidecar_get(self, plugin, graph, key):
+        """Read one raw sidecar fact."""
+        return self.invoke("sidecar.get", {"plugin": plugin, "graph": graph, "key": key})
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.sidecar-scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def sidecar_scan(self, plugin, graph, prefix="", limit=100):
+        """Scan raw sidecar facts by prefix within one plugin graph."""
+        return self.invoke("sidecar.scan", {"plugin": plugin, "graph": graph, "prefix": prefix, "limit": limit})
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.promote work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def promote(self, plugin, assertions):
+        """Promote selected sidecar findings to canonical relationships."""
+        return self.invoke("plugins.promote", {"plugin": plugin, "assertions": assertions})
+
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.viewer-panels work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def viewer_panels(self):
+        """Plugin viewer data panels (structured title/html + provenance)."""
+        return self.invoke("viewer.panels", {})
+
 
 # trace:v1 id=impl.sdk-python-scc-sdk.query-builder work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 class _Query:

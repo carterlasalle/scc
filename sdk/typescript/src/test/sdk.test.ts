@@ -142,6 +142,9 @@ test("operations() lists the registry via RPC", { skip: skip ? skipReason : fals
   const out = await scc().operations();
   assert.ok(out.operations.length > 50);
   assert.ok(out.operations.includes("context.task"));
+  assert.ok(out.operations.includes("sidecar.put"));
+  assert.ok(out.operations.includes("plugins.promote"));
+  assert.ok(out.operations.includes("viewer.panels"));
 });
 
 test("non-zero scc exit rejects with stderr", { skip: skip ? skipReason : false }, async () => {

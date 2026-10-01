@@ -298,6 +298,36 @@ export class SCC {
     return this.invoke("plugins.graph", {});
   }
 
+  /** Write one raw sidecar fact (never authoritative; promote explicitly). */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.sidecar-put work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async sidecarPut(plugin: string, graph: string, key: string, value: unknown): Promise<unknown> {
+    return this.invoke("sidecar.put", { plugin, graph, key, value });
+  }
+
+  /** Read one raw sidecar fact. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.sidecar-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async sidecarGet(plugin: string, graph: string, key: string): Promise<unknown> {
+    return this.invoke("sidecar.get", { plugin, graph, key });
+  }
+
+  /** Scan raw sidecar facts by prefix within one plugin graph. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.sidecar-scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async sidecarScan(plugin: string, graph: string, prefix = "", limit = 100): Promise<unknown> {
+    return this.invoke("sidecar.scan", { plugin, graph, prefix, limit });
+  }
+
+  /** Promote selected sidecar findings to canonical relationships. */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.promote work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async promote(plugin: string, assertions: unknown[]): Promise<unknown> {
+    return this.invoke("plugins.promote", { plugin, assertions });
+  }
+
+  /** Plugin viewer data panels (structured title/html + provenance). */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.viewer-panels work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async viewerPanels(): Promise<unknown> {
+    return this.invoke("viewer.panels", {});
+  }
+
   /** Index the repository (idempotent; incremental after the first run). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.index work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async index(): Promise<IndexResult> {
