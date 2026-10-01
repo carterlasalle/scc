@@ -400,6 +400,22 @@ fn surface_compile_returns_unranked_map() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.vector-aliases verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.model-get
+fn vector_aliases_match_canonical() {
+    // §18 vocabulary: ranking.global_vector / ranking.task_vector serve
+    // the same raw vectors as the dotted pagerank.* names.
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    let g1 = scc_engine::invoke(&root, "ranking.pagerank.global", json!({})).unwrap();
+    let g2 = scc_engine::invoke(&root, "ranking.global_vector", json!({})).unwrap();
+    assert_eq!(g1["vector"], g2["vector"], "global alias identical");
+    assert!(!g2["vector"].as_array().unwrap().is_empty(), "{g2}");
+    let t1 = scc_engine::invoke(&root, "ranking.pagerank.task", json!({"goal": "hello"})).unwrap();
+    let t2 = scc_engine::invoke(&root, "ranking.task_vector", json!({"goal": "hello"})).unwrap();
+    assert_eq!(t1["vector"], t2["vector"], "task alias identical");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.ranking-entry verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
 fn ranking_entry_resolves_compiled_candidate() {
     // `ranking.entry`: one compiled entry by id — full structured

@@ -446,12 +446,12 @@ pub fn invoke(
             let seeds = engine.ranking().seeds_with(goal, &hooks)?;
             serde_json::json!({"seeds": seeds.iter().map(|x| serde_json::json!({"id": x.id, "kind": x.kind, "weight": x.weight})).collect::<Vec<_>>()})
         }
-        "ranking.pagerank.global" => {
+        "ranking.pagerank.global" | "ranking.global_vector" => {
             // Raw stage introspection: no plugin hooks by contract.
             let v = engine.ranking().pagerank_global()?;
             serde_json::json!({"vector": v.iter().map(|(id, s)| serde_json::json!({"id": id, "score": s})).collect::<Vec<_>>()})
         }
-        "ranking.pagerank.task" => {
+        "ranking.pagerank.task" | "ranking.task_vector" => {
             // Raw stage introspection: no plugin hooks by contract.
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
             let v = engine.ranking().pagerank_task(goal)?;
