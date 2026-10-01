@@ -150,6 +150,14 @@ test("ranking() returns items with feature decomposition", { skip: skip ? skipRe
   assert.ok(first.plugin_features !== undefined);
 });
 
+test("rankingSeeds() returns the seed merge", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().rankingSeeds("add numbers");
+  assert.ok(out.seeds.length > 0);
+  for (const seed of out.seeds) {
+    assert.ok(seed.id && seed.kind && typeof seed.weight === "number");
+  }
+});
+
 test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
   const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
   const firstId = ranked.items[0].id;

@@ -296,6 +296,16 @@ export class SCC {
   }
 
   /**
+   * Task-seed introspection (§123.11): lexical seeds merged with plugin
+   * seed providers (weight sums by id) — the same merge ranking.symbols
+   * consumes. Read-only stage view.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-seeds work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async rankingSeeds(goal?: string): Promise<{ seeds: Array<{ id: string; kind: string; weight: number }> }> {
+    return this.invoke("ranking.seeds", { goal: goal ?? null });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).

@@ -152,6 +152,14 @@ class TestSCCSDK(unittest.TestCase):
             self.assertIn(feat, first["features"], f"missing feature {feat}: {first['features']}")
 
     # trace:exempt reason=unit-test
+    def test_ranking_seeds_returns_seed_merge(self):
+        out = self.scc.rankingSeeds(goal="add numbers")
+        self.assertIn("seeds", out)
+        self.assertTrue(out["seeds"], f"empty seeds: {out}")
+        for seed in out["seeds"]:
+            for key in ("id", "kind", "weight"):
+                self.assertIn(key, seed, f"missing {key}: {seed}")
+
     def test_explain_ranking_returns_item_audit(self):
         ranked = self.scc.ranking(goal="add numbers", limit=5)
         first_id = ranked["items"][0]["id"]

@@ -216,6 +216,16 @@ class SCC:
         reasons, and plugin_features. Same item shape as ranking() items."""
         return self.invoke("ranking.explain", {"id": id, "goal": goal})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-seeds work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def rankingSeeds(
+        self,
+        goal: str | None = None,
+    ) -> dict[str, Any]:
+        """Task-seed introspection (§123.11): lexical seeds merged with
+        plugin seed providers (weight sums by id) — the same merge
+        ranking.symbols consumes. Read-only stage view."""
+        return self.invoke("ranking.seeds", {"goal": goal})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,
