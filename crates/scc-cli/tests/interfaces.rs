@@ -618,6 +618,16 @@ fn http_daemon_endpoints() {
     let (s, body) = post("/v1/verify", "{}");
     assert_eq!(s, 200);
     assert!(body.contains("FRESHNESS"), "{body}");
+    let (s, body) = get("/v1/operations");
+    assert_eq!(s, 200);
+    // §82 discovery: every entry carries its stability class.
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let ops = v["operations"].as_array().unwrap();
+    assert!(ops.len() >= 50, "{v}");
+    assert!(ops.iter().all(|o| o.get("stability").and_then(|x| x.as_str()).is_some()), "{v}");
+    let (s, body) = post("/v1/operations/ranking.seeds", r#"{"goal":"transcript"}"#);
+    assert_eq!(s, 200);
+    assert!(body.contains("\"seeds\""), "{body}");
     let (s, _) = get("/v1/nope");
     assert_eq!(s, 404);
     drop(_child);

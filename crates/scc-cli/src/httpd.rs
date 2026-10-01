@@ -268,6 +268,7 @@ fn route(
                     "description": d.description,
                     "mutation": format!("{:?}", d.mutation),
                     "streaming": d.streaming,
+                    "stability": format!("{:?}", d.stability),
                 }))
                 .collect();
             Ok((200, "application/json".to_string(), serde_json::to_string(&serde_json::json!({
