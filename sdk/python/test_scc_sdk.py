@@ -82,6 +82,16 @@ class TestSCCSDK(unittest.TestCase):
             self.assertIn(key, rel, f"missing {key}: {rel}")
 
     # trace:exempt reason=unit-test
+    def test_workspace_status_reports_freshness(self):
+        st = self.scc.workspaceStatus()
+        for key in ("repository", "revision", "freshness", "stats"):
+            self.assertIn(key, st, f"missing {key}: {st}")
+        # Fixture indexes its own fake-scc shim, so freshness is STALE
+        # here by design; assert only that it reports a known state.
+        self.assertIn(st["freshness"], ("CURRENT", "STALE"), f"bad state: {st}")
+        self.assertIn("entities", st["stats"], f"no entity stats: {st}")
+
+    # trace:exempt reason=unit-test
     def test_workspace_session_pins_identity(self):
         sess = self.scc.workspaceSession()
         for key in ("repo_id", "revision", "epoch", "config_hash"):

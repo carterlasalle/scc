@@ -176,6 +176,13 @@ class SCC:
         Graph node; ``trusted`` reports the TrustedGraphView decision."""
         return self.invoke("graph.entity.get", {"id": id})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.workspace-status work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def workspaceStatus(self) -> dict[str, Any]:
+        """Index status, stats, and freshness (workspace.status): repo,
+        revision, freshness, stale files, entity/relationship counts.
+        The live counterpart to the pinned workspaceSession identity."""
+        return self.invoke("workspace.status", {})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.workspace-session work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def workspaceSession(self) -> dict[str, Any]:
         """Pinned model-session identity (§6): repo, revision, epoch,

@@ -272,6 +272,16 @@ export class SCC {
   }
 
   /**
+   * Index status, stats, and freshness (workspace.status): repo,
+   * revision, freshness, stale files, entity/relationship counts.
+   * The live counterpart to the pinned workspaceSession identity.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.workspace-status work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async workspaceStatus(): Promise<{ repository: string; revision: string; freshness: string; stale_count: number; stats: Record<string, number> }> {
+    return this.invoke("workspace.status", {});
+  }
+
+  /**
    * Pinned model-session identity (§6): repo, revision, epoch, config
    * hash, plugin set, ranking pipeline. The anchor every result's model
    * identity refers to.

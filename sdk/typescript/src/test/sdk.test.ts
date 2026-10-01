@@ -77,6 +77,15 @@ test("graphRelationships() lists raw edges", { skip: skip ? skipReason : false }
     assert.ok(key in got.relationships[0], `missing ${key}`);
 });
 
+test("workspaceStatus() reports freshness and stats", { skip: skip ? skipReason : false }, async () => {
+  const st = await scc().workspaceStatus();
+  for (const key of ["repository", "revision", "freshness", "stats"] as const)
+    assert.ok(key in st, `missing ${key}`);
+  // Fixture indexes its own fake-scc shim, so STALE is expected here.
+  assert.ok(st.freshness === "CURRENT" || st.freshness === "STALE");
+  assert.ok("entities" in (st.stats as Record<string, unknown>));
+});
+
 test("workspaceSession() pins the model identity", { skip: skip ? skipReason : false }, async () => {
   const sess = await scc().workspaceSession();
   for (const key of ["repo_id", "revision", "epoch", "config_hash"] as const)
