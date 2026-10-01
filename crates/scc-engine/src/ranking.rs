@@ -195,7 +195,16 @@ impl<'a> Ranker<'a> {
             ranker.project_to_symbols(&ranker.task_vector(&seeds)).into_iter().collect();
         let has_task = !goal.is_empty();
         let map = scc_context::surface::compile_surface_map(&ctx);
-        let required = scc_context::surface::required_ids(&map, &ctx);
+        let mut required = scc_context::surface::required_ids(&map, &ctx);
+        // Plugin coverage rules (§124 item 26): union contributed ids.
+        let mut required_by: usize = 0;
+        for cov in &hooks.coverage {
+            for id in cov(goal) {
+                if required.insert(id) {
+                    required_by += 1;
+                }
+            }
+        }
         let mut best: std::collections::BTreeMap<&str, RankItem> = std::collections::BTreeMap::new();
         for e in &map.entries {
             let task_ppr = task_of.get(&e.symbol_id).copied().unwrap_or(0.0);
@@ -226,6 +235,7 @@ impl<'a> Ranker<'a> {
             let mut plugin_features = std::collections::BTreeMap::new();
             let mut reasons: Vec<String> = Vec::new();
             if seed_ids.contains(e.symbol_id.as_str()) { reasons.push("task-seed".into()); }
+            if required_by > 0 && required.contains(&e.id) && !seed_ids.contains(e.symbol_id.as_str()) { reasons.push(format!("required-by:plugin({required_by})")); }
             let mut total = total;
             for feat in &hooks.features {
                 let v = feat(&e.symbol_id, goal);
@@ -340,6 +350,14 @@ pub struct BlendWeights {
     pub novelty: Option<f64>,
 }
 
+/// Required-coverage contributor (§124 item 26): symbol ids that MUST
+/// count as required (criticality 1.0), unioned with the engine's
+/// `required_ids` base. E.g. a security plugin marks tainted sinks
+/// required so task ranking never demotes them.
+// trace:exempt reason=internal-detail
+pub type CoverageProvider =
+    Box<dyn Fn(&str) -> Vec<String> + Send + Sync>;
+
 // trace:exempt reason=internal-detail
 pub type SimilarityFn = std::sync::Arc<dyn Fn(&str, &str, Option<&str>, Option<&str>) -> f64 + Send + Sync>;
 
@@ -354,7 +372,11 @@ pub struct RankHooks {
     /// returning a nonzero value wins (deterministic chain order);
     /// the built-in default (same-group => 1.0) runs last.
     pub similarities: Vec<SimilarityFn>,
-    /// Extra candidate providers (spec 18): merged with the lexical base
+        /// Extra required-coverage providers (§124 item 26): contributed
+    /// symbol ids union with the engine `required_ids` base. Recorded in
+    /// reasons as `required-by:<n>`.
+    pub coverage: Vec<CoverageProvider>,
+/// Extra candidate providers (spec 18): merged with the lexical base
     /// by canonical id, max score wins. Deterministic chain order.
     pub candidates: Vec<CandidateProvider>,
     /// Named blend profiles: profile name -> per-feature weight

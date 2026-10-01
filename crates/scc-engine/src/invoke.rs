@@ -704,6 +704,18 @@ fn ranking_hooks_from_plugins(
                 hooks.profiles.insert(name, bw);
             }
         }
+        if wants("coverage", "ranking.coverage") {
+            let plug = Arc::clone(&plug);
+            hooks.coverage.push(Box::new(move |goal: &str| {
+                let input = serde_json::json!({"goal": goal});
+                match scc_plugin_host::call(&plug, "ranking.coverage", input, None) {
+                    Ok(v) => v.get("required").and_then(|a| a.as_array()).map(|a| {
+                        a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()
+                    }).unwrap_or_default(),
+                    Err(_) => Vec::new(),
+                }
+            }));
+        }
         if wants("similarity", "ranking.similarity") {
             let plug = Arc::clone(&plug);
             hooks.similarities.push(std::sync::Arc::new(move |a, b, ga, gb| {

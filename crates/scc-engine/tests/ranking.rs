@@ -137,3 +137,23 @@ fn pure_algorithm_ops() {
     assert!(q.contains(&"c".to_string()), "core survives capped public: {q:?}");
     let _ = SelectionRequest { ranked: vec![RankedEntry { id: "a".into(), value: 1.0, token_cost: 5, kind: "core".into(), group: None }], budget: 10, lambda: None, quotas: None };
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-ranking.coverage-hook verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn coverage_hook_marks_required() {
+    let (_dir, store) = fixture();
+    let (_g, _c, _s, engine) = ranker_of(&store);
+    let r = engine.ranking();
+    let goal = "qqqzzz-no-such-term";
+    let req = RankRequest { profile: None, goal: Some(goal.into()), limit: 20, explain: true, include_features: false, include_intermediate: false };
+    let base = r.symbols(&req).unwrap();
+    // Pick a symbol that is NOT required in the base blend.
+    let target = base.items.iter().find(|i| !i.reasons.iter().any(|x| x.contains("required"))).map(|i| i.id.clone()).expect("a non-required item");
+    let mut hooks = scc_engine::ranking::RankHooks::default();
+    let t2 = target.clone();
+    hooks.coverage.push(Box::new(move |_goal| vec![t2.clone()]));
+    let out = r.symbols_with_hooks(&req, &hooks).unwrap();
+    let item = out.items.iter().find(|i| i.id == target).expect("target present");
+    assert!(item.features.criticality == 1.0, "coverage marks criticality 1.0: {item:?}");
+    assert!(item.reasons.iter().any(|x| x.contains("required-by:plugin")), "recorded: {:?}", item.reasons);
+}
