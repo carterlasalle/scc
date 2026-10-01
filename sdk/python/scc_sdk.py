@@ -162,6 +162,22 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.context-atlas work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def contextAtlas(
+        self,
+        budget: int | None = None,
+        full: bool = False,
+        unbounded: bool = False,
+    ) -> dict[str, Any]:
+        """System Atlas as its structured type (§74): components,
+        hierarchy, ownership, flows, invariants, boundaries, drift.
+        Distinct from contextStartup (fused session artifact)."""
+        return self.invoke("context.atlas", {
+            "budget": budget,
+            "full": full,
+            "unbounded": unbounded,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.verify-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def verifyContext(self) -> dict[str, Any]:
         """Run the freshness/evidence verification (structured pack)."""

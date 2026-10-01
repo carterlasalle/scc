@@ -252,6 +252,16 @@ export class SCC {
     });
   }
 
+  /**
+   * System Atlas as its structured type (§74): components, hierarchy,
+   * ownership, flows, invariants, boundaries, drift. Distinct from
+   * contextStartup (fused session artifact).
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.context-atlas work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async contextAtlas(budget?: number, full?: boolean, unbounded?: boolean): Promise<unknown> {
+    return this.invoke("context.atlas", { budget: budget ?? null, full: full ?? false, unbounded: unbounded ?? false });
+  }
+
   /** Run the freshness/evidence verification (structured pack, via RPC). */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.verify-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
   async verifyContext(): Promise<ContextPack> {

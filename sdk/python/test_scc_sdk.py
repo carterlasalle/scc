@@ -72,6 +72,12 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("IDENTITY", pack["content"])
         self.assertIsInstance(pack["entity_ids"], list)
 
+    # trace:exempt reason=unit-test
+    def test_context_atlas_has_components(self):
+        atlas = self.scc.contextAtlas()
+        self.assertIsInstance(atlas, dict, f"not a dict: {atlas}")
+        self.assertTrue(atlas, f"empty atlas: {atlas}")
+
     # trace:exempt reason=internal-detail  # sdk integration test; behavior traced at impl.crates-scc-cli-src-commands.build-task-context
     def test_task_context_has_entity_ids_array(self):
         artifact = self.scc.taskContext("transcript")
