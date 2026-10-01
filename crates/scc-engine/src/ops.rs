@@ -33,6 +33,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "workspace.session", description: "Pin the current model session (repo, revision, epoch, config, plugins, salt)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "workspace.session_check", description: "Check a pinned session against live state (current vs stale)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "workspace.state_path", description: "Print the SCC state directory", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "workspace.scan", description: "Scan explanation: which files index and why", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "workspace.languages", description: "Generated language-support matrix", mutation: MutationClass::Read, streaming: false },
     // index
     OperationDescriptor { id: "index.full", description: "Index the repository (cold on first run, incremental afterwards)", mutation: MutationClass::Write, streaming: false },

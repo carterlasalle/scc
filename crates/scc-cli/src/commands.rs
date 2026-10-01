@@ -125,65 +125,42 @@ pub fn cmd_status(root: &Path) -> crate::Result<()> {
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 pub fn cmd_scan(root: &Path, path: Option<&str>, json: bool) -> crate::Result<()> {
     let config = load_config(root)?;
-    let exp = scc_indexer::scan::explain_scan(root, &config.index)
-        .map_err(|e| crate::CliError::Index(scc_indexer::IndexError::Scan(e)))?;
+    let v = scc_engine::status::scan(root, &config, path).map_err(engine_err)?;
+    let indexed = v["indexed"].as_array().cloned().unwrap_or_default();
+    let skipped = v["skipped"].as_array().cloned().unwrap_or_default();
+    let strf = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     if json {
-        let mut out = String::from("{\"indexed\":[");
-        for (i, f) in exp.indexed.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            out.push_str(&format!(
-                "{{\"path\":{},\"language\":{},\"kind\":{},\"bytes\":{}}}",
-                serde_json::to_string(&f.path).unwrap_or_default(),
-                serde_json::to_string(f.language.as_str()).unwrap_or_default(),
-                serde_json::to_string(f.kind.as_str()).unwrap_or_default(),
-                f.size
-            ));
-        }
-        out.push_str("],\"skipped\":[");
-        for (i, s) in exp.skipped.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            out.push_str(&format!(
-                "{{\"path\":{},\"reason\":{},\"rule\":{}}}",
-                serde_json::to_string(&s.path).unwrap_or_default(),
-                serde_json::to_string(s.reason).unwrap_or_default(),
-                serde_json::to_string(&s.rule).unwrap_or_default()
-            ));
-        }
-        out.push_str("]}");
-        println!("{out}");
+        println!("{v}");
         return Ok(());
     }
     // Single path: one verdict line (exit 0 indexed, 1 skipped, 2 missing).
     if let Some(q) = path {
         let q = q.trim_start_matches("./");
-        if let Some(f) = exp.indexed.iter().find(|f| f.path == q) {
-            println!("{}: indexed ({} {})", f.path, f.language.as_str(), f.kind.as_str());
+        if let Some(f) = indexed.iter().find(|f| f.get("path").and_then(|p| p.as_str()) == Some(q)) {
+            println!("{}: indexed ({} {})", strf(f, "path"), strf(f, "language"), strf(f, "kind"));
             return Ok(());
         }
-        if let Some(s) = exp.skipped.iter().find(|s| s.path == q) {
-            match &s.rule {
-                Some(rule) => println!("{q}: {} ({rule})", s.reason),
-                None => println!("{q}: {}", s.reason),
+        if let Some(sk) = skipped.iter().find(|f| f.get("path").and_then(|p| p.as_str()) == Some(q)) {
+            match sk.get("rule").and_then(|r| r.as_str()) {
+                Some(rule) => println!("{q}: {} ({rule})", sk.get("reason").and_then(|r| r.as_str()).unwrap_or("")),
+                None => println!("{q}: {}", sk.get("reason").and_then(|r| r.as_str()).unwrap_or("")),
             }
             std::process::exit(1);
         }
         println!("{q}: not found (no such file in working tree)");
         std::process::exit(2);
     }
-    let s = &exp.stats;
+    let st = &v["stats"];
+    let n = |k: &str| st.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
     println!(
         "scan: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={} (live walk, not index-time counts)",
-        s.discovered, s.indexed, s.ignored, s.unsupported, s.oversized, s.unreadable
+        n("discovered"), n("indexed"), n("ignored"), n("unsupported"), n("oversized"), n("unreadable")
     );
-    if !exp.skipped.is_empty() {
+    if !skipped.is_empty() {
         use std::collections::BTreeMap;
         let mut by_rule: BTreeMap<String, usize> = BTreeMap::new();
-        for sk in &exp.skipped {
-            let key = format!("{}: {}", sk.reason, sk.rule.as_deref().unwrap_or("?"));
+        for sk in &skipped {
+            let key = format!("{}: {}", sk.get("reason").and_then(|r| r.as_str()).unwrap_or("?"), sk.get("rule").and_then(|r| r.as_str()).unwrap_or("?"));
             *by_rule.entry(key).or_default() += 1;
         }
         println!("\nskips by rule:");
@@ -195,9 +172,10 @@ pub fn cmd_scan(root: &Path, path: Option<&str>, json: bool) -> crate::Result<()
     {
         use std::collections::BTreeMap;
         let mut by_dir: BTreeMap<String, usize> = BTreeMap::new();
-        for f in &exp.indexed {
-            let top = f.path.split('/').next().unwrap_or(".").to_string();
-            let key = if f.path.contains('/') { top } else { "(root)".to_string() };
+        for f in &indexed {
+            let p = f.get("path").and_then(|x| x.as_str()).unwrap_or("");
+            let top = p.split('/').next().unwrap_or(".").to_string();
+            let key = if p.contains('/') { top } else { "(root)".to_string() };
             *by_dir.entry(key).or_default() += 1;
         }
         println!("\nindexed by top dir:");

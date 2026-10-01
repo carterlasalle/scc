@@ -202,6 +202,10 @@ pub fn invoke(
             serde_json::json!({"initialized": dir.to_string_lossy(), "config": cfg_path.to_string_lossy()})
         }
         "workspace.state_path" => Value::String(crate::workspace::state_dir(root).to_string_lossy().into()),
+        "workspace.scan" => {
+            let path = input.get("path").and_then(|v| v.as_str());
+            serde_json::to_value(crate::status::scan(root, &config, path)?)?
+        }
         "workspace.session" => serde_json::to_value(crate::workspace::open_session(&store, &config)?)?,
         "workspace.session_check" => {
             let session: crate::workspace::Session = serde_json::from_value(input.get("session").cloned().unwrap_or(serde_json::Value::Null))?;

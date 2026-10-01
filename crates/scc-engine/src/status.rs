@@ -57,3 +57,34 @@ pub fn status(store: &scc_store::Store) -> crate::Result<Status> {
         },
     })
 }
+
+/// Scan explanation: which files the indexer would index and why
+/// (languages, ignore rules, budgets). The `scc scan` value — transports
+/// render it; the engine owns the derivation.
+// trace:v1 id=impl.scc-engine-status.scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn scan(
+    root: &std::path::Path,
+    config: &scc_indexer::Config,
+    path: Option<&str>,
+) -> crate::Result<serde_json::Value> {
+    let exp = scc_indexer::scan::explain_scan(root, &config.index)
+        .map_err(|e| crate::EngineError::Other(e.to_string()))?;
+    let indexed: Vec<serde_json::Value> = exp
+        .indexed
+        .into_iter()
+        .filter(|f| path.filter(|p| !p.is_empty()).map(|p| f.path == p || f.path.starts_with(p)).unwrap_or(true))
+        .map(|f| {
+            serde_json::json!({"path": f.path, "language": f.language.as_str(), "kind": f.kind.as_str(), "bytes": f.size})
+        })
+        .collect();
+    let skipped: Vec<serde_json::Value> = exp
+        .skipped
+        .into_iter()
+        .map(|sk| serde_json::json!({"path": sk.path, "reason": sk.reason, "rule": sk.rule}))
+        .collect();
+    let st = &exp.stats;
+    Ok(serde_json::json!({"indexed": indexed, "skipped": skipped,
+        "stats": {"discovered": st.discovered, "indexed": st.indexed, "ignored": st.ignored,
+                  "unsupported": st.unsupported, "oversized": st.oversized, "unreadable": st.unreadable,
+                  "symlink_escape": st.symlink_escape}}))
+}
