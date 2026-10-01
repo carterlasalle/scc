@@ -202,6 +202,13 @@ pub fn invoke(
                 "boundaries": r.boundaries,
             })
         },
+        "graph.explain" => {
+            let subject = input.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+            let predicate = input.get("predicate").and_then(|v| v.as_str()).unwrap_or("");
+            let object = input.get("object").and_then(|v| v.as_str()).unwrap_or("");
+            let cc = ctx.engine.ctx();
+            crate::graph::explain(&cc, subject, predicate, object)
+        }
         "graph.entity.get" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let found = store.all_entities()?.into_iter().find(|e| e.id == id);

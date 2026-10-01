@@ -179,3 +179,44 @@ pub fn traverse(
     out_entities.truncate(limit);
     Ok((out_entities, rels))
 }
+
+/// Overlay diagnostics (§97): why is `subject —predicate→ object` a trusted
+/// claim? Returns every stored assertion row (one per provider assertion —
+/// native EXTRACTED, pyright/tsserver RESOLVED, plugin contributions) with
+/// provenance, confidence, and evidence, plus the trusted verdict computed
+/// through the compiler view. Conflicts are preserved verbatim: disagreeing
+/// objects for the same subject+predicate appear side by side, never merged.
+// trace:v1 id=impl.scc-engine-graph.explain work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn explain(
+    compiler: &scc_context::ContextCompiler<'_>,
+    subject: &str,
+    predicate: &str,
+    object: &str,
+) -> serde_json::Value {
+    let store = compiler.store;
+    let direct = store.relationships_between(subject, predicate, object).unwrap_or_default();
+    let rivals: Vec<scc_core::Relationship> = store
+        .relationships_for(subject)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.predicate == predicate && r.object != object)
+        .collect();
+    let trusted = compiler
+        .view
+        .out_pred(subject, predicate)
+        .iter()
+        .any(|r| r.object == object);
+    let why = if trusted {
+        "visible through TrustedGraphView"
+    } else if direct.is_empty() {
+        "no stored assertion for this triple"
+    } else {
+        "hidden by TrustedGraphView (stale evidence or below trust floor)"
+    };
+    serde_json::json!({
+        "subject": subject, "predicate": predicate, "object": object,
+        "trusted": trusted, "why": why,
+        "assertions": direct,
+        "conflicting_objects": rivals.into_iter().map(|r| r.object).collect::<Vec<_>>(),
+    })
+}

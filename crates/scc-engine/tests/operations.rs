@@ -260,3 +260,22 @@ fn entity_get_reports_trust_envelope() {
     assert_eq!(v["trusted"], json!(false), "{v}");
     assert!(v["entity"].is_null(), "{v}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.explain-assertions verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-graph.explain
+fn explain_reports_assertions_and_verdict() {
+    let (_dir, root) = fixture();
+    let rels = scc_engine::invoke(&root, "graph.relationships", json!({"limit": 5})).unwrap();
+    let first = rels.as_array().and_then(|a| a.first()).expect("fixture has rels");
+    let (s, p, o) = (
+        first["subject"].as_str().unwrap(),
+        first["predicate"].as_str().unwrap(),
+        first["object"].as_str().unwrap(),
+    );
+    let v = scc_engine::invoke(&root, "graph.explain", json!({"subject": s, "predicate": p, "object": o})).unwrap();
+    assert_eq!(v["trusted"], json!(true), "fresh edge is trusted: {v}");
+    assert!(v["assertions"].as_array().map(|a| !a.is_empty()).unwrap_or(false), "{v}");
+    assert!(v["assertions"][0].get("provenance").is_some(), "{v}");
+    let v = scc_engine::invoke(&root, "graph.explain", json!({"subject": s, "predicate": p, "object": "no-such-object"})).unwrap();
+    assert_eq!(v["trusted"], json!(false), "{v}");
+}
