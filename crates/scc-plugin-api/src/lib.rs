@@ -16,6 +16,8 @@ pub enum Permission {
     RepoRead,
     GraphRead,
     GraphContribute,
+    #[serde(rename = "evidence.contribute")]
+    EvidenceContribute,
     StateRead,
     StateWrite,
     Network,
@@ -30,6 +32,7 @@ impl Permission {
             Permission::RepoRead => "repo.read",
             Permission::GraphRead => "graph.read",
             Permission::GraphContribute => "graph.contribute",
+            Permission::EvidenceContribute => "evidence.contribute",
             Permission::StateRead => "state.read",
             Permission::StateWrite => "state.write",
             Permission::Network => "network",
@@ -46,12 +49,13 @@ impl Permission {
             "repo.read" => Ok(Permission::RepoRead),
             "graph.read" => Ok(Permission::GraphRead),
             "graph.contribute" => Ok(Permission::GraphContribute),
+            "evidence.contribute" => Ok(Permission::EvidenceContribute),
             "state.read" => Ok(Permission::StateRead),
             "state.write" => Ok(Permission::StateWrite),
             "network" => Ok(Permission::Network),
             "subprocess" => Ok(Permission::Subprocess),
             other => Err(format!(
-                "unknown permission '{other}' (known: repo.read, graph.read, graph.contribute, state.read, state.write, network, subprocess)"
+                "unknown permission '{other}' (known: repo.read, graph.read, graph.contribute, evidence.contribute, state.read, state.write, network, subprocess)"
             )),
         }
     }
@@ -175,6 +179,7 @@ impl PluginManifest {
                         "repo_read" => Permission::RepoRead,
                         "graph_read" => Permission::GraphRead,
                         "graph_contribute" => Permission::GraphContribute,
+                        "evidence_contribute" => Permission::EvidenceContribute,
                         "state_read" => Permission::StateRead,
                         "state_write" => Permission::StateWrite,
                         "network" => Permission::Network,

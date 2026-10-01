@@ -940,6 +940,10 @@ fn unknown_grant_names_surface_diagnostics() {
     assert_eq!(ap.diagnostics.len(), 2, "both typos diagnosed: {:?}", ap.diagnostics);
     assert!(ap.diagnostics.iter().all(|d| d.plugin == "any.plugin"), "{:?}", ap.diagnostics);
     assert!(ap.diagnostics.iter().any(|d| d.error.contains("graph.write")), "{:?}", ap.diagnostics);
+    // Capability alias (§27): `evidence.contribute` is a known grant name —
+    // it parses alongside `graph.contribute` (same contribution scope).
+    assert!(scc_plugin_api::Permission::parse("evidence.contribute").is_ok());
+    assert!(scc_plugin_api::Permission::parse("graph.contribute").is_ok());
     // plugins.doctor surfaces the same diagnostics over invoke.
     std::fs::create_dir_all(root.join(".scc")).unwrap();
     std::fs::write(

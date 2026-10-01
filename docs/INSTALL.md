@@ -304,6 +304,8 @@ Rules that bite (stated once, enforced always):
   see `crates/scc-plugin-api/PLUGIN_WIT`); use `runtime.command`.
 - `state.*` operations need the matching grant; everything else needs only
   discovery. Grants from project config narrow the manifest's permissions.
+- `evidence.contribute` is an alias for `graph.contribute` (evidence importers
+  may request either name; both parse and both narrow identically).
 
 Plugins can also register rank features, candidate providers, and rerankers
 via `[extensions] "rank-feature:<id>" = {priority=1}` — see the echo and
