@@ -1,3 +1,4 @@
+<!-- trace:v1 id=doc.scc-claude type=document work=WORK-SI-MMMJA4G6 -->
 <!-- rtk-instructions v2 -->
 # RTK (Rust Token Killer) - Token-Optimized Commands
 
@@ -140,3 +141,14 @@ Overall average: **60-90% token reduction** on common development operations.
 
 
 This repository uses mandatory semantic traceability. Trace integrity is part of the Definition of Done. Follow the repository traceability skill and any trace instructions injected by hooks. Do not invent trace fields, replace stable IDs during refactors, or remove markers to silence validation. Before completing implementation work, `trace verify --changed` must pass under the active policy.
+
+<!-- trace:exempt reason=document-structure -->
+## Contributor invariant (SCC engine architecture)
+
+> **SCC is an engine, not a CLI.** All domain capabilities are implemented behind stable Engine services and structured operation contracts. CLI, MCP, HTTP, SDKs, viewers, and agent integrations consume those services; they do not independently implement SCC semantics.
+
+> **SCC has one authoritative reality model.** Extensions contribute evidence and assertions into that model through versioned, provenance-preserving interfaces. Precision overlays may strengthen supported claims according to explicit rules; they do not create competing realities.
+
+> **Everything important is inspectable.** Any ranking decision, plugin contribution, graph assertion, context inclusion, omission, conflict, or provenance upgrade must have a machine-readable explanation path.
+
+> **Plugins are first-class but not privileged by default.** A plugin may extend essentially every stage of SCC, including ranking and model construction, but its permissions, ordering, provenance, failures, cache impact, and contributions are explicit.
