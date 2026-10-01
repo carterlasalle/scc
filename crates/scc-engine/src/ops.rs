@@ -272,6 +272,8 @@ pub fn input_schema(id: &str) -> Option<serde_json::Value> {
         }
         "graph.traverse" => serde_json::to_value(schemars::schema_for!(TraverseRequest)).unwrap_or(serde_json::json!({})),
         "graph.explain" => free(&[("subject", "string"), ("predicate", "string"), ("object", "string")]),
+        "plugins.describe" => free(&[("id", "string")]),
+        "plugins.inspect" => free(&[("id", "string")]),
         "plugins.enable" | "plugins.disable" => free(&[("id", "string")]),
         "graph.entity.get" | "graph.entity" => free(&[("id", "string")]),
         "ranking.symbols" | "ranking.global" | "ranking.task" | "ranking.entities" | "surface.rank" => {

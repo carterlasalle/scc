@@ -35,6 +35,11 @@ enum PluginSub {
         /// Plugin id
         id: String,
     },
+    /// Inspect one plugin manifest (alias for describe, §29 name)
+    Inspect {
+        /// Plugin id
+        id: String,
+    },
     /// Plugin environment + failure diagnostics
     Doctor,
     /// Write .scc/plugins.lock from the live plugin set (reproducible installs)
@@ -973,6 +978,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Plugin { sub } => match sub {
             PluginSub::List => commands::cmd_plugin_list(&root),
             PluginSub::Describe { id } => commands::cmd_plugin_describe(&root, id.as_str()),
+            PluginSub::Inspect { id } => commands::cmd_plugin_describe(&root, id.as_str()),
             PluginSub::Doctor => commands::cmd_plugin_doctor(&root),
             PluginSub::Lock => commands::cmd_plugin_lock(&root),
             PluginSub::Check => commands::cmd_plugin_check(&root),

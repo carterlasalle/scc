@@ -712,6 +712,19 @@ fn plugin_lock_and_check_ops_round_trip() {
     assert_eq!(check.get("ok"), Some(&serde_json::json!(true)), "{check}");
 }
 #[test]
+// trace:v1 id=test.scc-engine-plugins.inspect-alias verifies=REQ-SI-503JSBGP
+fn plugin_inspect_aliases_describe() {
+    // §29 names `inspect`; the op and CLI spell it `describe` elsewhere.
+    // Both invoke arms resolve to the same manifest payload.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = write_plugin(dir.path());
+    for op in ["plugins.describe", "plugins.inspect"] {
+        let v = scc_engine::invoke(&root, op, serde_json::json!({"id": "acme.echo"})).unwrap();
+        assert_eq!(v["manifest"]["id"], serde_json::json!("acme.echo"), "{op}: {v}");
+    }
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.enable-disable verifies=REQ-SI-503JSBGP
 fn plugin_enable_disable_round_trip() {
     // §29 enable/disable: the allow-list mutates .scc/config.yaml in

@@ -660,7 +660,7 @@ pub fn invoke(
             let ap = crate::plugins::active(root, &config);
             serde_json::json!({"plugins": scc_plugin_host::discover(root).iter().map(|p| &p.manifest.id).collect::<Vec<_>>(), "lock": crate::plugins::lock_entries(&ap)})
         }
-        "plugins.describe" => {
+        "plugins.describe" | "plugins.inspect" => {
             let ap = crate::plugins::active(root, &config);
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             match ap.plugins.iter().find(|p| p.manifest.id == id) {
