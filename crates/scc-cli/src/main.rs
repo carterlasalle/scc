@@ -1588,7 +1588,7 @@ fn generate_variant_artifact(
                 &task.goal,
                 structural_budget,
             )?;
-            let mut text = format!("{startup}\n\n{task_pack}\n\n{structural}");
+            let mut text = format!("{startup}\n\n{task_pack}\n\n# STRUCTURAL SOURCE\n\n{structural}");
             text = text.trim_end().to_string();
             // Hard enforcement on the concatenated artifact: shrink the
             // structural section (complete-file units) until it fits.
@@ -1600,7 +1600,7 @@ fn generate_variant_artifact(
                     &task.goal,
                     structural_budget,
                 )?;
-                text = format!("{startup}\n\n{task_pack}\n\n{structural}")
+                text = format!("{startup}\n\n{task_pack}\n\n# STRUCTURAL SOURCE\n\n{structural}")
                     .trim_end()
                     .to_string();
             }
