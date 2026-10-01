@@ -70,6 +70,12 @@ test("systemOverview() content identifies the repository", { skip: skip ? skipRe
   assert.ok(Array.isArray(pack.entity_ids));
 });
 
+test("graphEntities() lists graph nodes", { skip: skip ? skipReason : false }, async () => {
+  const got = await scc().graphEntities();
+  assert.ok(got.entities.length > 0);
+  assert.ok("id" in got.entities[0]);
+});
+
 test("evidenceSearch() lists evidence records", { skip: skip ? skipReason : false }, async () => {
   const got = await scc().evidenceSearch();
   assert.ok(got.evidence.length > 0);

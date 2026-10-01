@@ -253,6 +253,16 @@ export class SCC {
   }
 
   /**
+   * Component/entity inventory (graph.entities): the node list behind
+   * relationships and traversal. Edges live in graphRelationships;
+   * paths in traverse().
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.graph-entities work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async graphEntities(): Promise<{ entities: Array<{ id: string; kind: string; name: string }> }> {
+    return { entities: await this.invoke("graph.entities", {}) as Array<{ id: string; kind: string; name: string }> };
+  }
+
+  /**
    * Path-filtered evidence facts (evidence.search): the source,
    * config, runtime, test records behind provenance claims. Omit
    * `path` to list all evidence (capped at `limit`).

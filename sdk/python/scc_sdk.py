@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-entities work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def graphEntities(self) -> dict[str, Any]:
+        """Component/entity inventory (graph.entities): the node list
+        behind relationships and traversal. Edges live in
+        graphRelationships; paths in traverse()."""
+        return {"entities": self.invoke("graph.entities", {})}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.evidence-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def evidenceSearch(self, path: str | None = None, limit: int = 200) -> dict[str, Any]:
         """Path-filtered evidence facts (evidence.search): the source,
