@@ -119,7 +119,7 @@ pub fn snapshot_save(
     task: &str,
     budget: Option<usize>,
 ) -> crate::Result<scc_store::snapshot::ContextSnapshot> {
-    let req = scc_api::TaskContextRequest { goal: task.into(), files: vec![], symbols: vec![], budget, hook: false };
+    let req = scc_api::TaskContextRequest { goal: task.into(), files: vec![], symbols: vec![], budget, hook: false, record_visibility: true };
     let store = crate::workspace::open_store(root)?;
     let config = crate::workspace::load_config(root)?;
     let stale = crate::workspace::stale_paths(&store)?;

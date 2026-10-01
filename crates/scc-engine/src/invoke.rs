@@ -70,11 +70,17 @@ pub fn invoke(
         "context.task_delta" => {
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
             let budget: usize = input.get("budget").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(scc_core::ContextBudget::default().task_delta);
+            // Spec §77: inspection without display must not suppress future
+            // deltas. record_visibility=false skips the ledger write;
+            // default true preserves current CLI behavior.
+            let record = input.get("record_visibility").and_then(|v| v.as_bool()).unwrap_or(true);
             let (scorer, _) = crate::inference::rankers(&store, &config, goal);
             let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
                 scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
             let (delta, ids) = ctx.task_delta(goal, budget, semantic)?;
-            ctx.record_task_delta_ids(&ids);
+            if record {
+                ctx.record_task_delta_ids(&ids);
+            }
             serde_json::json!({"delta": delta, "delta_ids": ids})
         }
         "context.subagent" => {
@@ -94,7 +100,7 @@ pub fn invoke(
                 scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
             let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
                 reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
-            let pack = crate::task::build_enriched_task_pack(&engine, &config, root, &scc_api::TaskContextRequest { goal: goal.into(), files: vec![], symbols: vec![], budget, hook: false }, scorer_trait, reranker_trait)?;
+            let pack = crate::task::build_enriched_task_pack(&engine, &config, root, &scc_api::TaskContextRequest { goal: goal.into(), files: vec![], symbols: vec![], budget, hook: false, record_visibility: true }, scorer_trait, reranker_trait)?;
             serde_json::to_value(pack)?
         }
         "context.component" | "context.flow" | "context.impact" | "context.verify" | "context.structural" | "source.structural" | "surface.build" | "surface.compile" | "surface.global" | "surface.task" | "surface.render" => {

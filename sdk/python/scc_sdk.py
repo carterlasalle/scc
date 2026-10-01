@@ -116,6 +116,7 @@ class SCC:
         files: list[str] | None = None,
         symbols: list[str] | None = None,
         tokenBudget: int | None = None,
+        recordVisibility: bool | None = None,
     ) -> dict[str, Any]:
         """Compile the complete task context artifact for a goal: the enriched
         task pack plus its task-personalized Surface delta.
@@ -134,6 +135,7 @@ class SCC:
             "symbols": symbols or [],
             "budget": tokenBudget,
             "hook": False,
+            "record_visibility": recordVisibility,
         })
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.component-context work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR

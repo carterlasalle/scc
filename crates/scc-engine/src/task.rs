@@ -255,7 +255,7 @@ pub fn build_task_context(
             dropped.push("task-pack");
         }
     }
-    if !delta_ids.is_empty() {
+    if !delta_ids.is_empty() && req.record_visibility {
         let mut led = visible;
         crate::context::record_visible_ids(&mut led, &ctx, &delta_ids);
         ledger_store.save(&led);

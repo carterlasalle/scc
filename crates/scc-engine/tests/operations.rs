@@ -380,6 +380,28 @@ fn spec_section_81_aliases_resolve() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.task-record-visibility verifies=REQ-SI-503JSBGP
+fn task_record_visibility_false_skips_ledger() {
+    // Spec §77: inspection without display must not suppress future
+    // deltas. record_visibility=false returns the same delta but writes
+    // nothing to the ledger; the default records.
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    let first = scc_engine::invoke(&root, "context.task",
+        json!({"goal": "hello", "record_visibility": false})).unwrap();
+    let delta: Vec<String> = serde_json::from_value(first["delta_ids"].clone()).unwrap();
+    assert!(!delta.is_empty(), "fixture must render delta ids: {first}");
+    let second = scc_engine::invoke(&root, "context.task",
+        json!({"goal": "hello"})).unwrap();
+    let delta2: Vec<String> = serde_json::from_value(second["delta_ids"].clone()).unwrap();
+    assert_eq!(delta, delta2, "unrecorded ids resurface: {delta:?} vs {delta2:?}");
+    // The bare delta arm honors the same flag.
+    let bare = scc_engine::invoke(&root, "context.task_delta",
+        json!({"goal": "other-goal", "record_visibility": false})).unwrap();
+    assert!(bare.get("delta_ids").is_some(), "{bare}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.surface-compile verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
 fn surface_compile_returns_unranked_map() {
     // `surface.compile`: stage 1 alone — the candidate map before any

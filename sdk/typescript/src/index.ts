@@ -38,6 +38,8 @@ export interface TaskContextOptions {
   files?: string[];
   symbols?: string[];
   tokenBudget?: number;
+  /** Spec §77: false = inspect without display; skips the ledger write. */
+  recordVisibility?: boolean;
 }
 
 // trace:v1 id=impl.sdk-typescript-src-index.task-context-artifact work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
@@ -222,6 +224,7 @@ export class SCC {
       symbols: opts?.symbols ?? [],
       budget: opts?.tokenBudget,
       hook: false,
+      record_visibility: opts?.recordVisibility ?? null,
     });
   }
 

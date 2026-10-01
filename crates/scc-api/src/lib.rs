@@ -68,6 +68,10 @@ pub struct TaskContextRequest {
     pub budget: Option<usize>,
     #[serde(default)]
     pub hook: bool,
+    /// Spec §77: false = inspect without display; skip the ledger write
+    /// so future deltas still surface these ids. Default true (shown).
+    #[serde(default = "record_visible_on")]
+    pub record_visibility: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -200,6 +204,9 @@ pub struct TraverseRequest {
 
 // trace:exempt reason=internal-detail
 fn trusted_on() -> bool { true }
+
+// trace:exempt reason=internal-detail
+fn record_visible_on() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 // trace:exempt reason=internal-detail
