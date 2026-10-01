@@ -340,7 +340,7 @@ fn spec_section_81_aliases_resolve() {
     let (_dir, root) = fixture();
     // Every §81 alias resolves through invoke to the canonical behavior.
     let pairs: &[(&str, serde_json::Value, &str)] = &[
-        ("surface.compile", json!({}), "text"),
+        ("surface.compile", json!({}), "entries"),
         ("surface.global", json!({}), "text"),
         ("surface.task", json!({"task": "hello"}), "text"),
         ("surface.important", json!({"limit": 3}), "entries"),
@@ -380,6 +380,26 @@ fn spec_section_81_aliases_resolve() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-operations.surface-compile verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-engine-src-context.scc-context-2
+fn surface_compile_returns_unranked_map() {
+    // `surface.compile`: stage 1 alone — the candidate map before any
+    // PPR/rank/select. Superset of what surface.build renders.
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    let map = scc_engine::invoke(&root, "surface.compile", json!({})).unwrap();
+    let entries = map["entries"].as_array().unwrap();
+    assert!(!entries.is_empty(), "compile yields candidates: {map}");
+    let build = scc_engine::invoke(&root, "surface.build", json!({})).unwrap();
+    let rendered = build["result"]["rendered_ids"].as_array().unwrap();
+    assert!(!rendered.is_empty(), "{build}");
+    let ids: std::collections::BTreeSet<&str> =
+        entries.iter().filter_map(|e| e.get("id").and_then(|x| x.as_str())).collect();
+    for r in rendered {
+        assert!(ids.contains(r.as_str().unwrap()), "rendered {r} is a compiled candidate");
+    }
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-operations.extensions-preserved verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.model-get
 fn extensions_section_preserves_plugin_facts() {
     let (_dir, root) = fixture();
@@ -409,9 +429,9 @@ fn operations_schema_comes_from_request_types() {
     let v = scc_engine::invoke(&root, "operations.schema", serde_json::json!({"id": "graph.traverse"})).unwrap();
     let s = v.to_string();
     assert!(s.contains("steps") && s.contains("trusted_only"), "{s}");
-    // Aliases share the canonical schema.
+    // surface.compile takes no input: schema is absent (free empty object).
     let a = scc_engine::invoke(&root, "operations.schema", serde_json::json!({"id": "surface.compile"})).unwrap();
-    assert!(a.to_string().contains("task"), "{a}");
+    assert!(a.to_string().contains("surface.compile"), "{a}");
     // Unknown ops fail loudly.
     let e = scc_engine::invoke(&root, "operations.schema", serde_json::json!({"id": "nope.nope"}));
     assert!(e.is_err(), "{e:?}");

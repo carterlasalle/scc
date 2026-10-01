@@ -104,7 +104,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "context.compress", description: "Compress a task pack", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     // surface + ranking
     OperationDescriptor { id: "surface.build", description: "System Surface Map (global or task-personalized)", mutation: MutationClass::Write, streaming: false , stability: Stability::Stable },
-    OperationDescriptor { id: "surface.compile", description: "Alias for surface.build", mutation: MutationClass::Write, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "surface.compile", description: "Compiled Surface Map: unranked candidate entries before PPR/rank/select", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "surface.global", description: "Alias for surface.build (global blend, no task)", mutation: MutationClass::Write, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "surface.task", description: "Alias for surface.build (task-personalized blend)", mutation: MutationClass::Write, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "surface.important", description: "Alias for ranking.important", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
@@ -251,10 +251,11 @@ pub fn input_schema(id: &str) -> Option<serde_json::Value> {
             serde_json::to_value(schemars::schema_for!(TaskContextRequest)).unwrap_or(serde_json::json!({}))
         }
         "context.startup" => serde_json::to_value(schemars::schema_for!(StartupRequest)).unwrap_or(serde_json::json!({})),
-        "surface.build" | "surface.compile" | "surface.global" | "surface.task" | "surface.render" | "ranking.important" | "surface.important" => {
+        "surface.build" | "surface.global" | "surface.task" | "surface.render" | "ranking.important" | "surface.important" => {
             serde_json::to_value(schemars::schema_for!(SurfaceRequest)).unwrap_or(serde_json::json!({}))
         }
         "context.component" | "context.flow" => serde_json::to_value(schemars::schema_for!(DetailRequest)).unwrap_or(serde_json::json!({})),
+        "surface.compile" => free(&[]),
         "context.impact" => serde_json::to_value(schemars::schema_for!(ImpactRequest)).unwrap_or(serde_json::json!({})),
         "context.structural" | "source.structural" => {
             serde_json::to_value(schemars::schema_for!(StructuralRequest)).unwrap_or(serde_json::json!({}))

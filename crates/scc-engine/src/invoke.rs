@@ -974,7 +974,10 @@ fn invoke_context(
                 scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
             serde_json::json!({"text": ctx.structural(&req, &store.root, semantic)?})
         }
-        "surface.build" | "surface.compile" | "surface.global" | "surface.task" | "surface.render" | "ranking.important" | "surface.important" => {
+        "surface.compile" => {
+            serde_json::to_value(ctx.surface_map()?)?
+        }
+        "surface.build" | "surface.global" | "surface.task" | "surface.render" | "ranking.important" | "surface.important" => {
             let req: scc_api::SurfaceRequest = serde_json::from_value(input)?;
             let goal = req.task.clone().unwrap_or_default();
             let (scorer, _) = crate::inference::rankers(store, config, &goal);
