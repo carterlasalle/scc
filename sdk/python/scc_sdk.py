@@ -255,6 +255,24 @@ class SCC:
             "profile": profile,
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-trace work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def rankingTrace(
+        self,
+        goal: str | None = None,
+        limit: int = 50,
+        explain: bool = False,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Full ranking trace (§19): RankResult items plus the seed and
+        required inputs the blend consumed. Same computation as
+        ranking.symbols; the envelope is the audit path."""
+        return self.invoke("ranking.trace", {
+            "goal": goal,
+            "limit": limit,
+            "explain": explain,
+            "profile": profile,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,

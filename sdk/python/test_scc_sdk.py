@@ -176,6 +176,14 @@ class TestSCCSDK(unittest.TestCase):
         for feat in ("task_ppr", "global_ppr", "lexical", "semantic", "confidence", "criticality", "change_risk", "novelty"):
             self.assertIn(feat, out["features"][0], f"missing feature {feat}: {out['features'][0]}")
 
+    # trace:exempt reason=unit-test
+    def test_ranking_trace_returns_items_plus_inputs(self):
+        out = self.scc.rankingTrace(goal="add numbers", limit=5)
+        self.assertIn("items", out)
+        self.assertTrue(out["items"], f"empty trace: {out}")
+        self.assertIn("seeds", out)
+        self.assertIn("required", out)
+
     def test_explain_ranking_returns_item_audit(self):
         ranked = self.scc.ranking(goal="add numbers", limit=5)
         first_id = ranked["items"][0]["id"]

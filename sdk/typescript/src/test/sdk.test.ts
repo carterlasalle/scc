@@ -174,6 +174,12 @@ test("rankingFeatures() returns feature rows", { skip: skip ? skipReason : false
   }
 });
 
+test("rankingTrace() returns items plus seed/required inputs", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().rankingTrace({ goal: "add numbers", limit: 5 });
+  assert.ok(out.items.length > 0);
+  assert.ok(Array.isArray(out.seeds) && Array.isArray(out.required));
+});
+
 test("explainRanking() returns the item audit", { skip: skip ? skipReason : false }, async () => {
   const ranked = await scc().ranking({ goal: "add numbers", limit: 5 });
   const firstId = ranked.items[0].id;

@@ -334,6 +334,19 @@ export class SCC {
   }
 
   /**
+   * Full ranking trace (§19): RankResult items plus the seed and required
+   * inputs the blend consumed. Same computation as ranking.symbols; the
+   * envelope is the audit path.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-trace work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async rankingTrace(args: { goal?: string; limit?: number; explain?: boolean; profile?: string }): Promise<RankResult & { seeds: string[]; required: string[] }> {
+    return this.invoke("ranking.trace", {
+      goal: args.goal ?? null, limit: args.limit ?? 50,
+      explain: args.explain ?? false, profile: args.profile ?? null,
+    });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).
