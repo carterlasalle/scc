@@ -493,7 +493,7 @@ pub fn invoke(
             let budget: usize = items.iter().map(|i| i.token_cost).sum();
             // Budget-optimizer extension (§124 item 27): at most one
             // declarer; the plugin returns the full selected id list.
-            let mut ap = crate::plugins::active(root, &config);
+            let ap = crate::plugins::active(root, &config);
             match crate::plugins::budget_selection(&ap, &req, &items, budget)? {
                 Some(sel) => {
                     let mut out = serde_json::json!({"selected": sel});
