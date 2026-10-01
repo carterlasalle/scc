@@ -1555,10 +1555,10 @@ pub fn cmd_operations(describe: Option<&str>) -> crate::Result<()> {
         }
         return Ok(());
     }
-    println!("Operation                 Mutation  Stream  Description");
-    println!("----------------------------------------------------------------");
+    println!("Operation                 Mutation       Stream  Stability     Description");
+    println!("--------------------------------------------------------------------------------");
     for d in scc_engine::ops::OPERATIONS {
-        println!("{:<26} {:<9} {:<7} {}", d.id, format!("{:?}", d.mutation), d.streaming, d.description);
+        println!("{:<26} {:<14} {:<7} {:<13} {}", d.id, format!("{:?}", d.mutation), d.streaming, format!("{:?}", d.stability), d.description);
     }
     Ok(())
 }
