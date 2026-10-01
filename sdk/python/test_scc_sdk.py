@@ -73,6 +73,12 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_workspace_session_pins_identity(self):
+        sess = self.scc.workspaceSession()
+        for key in ("repo_id", "revision", "epoch", "config_hash"):
+            self.assertIn(key, sess, f"missing {key}: {sess}")
+
+    # trace:exempt reason=unit-test
     def test_graph_entity_reports_trust_verdict(self):
         syms = self.scc.ranking(goal="add numbers", limit=5)
         self.assertTrue(syms["items"], f"no ranked items: {syms}")

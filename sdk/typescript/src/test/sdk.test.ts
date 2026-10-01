@@ -70,6 +70,12 @@ test("systemOverview() content identifies the repository", { skip: skip ? skipRe
   assert.ok(Array.isArray(pack.entity_ids));
 });
 
+test("workspaceSession() pins the model identity", { skip: skip ? skipReason : false }, async () => {
+  const sess = await scc().workspaceSession();
+  for (const key of ["repo_id", "revision", "epoch", "config_hash"] as const)
+    assert.ok(key in sess, `missing ${key}`);
+});
+
 test("graphEntity() reports the trust verdict", { skip: skip ? skipReason : false }, async () => {
   const syms = await scc().ranking({ goal: "add numbers", limit: 5 });
   assert.ok(syms.items.length > 0);

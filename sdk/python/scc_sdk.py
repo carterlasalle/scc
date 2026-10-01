@@ -169,6 +169,13 @@ class SCC:
         Graph node; ``trusted`` reports the TrustedGraphView decision."""
         return self.invoke("graph.entity.get", {"id": id})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.workspace-session work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def workspaceSession(self) -> dict[str, Any]:
+        """Pinned model-session identity (§6): repo, revision, epoch,
+        config hash, plugin set, ranking pipeline. The anchor every
+        result's model identity refers to."""
+        return self.invoke("workspace.session", {})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.model-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def modelGet(self) -> dict[str, Any]:
         """Full model access (§14): everything SCC knows as structured
