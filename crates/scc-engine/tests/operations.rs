@@ -306,7 +306,7 @@ fn spec_section_81_aliases_resolve() {
         ("context.task_delta", json!({"goal": "hello"}), "delta"),
         // context.docs asserted separately below (unconfigured Context7 must fail loudly, never synthesize).
     ];
-    for (op, input, probe) in pairs {
+    for (op, input, _probe) in pairs {
         let v = scc_engine::invoke(&root, op, input.clone());
         assert!(v.is_ok(), "{op} must resolve: {v:?}");
     }
