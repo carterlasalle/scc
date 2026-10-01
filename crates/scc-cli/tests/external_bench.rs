@@ -522,6 +522,7 @@ fn scc_full_structural_section_is_goal_selected_not_ground_truth() {
         }
     }
     assert!(!units.is_empty(), "structural section present: {text}");
+    assert!(text.contains("# STRUCTURAL SOURCE"), "§18 section header present");
 
     // Oracle: `scc surface --task "<goal>"` in an indexed fixture copy.
     let tmp = tempfile::TempDir::new().unwrap();
