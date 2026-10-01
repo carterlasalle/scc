@@ -310,6 +310,11 @@ pub struct Session {
     pub config_hash: String,
     pub plugin_lock: Vec<serde_json::Value>,
     pub rank_salt: String,
+    /// Ranking-pipeline hash (spec §§58/100): the plugin cache-key
+    /// fragment active at session open. "" on repos that predate the
+    /// field (legacy sessions still compare equal when the rest does).
+    #[serde(default)]
+    pub pipeline: String,
 }
 
 // trace:exempt reason=internal-detail
@@ -322,13 +327,15 @@ pub fn open_session(store: &Store, config: &Config) -> crate::Result<Session> {
         .map(|(s, _)| s.revision)
         .unwrap_or_else(|| "not-indexed".to_string());
     let engine = open_engine(store, config, stale_paths(store)?)?;
+    let ap = crate::plugins::active(&store.root, config);
     Ok(Session {
         repo_id: repo.id,
         revision,
         epoch,
         config_hash: scc_indexer::semantic_config_hash(config),
-        plugin_lock: crate::plugins::lock_entries(&crate::plugins::active(&store.root, config)),
-        rank_salt: engine.settings.rank_salt,
+        plugin_lock: crate::plugins::lock_entries(&ap),
+        rank_salt: engine.settings.rank_salt.clone(),
+        pipeline: crate::plugins::cache_key_fragment(&ap),
     })
 }
 

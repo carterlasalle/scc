@@ -237,6 +237,54 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.pipeline-rekey verifies=REQ-SI-503JSBGP exercises=impl.scc.startup.rank-cache-pipeline
+fn pipeline_fragment_rekeys_rank_cache() {
+    // §58: the rank cache keys on the ranking pipeline, not just the
+    // model epoch. A plugin install must change the fragment, and two
+    // fragments must load/store disjoint cache entries.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    let cfg = scc_indexer::Config::default();
+    scc_engine::index::full(&root, &cfg).unwrap();
+    let store = scc_store::Store::open(&dir.path().join("scc.db"), &root).unwrap();
+    let graph = scc_graph::RealityGraph::load(&store).unwrap();
+    let settings = scc_context::ContextSettings::default();
+    let stale: Vec<String> = Vec::new();
+    let comp = scc_context::ContextCompiler::new(&store, &graph, settings, stale);
+    let k0 = scc_engine::plugins::cache_key_fragment(
+        &scc_engine::plugins::active(&root, &cfg));
+    // A plugin install changes the fragment.
+    let plugdir = root.join(".scc").join("plugins").join("acme.pipe");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.pipe\"\nname = \"Pipe\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = []\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let k1 = scc_engine::plugins::cache_key_fragment(
+        &scc_engine::plugins::active(&root, &cfg));
+    assert_ne!(k0, k1, "install must change the pipeline fragment");
+    // Disjoint cache entries per pipeline at the same model epoch.
+    // The entry mirrors the live compiler epoch/policy/salt (load
+    // rejects mismatches by design); only the pipeline varies.
+    let epoch = comp.store.cache_epoch().unwrap();
+    let entry = scc_context::startup::GlobalRankCache {
+        epoch: epoch.clone(), policy: scc_context::startup::trust_policy_str(comp.view.policy()),
+        salt: comp.settings.rank_salt.clone(),
+        global_vector: vec![1.0], node_symbol_map: Default::default(),
+        candidates_epoch: epoch, candidate_ids: vec![],
+        hits: 0,
+    };
+    scc_context::startup::store_global_rank_cache_with_pipeline(&comp, &entry, &k0);
+    assert!(scc_context::startup::load_global_rank_cache_with_pipeline(&comp, &k0).is_some());
+    assert!(scc_context::startup::load_global_rank_cache_with_pipeline(&comp, &k1).is_none(),
+        "other pipeline must miss");
+    assert!(scc_context::startup::load_global_rank_cache(&comp).is_none(),
+        "legacy empty pipeline must miss a pipelined entry");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.viewer-panel verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.viewer-panels
 fn viewer_panel_plugin_returns_structured_data() {
     // §124 item 32: a `viewer-panel:*` extension returns structured

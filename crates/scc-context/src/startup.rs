@@ -610,7 +610,7 @@ pub fn build_startup(
 /// `system_atlas` pack-cache key pattern). A changed epoch, policy, or
 /// salt yields a different key — a stale entry is never served.
 // trace:exempt reason=internal-detail
-fn global_rank_key(epoch: &str, policy: &str, salt: &str) -> String {
+fn global_rank_key(epoch: &str, policy: &str, salt: &str, pipeline: &str) -> String {
     let mut h = blake3::Hasher::new();
     h.update(b"rank:global:v1");
     h.update(epoch.as_bytes());
@@ -618,20 +618,29 @@ fn global_rank_key(epoch: &str, policy: &str, salt: &str) -> String {
     h.update(policy.as_bytes());
     h.update(b"\0");
     h.update(salt.as_bytes());
+    h.update(b"\0");
+    h.update(pipeline.as_bytes());
     format!("rank:global:{}", &h.finalize().to_hex()[..20])
 }
+
+// trace:exempt reason=internal-detail
+fn no_pipeline() -> String { String::new() }
 
 /// Load the per-ModelEpoch global rank cache from the store cache
 /// (key `rank:global:<hash>` over epoch + policy + salt). `None` on any
 /// miss/error — never panics, never fabricates. The entry is validated
 /// against the current epoch/policy/salt (belt-and-suspenders: the key
 /// already pins them).
-// trace:v1 id=impl.scc.startup.rank-cache-load work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching satisfies=REQ-global-rank-cached-per-model-epoch
-pub fn load_global_rank_cache(compiler: &ContextCompiler) -> Option<GlobalRankCache> {
+/// Pipeline-aware variant (spec §58): `pipeline` is the ranking-pipeline
+/// hash (e.g. the engine plugin cache-key fragment). "" preserves the
+/// legacy key exactly — no-plugin callers see byte-identical keys.
+/// Supersedes impl.scc.startup.rank-cache-load (same body + pipeline).
+// trace:v1 id=impl.scc.startup.rank-cache-pipeline work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn load_global_rank_cache_with_pipeline(compiler: &ContextCompiler, pipeline: &str) -> Option<GlobalRankCache> {
     let epoch = compiler.store.cache_epoch().ok()?;
     let policy = trust_policy_str(compiler.view.policy());
     let salt = &compiler.settings.rank_salt;
-    let key = global_rank_key(&epoch, &policy, salt);
+    let key = global_rank_key(&epoch, &policy, salt, pipeline);
     let cached = compiler.store.cache_get(&key, &epoch).ok().flatten()?;
     let c: GlobalRankCache = serde_json::from_str(&cached).ok()?;
     if c.epoch != epoch || c.policy != policy || c.salt != *salt {
@@ -640,20 +649,31 @@ pub fn load_global_rank_cache(compiler: &ContextCompiler) -> Option<GlobalRankCa
     Some(c)
 }
 
+// trace:exempt reason=internal-detail
+pub fn load_global_rank_cache(compiler: &ContextCompiler) -> Option<GlobalRankCache> {
+    load_global_rank_cache_with_pipeline(compiler, "")
+}
+
 /// Persist the per-ModelEpoch global rank cache (best-effort: cache
 /// failures never fail the caller).
 // trace:v1 id=impl.scc.startup.rank-cache-store work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching satisfies=REQ-global-rank-cached-per-model-epoch
-pub fn store_global_rank_cache(compiler: &ContextCompiler, cache: &GlobalRankCache) {
+// trace:exempt reason=internal-detail
+pub fn store_global_rank_cache_with_pipeline(compiler: &ContextCompiler, cache: &GlobalRankCache, pipeline: &str) {
     let epoch = compiler
         .store
         .cache_epoch()
         .unwrap_or_else(|_| "no-epoch".into());
     let policy = trust_policy_str(compiler.view.policy());
     let salt = &compiler.settings.rank_salt;
-    let key = global_rank_key(&epoch, &policy, salt);
+    let key = global_rank_key(&epoch, &policy, salt, pipeline);
     if let Ok(json) = serde_json::to_string(cache) {
         let _ = compiler.store.cache_put(&key, &json, &epoch);
     }
+}
+
+// trace:exempt reason=internal-detail
+pub fn store_global_rank_cache(compiler: &ContextCompiler, cache: &GlobalRankCache) {
+    store_global_rank_cache_with_pipeline(compiler, cache, "")
 }
 
 /// The logical symbol entity id of a rendered entry id: overload-sensitive
@@ -757,7 +777,8 @@ fn compiler_warnings(compiler: &ContextCompiler) -> Vec<String> {
 }
 
 // trace:exempt reason=internal-detail
-pub(crate) fn trust_policy_str(p: &scc_graph::TrustPolicy) -> String {
+// trace:exempt reason=internal-detail
+pub fn trust_policy_str(p: &scc_graph::TrustPolicy) -> String {
     format!(
         "extracted={} resolved={} observed={} declared={} inferred={} floor={}",
         p.allow_extracted,
