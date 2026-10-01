@@ -271,6 +271,18 @@ export class SCC {
   }
 
   /**
+   * Fast where-to-pay-attention answer (§18/§96): top Surface entries,
+   * optionally scoped to a component and personalized to a task goal.
+   * `tasked` reports whether the call was task-personalized.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.surface-important work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async surfaceImportant(args?: { goal?: string; limit?: number; component?: string }): Promise<{ entries: unknown[]; tasked: boolean }> {
+    return this.invoke("surface.important", {
+      task: args?.goal ?? null, limit: args?.limit ?? 10, component: args?.component ?? null,
+    });
+  }
+
+  /**
    * Rank symbols for a goal through the full blend (task/global PPR,
    * lexical/semantic, confidence, criticality, change risk, novelty,
    * plus any active plugin features). Returns the RankResult envelope

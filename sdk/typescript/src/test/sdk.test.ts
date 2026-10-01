@@ -193,6 +193,12 @@ test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : 
   assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
 });
 
+test("surfaceImportant() returns top entries", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().surfaceImportant({ goal: "add numbers", limit: 3 });
+  assert.ok(Array.isArray(out.entries) && out.entries.length > 0);
+  assert.equal(typeof out.tasked, "boolean");
+});
+
 test("rankingEntry() returns the Surface object", { skip: skip ? skipReason : false }, async () => {
   const syms = await scc().ranking({ goal: "add numbers", limit: 5 });
   assert.ok(syms.items.length > 0);

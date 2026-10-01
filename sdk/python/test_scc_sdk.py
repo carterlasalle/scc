@@ -201,6 +201,13 @@ class TestSCCSDK(unittest.TestCase):
 
     # trace:exempt reason=unit-test
     # trace:exempt reason=unit-test
+    def test_surface_important_returns_entries(self):
+        out = self.scc.surfaceImportant(goal="add numbers", limit=3)
+        self.assertIn("entries", out, f"missing entries: {out}")
+        self.assertTrue(out["entries"], f"empty entries: {out}")
+        self.assertIn("tasked", out, f"missing tasked: {out}")
+
+    # trace:exempt reason=unit-test
     def test_ranking_entry_returns_surface_object(self):
         syms = self.scc.ranking(goal="add numbers", limit=5)
         self.assertTrue(syms["items"], f"no ranked items: {syms}")

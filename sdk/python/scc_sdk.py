@@ -184,6 +184,23 @@ class SCC:
             "explain": False,
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.surface-important work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def surfaceImportant(
+        self,
+        goal: str | None = None,
+        limit: int = 10,
+        component: str | None = None,
+    ) -> dict[str, Any]:
+        """Fast where-to-pay-attention answer (§18/§96): top ``limit``
+        Surface entries, optionally scoped to ``component`` and
+        personalized to a task ``goal``. ``tasked`` reports whether the
+        call was task-personalized."""
+        return self.invoke("surface.important", {
+            "task": goal,
+            "limit": limit,
+            "component": component,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def ranking(
         self,
