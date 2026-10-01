@@ -1635,6 +1635,22 @@ pub fn cmd_plugin_check(root: &Path) -> crate::Result<()> {
     Ok(())
 }
 
+/// `scc plugin enable <id>` / `scc plugin disable <id>`: project
+/// allow-list in .scc/config.yaml. Engine owns the mutation; CLI renders.
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-enable-disable work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_enable(root: &Path, id: &str) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.enable", serde_json::json!({"id": id})).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+// trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-disable work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_plugin_disable(root: &Path, id: &str) -> crate::Result<()> {
+    let out = scc_engine::invoke(root, "plugins.disable", serde_json::json!({"id": id})).map_err(engine_err)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
 /// `scc plugin invoke <operation> [json-input]`.
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-plugin-invoke work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_plugin_invoke(root: &Path, operation: &str, input: &str) -> crate::Result<()> {

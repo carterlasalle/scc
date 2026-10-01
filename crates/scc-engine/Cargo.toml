@@ -32,6 +32,8 @@ serde.workspace = true
 # trace:exempt reason=internal-detail
 serde_json.workspace = true
 # trace:exempt reason=internal-detail
+serde_yaml.workspace = true
+# trace:exempt reason=internal-detail
 thiserror.workspace = true
 
 # trace:exempt reason=internal-detail

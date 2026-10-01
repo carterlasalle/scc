@@ -718,6 +718,50 @@ pub fn invoke(
                 Err(drift) => serde_json::json!({"ok": false, "drift": drift}),
             }
         }
+        "plugins.enable" | "plugins.disable" => {
+            // Project allow-list (§29 enable/disable): mutate
+            // `plugins.enabled` in .scc/config.yaml in place, preserving
+            // every other key (raw YAML edit, not a struct round-trip —
+            // unknown keys must survive). Empty list means "all
+            // discovered run"; enable adds the id, disable removes it.
+            // Undiscovered ids fail loudly — a typo must not silently
+            // narrow the set.
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if id.is_empty() {
+                return Err(crate::EngineError::Other(format!("{operation} requires an `id`")));
+            }
+            let known: Vec<String> = scc_plugin_host::discover(root).into_iter().map(|p| p.manifest.id).collect();
+            if !known.iter().any(|k| k == id) {
+                return Err(crate::EngineError::Other(format!("unknown plugin '{id}' (discovered: {})", known.join(", "))));
+            }
+            let path = crate::workspace::config_path(root);
+            let mut doc: serde_yaml::Value = if path.exists() {
+                let text = std::fs::read_to_string(&path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+                serde_yaml::from_str(&text).map_err(|e| crate::EngineError::Other(e.to_string()))?
+            } else {
+                serde_yaml::from_str(&scc_indexer::Config::default_yaml()).map_err(|e| crate::EngineError::Other(e.to_string()))?
+            };
+            if !doc.get("plugins").is_some() {
+                if let Some(obj) = doc.as_mapping_mut() {
+                    obj.insert(serde_yaml::Value::String("plugins".into()), serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+                }
+            }
+            let mut cur: Vec<String> = doc.get("plugins").and_then(|p| p.get("enabled")).and_then(|v| serde_yaml::from_value(v.clone()).ok()).unwrap_or_default();
+            if operation == "plugins.enable" {
+                if !cur.iter().any(|x| x == id) { cur.push(id.to_string()); }
+            } else {
+                cur.retain(|x| x != id);
+            }
+            if let Some(plugins) = doc.get_mut("plugins").and_then(|p| p.as_mapping_mut()) {
+                plugins.insert(serde_yaml::Value::String("enabled".into()), serde_yaml::to_value(&cur).map_err(|e| crate::EngineError::Other(e.to_string()))?);
+            }
+            if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| crate::EngineError::Other(e.to_string()))?; }
+            let text = serde_yaml::to_string(&doc).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+            std::fs::write(&path, text).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+            let cfg = crate::workspace::load_config(root)?;
+            let ap = crate::plugins::active(root, &cfg);
+            serde_json::json!({"ok": true, "enabled": cfg.plugins.enabled, "active": ap.plugins.iter().map(|p| &p.manifest.id).collect::<Vec<_>>()})
+        }
         "plugin_state.get" | "plugin_state.put" | "plugin_state.delete" | "plugin_state.scan" => {
             let pid = input.get("plugin").and_then(|v| v.as_str()).unwrap_or("");
             let ap = crate::plugins::active(root, &config);

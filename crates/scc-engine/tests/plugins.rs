@@ -711,6 +711,28 @@ fn plugin_lock_and_check_ops_round_trip() {
     let check = scc_engine::invoke(&root, "plugins.check", serde_json::json!({})).unwrap();
     assert_eq!(check.get("ok"), Some(&serde_json::json!(true)), "{check}");
 }
+#[test]
+// trace:v1 id=test.scc-engine-plugins.enable-disable verifies=REQ-SI-503JSBGP
+fn plugin_enable_disable_round_trip() {
+    // §29 enable/disable: the allow-list mutates .scc/config.yaml in
+    // place; unknown ids fail loudly; other keys survive.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = write_plugin(dir.path());
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    std::fs::write(root.join(".scc").join("config.yaml"), "schema: 1\ncontext:\n  startup_tokens: 4242\n").unwrap();
+    let en = scc_engine::invoke(&root, "plugins.enable", serde_json::json!({"id": "acme.echo"})).unwrap();
+    assert_eq!(en["ok"], serde_json::json!(true), "{en}");
+    assert!(en["enabled"].as_array().unwrap().iter().any(|x| x == "acme.echo"), "{en}");
+    let text = std::fs::read_to_string(root.join(".scc").join("config.yaml")).unwrap();
+    assert!(text.contains("startup_tokens: 4242"), "other keys survive: {text}");
+    // Unknown id fails loudly.
+    let e = scc_engine::invoke(&root, "plugins.enable", serde_json::json!({"id": "no.such"}));
+    assert!(e.is_err(), "typo must fail: {e:?}");
+    let dis = scc_engine::invoke(&root, "plugins.disable", serde_json::json!({"id": "acme.echo"})).unwrap();
+    assert_eq!(dis["ok"], serde_json::json!(true), "{dis}");
+    assert!(!dis["enabled"].as_array().unwrap().iter().any(|x| x == "acme.echo"), "{dis}");
+}
+
 
 #[test]
 // trace:v1 id=test.scc-engine-plugins.edge-weight verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation

@@ -26,6 +26,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+// trace:exempt reason=internal-detail
 enum PluginSub {
     /// List enabled plugins with lock entries
     List,
@@ -49,6 +50,16 @@ enum PluginSub {
         /// JSON input (default {})
         #[arg(default_value = "{}")]
         input: String,
+    },
+    /// Add a plugin id to the project allow-list (plugins.enabled)
+    Enable {
+        /// Plugin id (must be discovered)
+        id: String,
+    },
+    /// Remove a plugin id from the project allow-list
+    Disable {
+        /// Plugin id
+        id: String,
     },
 }
 
@@ -967,6 +978,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             PluginSub::Check => commands::cmd_plugin_check(&root),
             PluginSub::Graph => commands::cmd_plugin_graph(&root),
             PluginSub::Invoke { operation, input } => commands::cmd_plugin_invoke(&root, operation.as_str(), input.as_str()),
+            PluginSub::Enable { id } => commands::cmd_plugin_enable(&root, id.as_str()),
+            PluginSub::Disable { id } => commands::cmd_plugin_disable(&root, id.as_str()),
         },
         Commands::Ingest { body } => commands::cmd_ingest_runtime(&root, &body),
         Commands::Embed => scc_cli::embed_cli::cmd_embed(&root),

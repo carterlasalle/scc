@@ -213,6 +213,8 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "plugins.invoke", description: "Invoke any plugin operation explicitly", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "plugins.lock", description: "Write .scc/plugins.lock from the live plugin set", mutation: MutationClass::ExternalMutation, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "plugins.check", description: "Verify live plugins against .scc/plugins.lock", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "plugins.enable", description: "Add a plugin id to the project allow-list (plugins.enabled in .scc/config.yaml)", mutation: MutationClass::ExternalMutation, streaming: false , stability: Stability::Experimental },
+    OperationDescriptor { id: "plugins.disable", description: "Remove a plugin id from the project allow-list (plugins.enabled in .scc/config.yaml)", mutation: MutationClass::ExternalMutation, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "plugins.graph", description: "Deterministic extension order per type (priority + before/after DAG)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "plugins.contribute", description: "Validate and commit a plugin contribution batch (entities, relationships, evidence)", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "plugins.promote", description: "Promote selected sidecar findings to canonical relationships (core predicates, existing endpoints, provenance-stamped)", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Experimental },
@@ -270,6 +272,7 @@ pub fn input_schema(id: &str) -> Option<serde_json::Value> {
         }
         "graph.traverse" => serde_json::to_value(schemars::schema_for!(TraverseRequest)).unwrap_or(serde_json::json!({})),
         "graph.explain" => free(&[("subject", "string"), ("predicate", "string"), ("object", "string")]),
+        "plugins.enable" | "plugins.disable" => free(&[("id", "string")]),
         "graph.entity.get" | "graph.entity" => free(&[("id", "string")]),
         "ranking.symbols" | "ranking.global" | "ranking.task" | "ranking.entities" | "surface.rank" => {
             serde_json::to_value(schemars::schema_for!(RankRequest)).unwrap_or(serde_json::json!({}))
