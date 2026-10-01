@@ -237,6 +237,40 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.diversity-policy verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.diversity-selection
+fn diversity_policy_plugin_replaces_mmr() {
+    // §124 item 24: a `diversity-policy` extension replaces MMR
+    // wholesale. Default no-plugin path unchanged; the plugin answer is
+    // honored verbatim.
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let ranked = |ids: &[&str]| -> Vec<serde_json::Value> {
+        ids.iter().map(|id| serde_json::json!({
+            "id": id, "kind": "symbol", "value": 1.0, "token_cost": 10})).collect()
+    };
+    let base = scc_engine::invoke(&root, "selection.mmr", serde_json::json!({
+        "ranked": ranked(&["a", "b", "c"]), "budget": 30,
+    })).unwrap();
+    assert_eq!(base["selected"].as_array().unwrap().len(), 3, "{base}");
+    let plugdir = root.join(".scc").join("plugins").join("acme.d");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.d\"\nname = \"D\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"selection.diversify\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"diversity-policy:acme.top1\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nprint(json.dumps({\"output\": {\"selected\": [\"b\"]}}))\n").unwrap();
+    let out = scc_engine::invoke(&root, "selection.mmr", serde_json::json!({
+        "ranked": ranked(&["a", "b", "c"]), "budget": 30,
+    })).unwrap();
+    assert_eq!(out["selected"], serde_json::json!(["b"]), "{out}");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.budget-optimizer verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.budget-selection
 fn budget_optimizer_plugin_replaces_selection() {
     // §124 item 27: a `budget-optimizer` extension replaces budget

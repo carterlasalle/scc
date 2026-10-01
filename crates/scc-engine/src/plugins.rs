@@ -394,6 +394,77 @@ pub fn budget_selection(
     }
 }
 
+/// Diversity-policy selection (§124 item 24): the single declaring
+/// `diversity-policy:*` extension replaces MMR via the plugin's
+/// `selection.diversify` op (input: ranked ids + lambda; output
+/// `selected: [ids]`, honored verbatim). Zero declarers = None (caller
+/// runs default MMR). Two+ declarers = hard error (spec §32: exclusive
+/// policy slots never silently last-win). Unknown ids fail loudly; an
+/// empty answer is honored (select nothing).
+// trace:v1 id=impl.scc-engine-plugins.diversity-selection work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn diversity_selection(
+    ap: &ActivePlugins,
+    req: &scc_api::SelectionRequest,
+) -> crate::Result<Option<Vec<String>>> {
+    let specs: Vec<(String, String, String)> = ap
+        .plugins
+        .iter()
+        .flat_map(|pl| {
+            pl.manifest.extensions.iter()
+                .filter(|e| e.extension_type == "diversity-policy")
+                .map(|e| (pl.manifest.id.clone(), e.id.clone(), pl.manifest.failure_policy.clone()))
+        })
+        .collect();
+    if specs.is_empty() {
+        return Ok(None);
+    }
+    if specs.len() > 1 {
+        let who: Vec<String> = specs.iter().map(|(pid, eid, _)| format!("{eid} from {pid}")).collect();
+        return Err(crate::EngineError::Other(format!(
+            "multiple diversity-policy extensions compete ({}) — exclusive policy slot needs explicit configuration (spec §32)",
+            who.join(", ")
+        )));
+    }
+    let (pid, ext_id, policy) = &specs[0];
+    let plug = ap.plugins.iter().find(|pl| &pl.manifest.id == pid).cloned()
+        .ok_or_else(|| crate::EngineError::Other(format!("diversity plugin {pid} vanished")))?;
+    let ranked: Vec<serde_json::Value> = req.ranked.iter().map(|e| {
+        serde_json::json!({"id": e.id, "value": e.value})
+    }).collect();
+    let input = serde_json::json!({
+        "policy": ext_id, "ranked": ranked,
+        "lambda": req.lambda.unwrap_or(0.5),
+    });
+    match scc_plugin_host::call(&plug, "selection.diversify", input, None) {
+        Ok(v) => {
+            let known: std::collections::BTreeSet<&str> =
+                req.ranked.iter().map(|e| e.id.as_str()).collect();
+            let mut sel = Vec::new();
+            if let Some(arr) = v.get("selected").and_then(|x| x.as_array()) {
+                for x in arr {
+                    let id = x.as_str().unwrap_or("");
+                    if !known.contains(id) {
+                        return Err(crate::EngineError::Other(format!(
+                            "diversity policy {ext_id} from {pid} selected unknown id '{id}'"
+                        )));
+                    }
+                    sel.push(id.to_string());
+                }
+            }
+            Ok(Some(sel))
+        }
+        Err(e) => {
+            if policy == "required" {
+                Err(crate::EngineError::Other(format!(
+                    "diversity policy {ext_id} from {pid} failed: {e}"
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 /// Deterministic extension order (§19): priority ascending, plugin id
 /// ascending, then before/after DAG edges. Unknown references and cycles
 /// are startup errors — never silent misordering.

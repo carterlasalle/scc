@@ -445,6 +445,13 @@ pub fn invoke(
             // request's `group` field (component/path supplied by caller).
             let mut ap = crate::plugins::active(root, &config);
             crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            // Diversity-policy replacement (§124 item 24): a single
+            // declarer replaces MMR wholesale (verbatim answer).
+            if let Some(sel) = crate::plugins::diversity_selection(&ap, &req)? {
+                let mut out = serde_json::json!({"selected": sel});
+                if !ap.diagnostics.is_empty() { out["plugin_diagnostics"] = serde_json::to_value(&ap.diagnostics)?; }
+                return Ok(out);
+            }
             let hooks = ranking_hooks_from_plugins(&mut ap, "");
             let sims = std::sync::Arc::new(hooks.similarities);
             let out = scc_context::selector::mmr_diversify(
