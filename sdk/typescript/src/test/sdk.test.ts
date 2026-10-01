@@ -209,6 +209,12 @@ test("rankingEntry() returns the Surface object", { skip: skip ? skipReason : fa
   assert.ok("rank" in entry);
 });
 
+test("edgeWeight() distinguishes calls from imports", { skip: skip ? skipReason : false }, async () => {
+  const calls = await scc().edgeWeight({ predicate: "calls", confidence: 1.0 });
+  const imports = await scc().edgeWeight({ predicate: "imports", confidence: 1.0 });
+  assert.ok(calls.weight > imports.weight);
+});
+
 test("finalImportance() matches scoreEntries() on one row", { skip: skip ? skipReason : false }, async () => {
   const feats = { task_ppr: 0.9, global_ppr: 0.5, lexical: 0.8, semantic: 0.7, confidence: 0.9, criticality: 1.0, change_risk: 0.4, novelty: 0.5 };
   const one = await scc().finalImportance(feats, true);

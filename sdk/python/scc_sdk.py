@@ -367,6 +367,24 @@ class SCC:
         programmatic Surface object (§123.7 needs entry-level access)."""
         return self.invoke("ranking.entry", {"id": id})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.edge-weight work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def edgeWeight(
+        self,
+        predicate: str = "calls",
+        confidence: float = 1.0,
+        total_symbols: int = 1,
+        target_in_degree: int = 0,
+    ) -> dict[str, Any]:
+        """Full edge weight (§45/§49): predicate × provenance ×
+        confidence × rarity. Provenance is Extracted on this arm;
+        plugin edge-weight hooks alter live ranking, not this probe."""
+        return self.invoke("ranking.edge_weight", {
+            "predicate": predicate,
+            "confidence": confidence,
+            "total_symbols": total_symbols,
+            "target_in_degree": target_in_degree,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.final-importance work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def finalImportance(
         self,

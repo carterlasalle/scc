@@ -425,6 +425,19 @@ export class SCC {
   }
 
   /**
+   * Full edge weight (§45/§49): predicate × provenance × confidence ×
+   * rarity. Provenance is Extracted on this arm; plugin edge-weight
+   * hooks alter live ranking, not this probe.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.edge-weight work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async edgeWeight(args?: { predicate?: string; confidence?: number; totalSymbols?: number; targetInDegree?: number }): Promise<{ weight: number }> {
+    return this.invoke("ranking.edge_weight", {
+      predicate: args?.predicate ?? "calls", confidence: args?.confidence ?? 1.0,
+      total_symbols: args?.totalSymbols ?? 1, target_in_degree: args?.targetInDegree ?? 0,
+    });
+  }
+
+  /**
    * Default blend (§51) over explicit feature values. Pure math, no
    * store, no hooks — the weights ranking.symbols blends from.
    */

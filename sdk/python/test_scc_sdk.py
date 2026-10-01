@@ -218,6 +218,15 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("rank", entry, f"missing rank: {entry}")
 
     # trace:exempt reason=unit-test
+    def test_edge_weight_distinguishes_calls_from_imports(self):
+        calls = self.scc.edgeWeight(predicate="calls", confidence=1.0)
+        imports = self.scc.edgeWeight(predicate="imports", confidence=1.0)
+        self.assertIn("weight", calls, f"missing weight: {calls}")
+        self.assertGreater(
+            calls["weight"], imports["weight"],
+            f"calls should outweigh imports: {calls} vs {imports}")
+
+    # trace:exempt reason=unit-test
     def test_final_importance_matches_score_entries(self):
         feats = {"task_ppr": 0.9, "global_ppr": 0.5, "lexical": 0.8,
                  "semantic": 0.7, "confidence": 0.9, "criticality": 1.0,
