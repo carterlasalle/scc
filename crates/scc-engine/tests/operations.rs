@@ -347,3 +347,19 @@ fn extensions_section_preserves_plugin_facts() {
     let ids = ext["acme.demo"].as_array().cloned().unwrap_or_default();
     assert!(ids.iter().any(|i| i.as_str() == Some("plugin:acme.demo/zone")), "{ids:?}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.schema-from-types verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ops.input-schema
+fn operations_schema_comes_from_request_types() {
+    let (_dir, root) = fixture();
+    // Schema for a typed op names its properties from the request struct.
+    let v = scc_engine::invoke(&root, "operations.schema", serde_json::json!({"id": "graph.traverse"})).unwrap();
+    let s = v.to_string();
+    assert!(s.contains("steps") && s.contains("trusted_only"), "{s}");
+    // Aliases share the canonical schema.
+    let a = scc_engine::invoke(&root, "operations.schema", serde_json::json!({"id": "surface.compile"})).unwrap();
+    assert!(a.to_string().contains("task"), "{a}");
+    // Unknown ops fail loudly.
+    let e = scc_engine::invoke(&root, "operations.schema", serde_json::json!({"id": "nope.nope"}));
+    assert!(e.is_err(), "{e:?}");
+}

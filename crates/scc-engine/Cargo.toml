@@ -36,6 +36,8 @@ thiserror.workspace = true
 
 # trace:exempt reason=internal-detail
 blake3 = "1"
+# trace:exempt reason=internal-detail
+schemars = "1"
 
 [dev-dependencies]
 # trace:exempt reason=internal-detail

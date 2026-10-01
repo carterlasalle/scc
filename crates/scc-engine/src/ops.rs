@@ -28,6 +28,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     // workspace
     OperationDescriptor { id: "operations.list", description: "List every registered operation id (introspection)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "operations.describe", description: "Describe one operation by id", mutation: MutationClass::Read, streaming: false },
+    OperationDescriptor { id: "operations.schema", description: "JSON Schema for one operation's input (naming its scc-api request type)", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "workspace.init", description: "Initialize the SCC workspace (.scc/config.yaml + database)", mutation: MutationClass::Write, streaming: false },
     OperationDescriptor { id: "workspace.status", description: "Index status, stats, and freshness", mutation: MutationClass::Read, streaming: false },
     OperationDescriptor { id: "workspace.session", description: "Pin the current model session (repo, revision, epoch, config, plugins, salt)", mutation: MutationClass::Read, streaming: false },
@@ -184,3 +185,45 @@ pub fn ids() -> Vec<&'static str> {
     OPERATIONS.iter().map(|d| d.id).collect()
 }
 
+/// JSON Schema for one operation's input (§9): generated from the canonical
+/// scc-api request type via schemars — the same struct invoke deserializes,
+/// so the schema can never drift from the implementation. Alias ops share
+/// their canonical op's schema. Returns None for unknown ids.
+// trace:v1 id=impl.scc-engine-ops.input-schema work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn input_schema(id: &str) -> Option<serde_json::Value> {
+    use scc_api::*;
+    // Operational envelope inputs (no dedicated request struct): free-form
+    // object with the documented fields.
+    let free = |props: &[(&str, &str)]| {
+        let mut m = serde_json::Map::new();
+        for (k, t) in props {
+            m.insert(k.to_string(), serde_json::json!({"type": t}));
+        }
+        serde_json::json!({"type": "object", "properties": m})
+    };
+    let v: serde_json::Value = match id {
+        "context.task" | "context.task_pack" | "context.task_delta" => {
+            serde_json::to_value(schemars::schema_for!(TaskContextRequest)).unwrap_or(serde_json::json!({}))
+        }
+        "context.startup" => serde_json::to_value(schemars::schema_for!(StartupRequest)).unwrap_or(serde_json::json!({})),
+        "surface.build" | "surface.compile" | "surface.global" | "surface.task" | "surface.render" | "ranking.important" | "surface.important" => {
+            serde_json::to_value(schemars::schema_for!(SurfaceRequest)).unwrap_or(serde_json::json!({}))
+        }
+        "context.component" | "context.flow" => serde_json::to_value(schemars::schema_for!(DetailRequest)).unwrap_or(serde_json::json!({})),
+        "context.impact" => serde_json::to_value(schemars::schema_for!(ImpactRequest)).unwrap_or(serde_json::json!({})),
+        "context.structural" | "source.structural" => {
+            serde_json::to_value(schemars::schema_for!(StructuralRequest)).unwrap_or(serde_json::json!({}))
+        }
+        "graph.query" | "graph.search" | "graph.search_symbols" => {
+            serde_json::to_value(schemars::schema_for!(QueryRequest)).unwrap_or(serde_json::json!({}))
+        }
+        "graph.traverse" => serde_json::to_value(schemars::schema_for!(TraverseRequest)).unwrap_or(serde_json::json!({})),
+        "graph.explain" => free(&[("subject", "string"), ("predicate", "string"), ("object", "string")]),
+        "graph.entity.get" | "graph.entity" => free(&[("id", "string")]),
+        "ranking.symbols" | "ranking.global" | "ranking.task" | "ranking.entities" | "surface.rank" => {
+            serde_json::to_value(schemars::schema_for!(RankRequest)).unwrap_or(serde_json::json!({}))
+        }
+        _ => return None,
+    };
+    Some(serde_json::json!({"operation": id, "input": v}))
+}

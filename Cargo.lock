@@ -1624,6 +1624,7 @@ dependencies = [
  "scc-plugin-api",
  "scc-plugin-host",
  "scc-store",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
