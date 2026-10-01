@@ -70,6 +70,13 @@ test("systemOverview() content identifies the repository", { skip: skip ? skipRe
   assert.ok(Array.isArray(pack.entity_ids));
 });
 
+test("graphRelationships() lists raw edges", { skip: skip ? skipReason : false }, async () => {
+  const got = await scc().graphRelationships();
+  assert.ok(got.relationships.length > 0);
+  for (const key of ["subject", "predicate", "object"] as const)
+    assert.ok(key in got.relationships[0], `missing ${key}`);
+});
+
 test("workspaceSession() pins the model identity", { skip: skip ? skipReason : false }, async () => {
   const sess = await scc().workspaceSession();
   for (const key of ["repo_id", "revision", "epoch", "config_hash"] as const)

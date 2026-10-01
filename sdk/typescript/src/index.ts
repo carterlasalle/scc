@@ -253,6 +253,15 @@ export class SCC {
   }
 
   /**
+   * Raw relationship facts (§15): the verbatim edge list behind
+   * traverse(). Use graphEntity/explain for trust verdicts.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.graph-relationships work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async graphRelationships(): Promise<{ relationships: Array<{ subject: string; predicate: string; object: string; provenance: string; confidence: number }> }> {
+    return { relationships: await this.invoke("graph.relationships", {}) as Array<{ subject: string; predicate: string; object: string; provenance: string; confidence: number }> };
+  }
+
+  /**
    * One canonical entity by id (§15) plus its trust verdict:
    * `{entity, trusted, reason}`. `entity` is the raw Reality Graph
    * node; `trusted` reports the TrustedGraphView decision.

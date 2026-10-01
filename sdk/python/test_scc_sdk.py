@@ -73,6 +73,15 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIsInstance(pack["entity_ids"], list)
 
     # trace:exempt reason=unit-test
+    def test_graph_relationships_lists_edges(self):
+        got = self.scc.graphRelationships()
+        self.assertIn("relationships", got, f"missing rels: {got}")
+        self.assertTrue(got["relationships"], f"empty rels: {got}")
+        rel = got["relationships"][0]
+        for key in ("subject", "predicate", "object"):
+            self.assertIn(key, rel, f"missing {key}: {rel}")
+
+    # trace:exempt reason=unit-test
     def test_workspace_session_pins_identity(self):
         sess = self.scc.workspaceSession()
         for key in ("repo_id", "revision", "epoch", "config_hash"):

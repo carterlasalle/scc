@@ -162,6 +162,13 @@ class SCC:
             "symbols": symbols or [],
         })
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-relationships work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def graphRelationships(self) -> dict[str, Any]:
+        """Raw relationship facts (§15): ``[{subject, predicate, object,
+        provenance, confidence}]``. The verbatim edge list behind
+        traverse(); use graphEntity/explain for trust verdicts."""
+        return {"relationships": self.invoke("graph.relationships", {})}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-entity work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def graphEntity(self, id: str) -> dict[str, Any]:
         """One canonical entity by id (§15) plus its trust verdict:
