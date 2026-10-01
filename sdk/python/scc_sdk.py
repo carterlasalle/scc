@@ -367,6 +367,20 @@ class SCC:
         programmatic Surface object (§123.7 needs entry-level access)."""
         return self.invoke("ranking.entry", {"id": id})
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.arch-specificity work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def architecturalSpecificity(
+        self,
+        id: str = "",
+        exported: bool = False,
+    ) -> dict[str, Any]:
+        """Architectural specificity multiplier (§1.4/§45): exported or
+        public symbols score 1.15, others 1.0. Pure probe of the
+        projection-stage multiplier ranking.symbols applies."""
+        return self.invoke("ranking.architectural_specificity", {
+            "id": id,
+            "exported": exported,
+        })
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.edge-weight work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def edgeWeight(
         self,

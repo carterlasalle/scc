@@ -218,6 +218,13 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("rank", entry, f"missing rank: {entry}")
 
     # trace:exempt reason=unit-test
+    def test_architectural_specificity_rewards_exported(self):
+        pub = self.scc.architecturalSpecificity(id="x", exported=True)
+        priv = self.scc.architecturalSpecificity(id="x", exported=False)
+        self.assertEqual(pub["specificity"], 1.15, f"exported: {pub}")
+        self.assertEqual(priv["specificity"], 1.0, f"private: {priv}")
+
+    # trace:exempt reason=unit-test
     def test_edge_weight_distinguishes_calls_from_imports(self):
         calls = self.scc.edgeWeight(predicate="calls", confidence=1.0)
         imports = self.scc.edgeWeight(predicate="imports", confidence=1.0)

@@ -425,6 +425,16 @@ export class SCC {
   }
 
   /**
+   * Architectural specificity multiplier (§1.4/§45): exported/public
+   * symbols score 1.15, others 1.0. Pure probe of the projection-stage
+   * multiplier ranking.symbols applies.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.arch-specificity work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async architecturalSpecificity(id?: string, exported?: boolean): Promise<{ specificity: number; id: string }> {
+    return this.invoke("ranking.architectural_specificity", { id: id ?? "", exported: exported ?? false });
+  }
+
+  /**
    * Full edge weight (§45/§49): predicate × provenance × confidence ×
    * rarity. Provenance is Extracted on this arm; plugin edge-weight
    * hooks alter live ranking, not this probe.

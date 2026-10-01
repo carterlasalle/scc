@@ -209,6 +209,13 @@ test("rankingEntry() returns the Surface object", { skip: skip ? skipReason : fa
   assert.ok("rank" in entry);
 });
 
+test("architecturalSpecificity() rewards exported symbols", { skip: skip ? skipReason : false }, async () => {
+  const pub = await scc().architecturalSpecificity("x", true);
+  const priv = await scc().architecturalSpecificity("x", false);
+  assert.equal(pub.specificity, 1.15);
+  assert.equal(priv.specificity, 1.0);
+});
+
 test("edgeWeight() distinguishes calls from imports", { skip: skip ? skipReason : false }, async () => {
   const calls = await scc().edgeWeight({ predicate: "calls", confidence: 1.0 });
   const imports = await scc().edgeWeight({ predicate: "imports", confidence: 1.0 });
