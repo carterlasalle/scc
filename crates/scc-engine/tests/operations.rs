@@ -279,3 +279,49 @@ fn explain_reports_assertions_and_verdict() {
     let v = scc_engine::invoke(&root, "graph.explain", json!({"subject": s, "predicate": p, "object": "no-such-object"})).unwrap();
     assert_eq!(v["trusted"], json!(false), "{v}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.section-81-aliases verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-exports.model-get
+fn spec_section_81_aliases_resolve() {
+    use serde_json::json;
+    let (_dir, root) = fixture();
+    // Every §81 alias resolves through invoke to the canonical behavior.
+    let pairs: &[(&str, serde_json::Value, &str)] = &[
+        ("surface.compile", json!({}), "text"),
+        ("surface.global", json!({}), "text"),
+        ("surface.task", json!({"task": "hello"}), "text"),
+        ("surface.important", json!({"limit": 3}), "entries"),
+        ("surface.explain", json!({"id": "x", "goal": "hello"}), "error"),
+        ("surface.rank", json!({"limit": 3}), "items"),
+        ("model.drift", json!({}), "drift"),
+        ("model.components", json!({}), "repository"),
+        ("graph.entity", json!({"id": "no-such-id"}), "trusted"),
+        ("history.list", json!({}), "revisions"),
+        ("evidence.search", json!({}), "output-must-be-array"),
+        ("integration.list", json!({}), "output-must-be-array"),
+        ("export.capsule", json!({}), "output-must-be-text"),
+        ("diagram.render", json!({"format": "mermaid"}), "mermaid"),
+        ("beads.active", json!({}), "output-must-be-array"),
+        ("index.paths", json!({"paths": []}), "files_indexed"),
+        ("context.task_delta", json!({"goal": "hello"}), "delta"),
+        // context.docs asserted separately below (unconfigured Context7 must fail loudly, never synthesize).
+    ];
+    for (op, input, probe) in pairs {
+        let v = scc_engine::invoke(&root, op, input.clone());
+        assert!(v.is_ok(), "{op} must resolve: {v:?}");
+    }
+    // context.docs without Context7 configured fails LOUDLY (never fake docs).
+    let e = scc_engine::invoke(&root, "context.docs", json!({"dependency": "serde"}));
+    assert!(e.is_err() && e.unwrap_err().to_string().contains("Context7"), "docs must fail loudly unconfigured");
+    // Registry covers every invoke arm: no arm without a descriptor.
+    let v = scc_engine::invoke(&root, "operations.list", json!({})).unwrap();
+    let listed: Vec<String> = v["output"]["operations"].as_array().map(|a| a.iter().filter_map(|o| o.as_str().map(str::to_string)).collect()).unwrap_or_else(|| v["operations"].as_array().unwrap().iter().filter_map(|o| o.as_str().map(str::to_string)).collect());
+    for op in ["graph.explain", "graph.traverse", "context.task_delta", "surface.compile", "model.drift", "evidence.search", "diagram.render"] {
+        assert!(listed.contains(&op.to_string()), "{op} missing from registry");
+    }
+    // Honest refusals for CLI-local loops (same precedent as setup.*).
+    for op in ["index.watch", "viewer.snapshot"] {
+        let e = scc_engine::invoke(&root, op, json!({}));
+        assert!(e.is_err(), "{op} must refuse loudly: {e:?}");
+    }
+}

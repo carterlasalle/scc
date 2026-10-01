@@ -57,6 +57,16 @@ pub fn invoke(
                 reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
             serde_json::to_value(crate::task::build_enriched_task_pack(&engine, &config, root, &req, scorer_trait, reranker_trait)?)?
         }
+        "context.task_delta" => {
+            let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let budget: usize = input.get("budget").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(scc_core::ContextBudget::default().task_delta);
+            let (scorer, _) = crate::inference::rankers(&store, &config, goal);
+            let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            let (delta, ids) = ctx.task_delta(goal, budget, semantic)?;
+            ctx.record_task_delta_ids(&ids);
+            serde_json::json!({"delta": delta, "delta_ids": ids})
+        }
         "context.subagent" => {
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
             let files: Vec<String> = input.get("files").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
@@ -77,7 +87,7 @@ pub fn invoke(
             let pack = crate::task::build_enriched_task_pack(&engine, &config, root, &scc_api::TaskContextRequest { goal: goal.into(), files: vec![], symbols: vec![], budget, hook: false }, scorer_trait, reranker_trait)?;
             serde_json::to_value(pack)?
         }
-        "context.component" | "context.flow" | "context.impact" | "context.verify" | "context.structural" | "source.structural" | "surface.build" => {
+        "context.component" | "context.flow" | "context.impact" | "context.verify" | "context.structural" | "source.structural" | "surface.build" | "surface.compile" | "surface.global" | "surface.task" | "surface.render" => {
             invoke_context(&ctx, &store, &config, operation, input)?
         }
         "graph.query" => {
@@ -94,8 +104,8 @@ pub fn invoke(
             let (entities, relationships) = crate::graph::traverse(&cc, &req)?;
             serde_json::json!({"entities": entities, "relationships": relationships, "trusted_only": req.trusted_only})
         }
-        "graph.entities" | "architecture.components" => serde_json::to_value(crate::graph::components(&store)?)?,
-        "graph.flows" | "architecture.flows" => serde_json::to_value(crate::graph::flows(&store)?)?,
+        "graph.entities" | "architecture.components" | "model.components" => serde_json::to_value(crate::graph::components(&store)?)?,
+        "graph.flows" | "architecture.flows" | "model.flows" => serde_json::to_value(crate::graph::flows(&store)?)?,
         "graph.relationships" => {
             let subject = input.get("subject").and_then(|v| v.as_str());
             let predicate = input.get("predicate").and_then(|v| v.as_str());
@@ -120,7 +130,7 @@ pub fn invoke(
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             serde_json::to_value(store.get_evidence(id)?)?
         }
-        "evidence.list" => {
+        "evidence.list" | "evidence.search" => {
             let path = input.get("path").and_then(|v| v.as_str());
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
             let mut out = match path {
@@ -143,17 +153,17 @@ pub fn invoke(
             }
         }
         "index.full" => serde_json::to_value(crate::index::full(root, &config)?)?,
-        "index.refresh" => {
+        "index.refresh" | "index.paths" => {
             let req: scc_api::IndexPathsRequest = serde_json::from_value(input)?;
             serde_json::to_value(crate::index::refresh_paths(root, &config, &req.paths)?)?
         }
-        "history.revisions" => serde_json::to_value(crate::history::revisions(&store)?)?,
+        "history.revisions" | "history.list" => serde_json::to_value(crate::history::revisions(&store)?)?,
         "history.diff" => {
             let req: scc_api::DiffRequest = serde_json::from_value(input)?;
             serde_json::to_value(crate::history::diff(&store, req.from, req.to)?)?
         }
-        "model.get" => serde_json::to_value(crate::exports::model_get(&store)?)?,
-        "context.external_docs" => {
+        "model.get" | "model.components" | "model.flows" | "model.invariants" => serde_json::to_value(crate::exports::model_get(&store)?)?,
+        "context.external_docs" | "context.docs" => {
             let dep = input.get("dependency").and_then(|v| v.as_str()).unwrap_or("");
             Value::String(crate::state::external_docs(root, dep)?)
         }
@@ -170,7 +180,17 @@ pub fn invoke(
         "export.system_ir_jsonl" => export_value(&store, root, "system-ir.jsonl")?,
         "export.ccg" => export_value(&store, root, "ccg")?,
         "export.flow_graphs" => export_value(&store, root, "flow-graphs.json")?,
-        "export.snap" => export_value(&store, root, "capsule.md")?,
+        "export.snap" | "export.capsule" => export_value(&store, root, "capsule.md")?,
+        "operations.list" => {
+            serde_json::json!({"operations": crate::ops::ids(), "api_version": scc_api::API_VERSION})
+        }
+        "operations.describe" => {
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match crate::ops::describe(id) {
+                Some(d) => serde_json::to_value(d)?,
+                None => return Err(crate::EngineError::Other(format!("unknown operation '{id}' (see operations.list)"))),
+            }
+        }
         "workspace.init" => {
             let dir = crate::workspace::scc_dir(root);
             std::fs::create_dir_all(&dir)?;
@@ -187,7 +207,7 @@ pub fn invoke(
             let session: crate::workspace::Session = serde_json::from_value(input.get("session").cloned().unwrap_or(serde_json::Value::Null))?;
             serde_json::json!({"current": crate::workspace::session_is_current(&store, &config, &session)?})
         }
-        "index.status" => {
+        "index.status" | "index.paths" => {
             let s = status_value(&store)?;
             serde_json::to_value(&s)?
         }
@@ -209,7 +229,7 @@ pub fn invoke(
             let cc = ctx.engine.ctx();
             crate::graph::explain(&cc, subject, predicate, object)
         }
-        "graph.entity.get" => {
+        "graph.entity.get" | "graph.entity" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let found = store.all_entities()?.into_iter().find(|e| e.id == id);
             match found {
@@ -223,21 +243,21 @@ pub fn invoke(
                 }
             }
         }
-        "architecture.drift" => serde_json::to_value(crate::misc::drift(&store)?)?,
+        "architecture.drift" | "model.drift" => serde_json::to_value(crate::misc::drift(&store)?)?,
         "architecture.cochange" => {
             let min = input.get("min_commits").and_then(|v| v.as_u64()).unwrap_or(2) as u32;
             let (pairs, enriched) = crate::misc::cochange(root, min)?;
             serde_json::json!({"pairs": pairs, "enriched": enriched})
         }
-        "integrity.invariants" | "architecture.invariants" => serde_json::to_value(crate::misc::check_invariants(&store)?)?,
+        "integrity.invariants" | "architecture.invariants" | "model.invariants" => serde_json::to_value(crate::misc::check_invariants(&store)?)?,
         "integrity.ci" => {
             let max = input.get("max_severity").and_then(|v| v.as_str()).unwrap_or("medium");
             let violations = crate::misc::check_invariants(&store)?;
             let (ok, lines) = crate::misc::ci_check(&store, &violations, max)?;
             serde_json::json!({"ok": ok, "lines": lines})
         }
-        "integrations.list" => serde_json::to_value(crate::integrations::list(root)?)?,
-        "integrations.doctor" => {
+        "integrations.list" | "integration.list" => serde_json::to_value(crate::integrations::list(root)?)?,
+        "integrations.doctor" | "integration.doctor" => {
             let deep = input.get("deep").and_then(|v| v.as_bool()).unwrap_or(false);
             let network = input.get("network").and_then(|v| v.as_bool()).unwrap_or(false);
             serde_json::to_value(crate::integrations::doctor_report(&store, &config, root, deep, network)?)?
@@ -251,7 +271,10 @@ pub fn invoke(
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
             serde_json::to_value(crate::state::lessons_list(root, limit)?)?
         }
-        "beads.list" => serde_json::to_value(crate::state::beads(root, 20)?)?,
+        "beads.list" | "beads.active" => serde_json::to_value(crate::state::beads(root, 20)?)?,
+        "index.watch" | "viewer.snapshot" => {
+            return Err(crate::EngineError::Other("watch/viewer-snapshot are CLI-local loops (file watcher, browser capture); not engine operations".into()));
+        }
         "setup.claude" | "setup.detected" | "setup.codex" | "setup.opencode" | "setup.hermes" | "setup.omp" | "setup.pi" => {
             return Err(crate::EngineError::Other("setup operations are CLI-local file installation (harness dirs, home directory); not engine operations".into()));
         }
@@ -288,7 +311,7 @@ pub fn invoke(
                 "errors": r.errors,
             })
         }
-        "export.diagram" => {
+        "export.diagram" | "diagram.render" => {
             let format = input.get("format").and_then(|v| v.as_str()).unwrap_or("mermaid");
             crate::exports::diagram(&store, format)?
         }
@@ -302,14 +325,14 @@ pub fn invoke(
         }
         "runtime.status" => serde_json::to_value(crate::state::runtime_edges(root)?)?,
         "runtime.reconcile" => serde_json::to_value(crate::state::reconcile(root)?)?,
-        "ranking.important" => {
+        "ranking.important" | "surface.important" => {
             let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
             let task = input.get("task").and_then(|v| v.as_str()).map(|s| s.to_string());
             let component = input.get("component").and_then(|v| v.as_str()).map(|s| s.to_string());
             let (entries, tasked) = ctx.important(limit, component.as_deref(), task.as_deref())?;
             serde_json::json!({"entries": entries, "tasked": tasked})
         }
-        "ranking.symbols" => {
+        "ranking.symbols" | "ranking.global" | "ranking.task" | "ranking.entities" | "surface.rank" => {
             let req: scc_api::RankRequest = serde_json::from_value(input)?;
             let ranker = engine.ranking();
             let mut ap = crate::plugins::active(root, &config);
@@ -360,7 +383,7 @@ pub fn invoke(
             let exported = input.get("exported").and_then(|v| v.as_bool()).unwrap_or(false);
             serde_json::json!({"specificity": if exported { 1.15 } else { 1.0 }, "id": id})
         }
-        "ranking.explain" => {
+        "ranking.explain" | "surface.explain" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
             let req = scc_api::RankRequest { profile: None, goal: Some(goal.into()), limit: 1000, explain: true, include_features: true, include_intermediate: true };
@@ -412,7 +435,7 @@ pub fn invoke(
             let budget: usize = req.ranked.iter().map(|e| e.token_cost).sum();
             serde_json::json!({"selected": crate::ranking::apply_quotas(&rows, &quotas, budget)})
         }
-        "selection.budget" => {
+        "selection.budget" | "surface.select" => {
             let req: scc_api::SelectionRequest = serde_json::from_value(input)?;
             let items: Vec<scc_core::ContextItem> = req.ranked.iter().map(|e| scc_core::ContextItem { id: e.id.clone(), value: e.value, token_cost: e.token_cost, required: false, group: e.group.clone() }).collect();
             let budget: usize = items.iter().map(|i| i.token_cost).sum();
@@ -704,7 +727,7 @@ fn invoke_context(
                 scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
             serde_json::json!({"text": ctx.structural(&req, &store.root, semantic)?})
         }
-        "surface.build" | "ranking.important" => {
+        "surface.build" | "surface.compile" | "surface.global" | "surface.task" | "surface.render" | "ranking.important" | "surface.important" => {
             let req: scc_api::SurfaceRequest = serde_json::from_value(input)?;
             let goal = req.task.clone().unwrap_or_default();
             let (scorer, _) = crate::inference::rankers(store, config, &goal);
