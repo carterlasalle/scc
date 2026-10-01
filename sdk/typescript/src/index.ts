@@ -383,6 +383,16 @@ export class SCC {
   }
 
   /**
+   * Required-coverage set (§123 never-omit): engine required_ids plus
+   * plugin coverage providers, unioned. Same inputs ranking.symbols
+   * blends criticality from.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.selection-required work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async selectionRequired(goal?: string): Promise<{ required: string[]; plugin_contributed: number }> {
+    return this.invoke("selection.required", { goal: goal ?? null });
+  }
+
+  /**
    * Compile the Structural Source representation of files: pass `files`
    * explicitly, or a `goal` to select the task-matched files via the
    * PPR->Surface pipeline (via RPC).

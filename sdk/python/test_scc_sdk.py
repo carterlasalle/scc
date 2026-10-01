@@ -200,6 +200,12 @@ class TestSCCSDK(unittest.TestCase):
             self.assertIn(key, out["candidates"][0], f"missing {key}: {out['candidates'][0]}")
 
     # trace:exempt reason=unit-test
+    # trace:exempt reason=unit-test
+    def test_selection_required_returns_never_omit_set(self):
+        out = self.scc.selectionRequired(goal="add numbers")
+        self.assertIn("required", out, f"missing required: {out}")
+        self.assertIsInstance(out["required"], list)
+
     def test_selection_preview_shows_stage_survivors(self):
         rows = [
             {"id": "a", "value": 3.0, "token_cost": 10, "kind": "symbol"},

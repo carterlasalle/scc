@@ -315,6 +315,16 @@ class SCC:
             req["lambda"] = lam
         return self.invoke("selection.preview", req)
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.selection-required work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def selectionRequired(
+        self,
+        goal: str | None = None,
+    ) -> dict[str, Any]:
+        """Required-coverage set (§123 never-omit): engine required_ids
+        plus plugin coverage providers, unioned. Same inputs
+        ranking.symbols blends criticality from."""
+        return self.invoke("selection.required", {"goal": goal})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.structural-source work=WORK-task-context-transport-parity satisfies=REQ-SCC-IR
     def structuralSource(
         self,

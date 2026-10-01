@@ -193,6 +193,11 @@ test("rankingCandidates() returns scored entities", { skip: skip ? skipReason : 
   assert.ok(first.id && first.kind && typeof first.score === "number" && first.reason !== undefined);
 });
 
+test("selectionRequired() returns the never-omit set", { skip: skip ? skipReason : false }, async () => {
+  const out = await scc().selectionRequired("add numbers");
+  assert.ok(Array.isArray(out.required));
+});
+
 test("selectionPreview() shows per-stage survivors", { skip: skip ? skipReason : false }, async () => {
   const rows = [
     { id: "a", value: 3.0, token_cost: 10, kind: "symbol" },
