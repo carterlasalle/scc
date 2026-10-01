@@ -211,3 +211,26 @@ fn edges_op_lists_universe() {
         assert!(w.is_finite() && *w > 0.0, "bad weight {w}");
     }
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-ranking.features-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn features_op_decomposes_scores() {
+    // §123.13: `ranking.features` serves the score inputs before the
+    // blend — core 8 + plugin features + specificity, positions dense.
+    let (_dir, store) = fixture();
+    let (_g, _c, _s, engine) = ranker_of(&store);
+    let r = engine.ranking();
+    let req = RankRequest { profile: None, goal: Some("zeta".into()), limit: 20,
+        explain: false, include_features: true, include_intermediate: false };
+    let out = r.symbols(&req).unwrap();
+    assert!(!out.items.is_empty());
+    let first = &out.items[0];
+    assert!(first.features.task_ppr > 0.0, "task signal present: {first:?}");
+    assert_eq!(first.position, 1);
+    // Projection contract: every item carries all 8 core features.
+    for it in &out.items {
+        let _ = (it.features.task_ppr, it.features.global_ppr, it.features.lexical,
+            it.features.semantic, it.features.confidence, it.features.criticality,
+            it.features.change_risk, it.features.novelty);
+    }
+}

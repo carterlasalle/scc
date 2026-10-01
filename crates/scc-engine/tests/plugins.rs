@@ -237,6 +237,30 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.features-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn features_op_serves_decomposition() {
+    // Live-RPC proof: `ranking.features` returns the per-symbol
+    // decomposition with all 8 core keys + plugin map, same hooks as
+    // ranking.symbols (zero transport code).
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let out = scc_engine::invoke(&root, "ranking.features",
+        serde_json::json!({"goal": "alpha", "limit": 10})).unwrap();
+    let feats = out["features"].as_array().unwrap();
+    assert!(!feats.is_empty(), "{out}");
+    for f in feats {
+        for k in ["task_ppr", "global_ppr", "lexical", "semantic",
+                  "confidence", "criticality", "change_risk", "novelty"] {
+            assert!(f.get(k).and_then(|x| x.as_f64()).is_some(), "missing {k}: {f}");
+        }
+        assert!(f.get("plugin_features").is_some(), "{f}");
+    }
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.seeds-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
 fn seeds_op_serves_plugin_merge() {
     // Live-RPC proof: `ranking.seeds` merges lexical + provider weights

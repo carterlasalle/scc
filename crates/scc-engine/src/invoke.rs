@@ -384,6 +384,25 @@ pub fn invoke(
             let cands = engine.ranking().candidates_with(goal, limit, &hooks)?;
             serde_json::json!({"candidates": cands.iter().map(|c| serde_json::json!({"id": c.id, "kind": c.kind, "name": c.name, "score": c.score, "reason": c.reason})).collect::<Vec<_>>()})
         }
+        "ranking.features" => {
+            // Feature-score introspection (§123.13): per-symbol core +
+            // plugin feature decomposition before the blend. Same hooks
+            // as ranking.symbols; no new math, projection only.
+            let req: scc_api::RankRequest = serde_json::from_value(input)?;
+            let ranker = engine.ranking();
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, req.goal.as_deref().unwrap_or(""));
+            let out = ranker.symbols_with_hooks(&req, &hooks)?;
+            serde_json::json!({"features": out.items.iter().map(|i| serde_json::json!({
+                "id": i.id, "position": i.position,
+                "task_ppr": i.features.task_ppr, "global_ppr": i.features.global_ppr,
+                "lexical": i.features.lexical, "semantic": i.features.semantic,
+                "confidence": i.features.confidence, "criticality": i.features.criticality,
+                "change_risk": i.features.change_risk, "novelty": i.features.novelty,
+                "specificity": i.specificity, "plugin_features": i.plugin_features,
+            })).collect::<Vec<_>>()})
+        }
         "ranking.edges" => {
             let edges = engine.ranking().rank_edges()?;
             serde_json::json!({"edges": edges.iter().map(|(s, p, o, w)| serde_json::json!({"subject": s, "predicate": p, "object": o, "weight": w})).collect::<Vec<_>>()})
