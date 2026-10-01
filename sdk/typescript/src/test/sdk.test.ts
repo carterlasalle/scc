@@ -87,6 +87,12 @@ test("graphEntities() lists graph nodes", { skip: skip ? skipReason : false }, a
   assert.ok("id" in got.entities[0]);
 });
 
+test("evidenceGet() returns the single record", { skip: skip ? skipReason : false }, async () => {
+  const listed = await scc().evidenceSearch();
+  const rec = await scc().evidenceGet((listed.evidence[0] as { id: string }).id) as { id: string };
+  assert.equal(rec.id, (listed.evidence[0] as { id: string }).id);
+});
+
 test("evidenceSearch() lists evidence records", { skip: skip ? skipReason : false }, async () => {
   const got = await scc().evidenceSearch();
   assert.ok(got.evidence.length > 0);

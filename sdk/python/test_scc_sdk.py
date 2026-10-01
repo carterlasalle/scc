@@ -93,6 +93,13 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("id", got["entities"][0], f"missing id: {got}")
 
     # trace:exempt reason=unit-test
+    def test_evidence_get_returns_single_record(self):
+        listed = self.scc.evidenceSearch()
+        rec_id = listed["evidence"][0]["id"]
+        got = self.scc.evidenceGet(rec_id)
+        self.assertEqual(got.get("id"), rec_id, f"id mismatch: {got}")
+
+    # trace:exempt reason=unit-test
     def test_evidence_search_lists_path_records(self):
         got = self.scc.evidenceSearch()
         self.assertIn("evidence", got, f"missing evidence: {got}")

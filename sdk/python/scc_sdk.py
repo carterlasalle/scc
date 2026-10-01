@@ -183,6 +183,13 @@ class SCC:
         graphRelationships; paths in traverse()."""
         return {"entities": self.invoke("graph.entities", {})}
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.evidence-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def evidenceGet(self, id: str) -> dict[str, Any]:
+        """One evidence record by id (evidence.get): the single
+        source/config/runtime/test record behind a provenance
+        pointer. List path: evidenceSearch."""
+        return self.invoke("evidence.get", {"id": id})
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.evidence-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def evidenceSearch(self, path: str | None = None, limit: int = 200) -> dict[str, Any]:
         """Path-filtered evidence facts (evidence.search): the source,

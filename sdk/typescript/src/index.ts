@@ -283,6 +283,16 @@ export class SCC {
   }
 
   /**
+   * One evidence record by id (evidence.get): the single
+   * source/config/runtime/test record behind a provenance pointer.
+   * List path: evidenceSearch.
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.evidence-get work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async evidenceGet(id: string): Promise<unknown> {
+    return this.invoke("evidence.get", { id });
+  }
+
+  /**
    * Path-filtered evidence facts (evidence.search): the source,
    * config, runtime, test records behind provenance claims. Omit
    * `path` to list all evidence (capped at `limit`).
