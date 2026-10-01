@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 // trace:exempt reason=internal-detail
-pub const SCHEMA_VERSION: u32 = 9;
+pub const SCHEMA_VERSION: u32 = 10;
 // trace:exempt reason=internal-detail
 pub const FTS_ESCAPE: &str = "\"";
 // trace:exempt reason=internal-detail
@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     MIGRATION_7,
     MIGRATION_8,
     MIGRATION_9,
+    MIGRATION_10,
 ];
 
 /// v4: model epoch. `context_cache.revision` becomes `epoch` — the cache is
@@ -134,6 +135,24 @@ CREATE TABLE IF NOT EXISTS plugin_state (
   PRIMARY KEY (plugin_id, key)
 );
 CREATE INDEX IF NOT EXISTS idx_plugin_state_plugin ON plugin_state(plugin_id);
+"#;
+
+/// v10: namespaced sidecar facts (§124 item 35) — raw analyzer facts
+/// (CPG nodes, findings, slices) scoped to `(plugin_id, graph, key)`.
+/// Queryable + versioned + explicitly namespaced; NOT authoritative by
+/// default. Promotion into the canonical graph goes through
+/// `plugins.promote` (normal contribution path), never by reading here.
+// trace:exempt reason=internal-detail
+const MIGRATION_10: &str = r#"
+CREATE TABLE IF NOT EXISTS sidecar_facts (
+  plugin_id TEXT NOT NULL,
+  graph TEXT NOT NULL DEFAULT 'default',
+  key TEXT NOT NULL,
+  value TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (plugin_id, graph, key)
+);
+CREATE INDEX IF NOT EXISTS idx_sidecar_plugin_graph ON sidecar_facts(plugin_id, graph);
 "#;
 
 /// v6: observed trace-path signatures (Wave 6) — canonical root-to-leaf
@@ -861,6 +880,49 @@ impl Store {
             )
             .optional()?;
         Ok(v)
+    }
+
+    // ------------------------------------------------------------------
+    // sidecar facts (§124 item 35): namespaced raw analyzer storage.
+    // (plugin_id, graph, key) -> JSON value. Same host-owns-table pattern
+    // as plugin_state; graphs are plugin-declared namespaces (e.g.
+    // `joern-cpg`). Never read by ranking/context — promotion only.
+    // ------------------------------------------------------------------
+
+    // trace:exempt reason=internal-detail
+    pub fn sidecar_put(&self, plugin_id: &str, graph: &str, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO sidecar_facts (plugin_id, graph, key, value, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(plugin_id, graph, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![plugin_id, graph, key, value, scc_core::now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn sidecar_get(&self, plugin_id: &str, graph: &str, key: &str) -> Result<Option<String>> {
+        let v = self
+            .conn
+            .query_row(
+                "SELECT value FROM sidecar_facts WHERE plugin_id = ?1 AND graph = ?2 AND key = ?3",
+                params![plugin_id, graph, key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(v)
+    }
+
+    // trace:exempt reason=internal-detail
+    pub fn sidecar_scan(&self, plugin_id: &str, graph: &str, prefix: &str, limit: usize) -> Result<Vec<(String, String)>> {
+        let esc = prefix.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let like = format!("{esc}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM sidecar_facts WHERE plugin_id = ?1 AND graph = ?2 AND key LIKE ?3 ESCAPE '\\' ORDER BY key LIMIT ?4",
+        )?;
+        let rows = stmt.query_map(params![plugin_id, graph, like, limit.max(1) as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
     // trace:exempt reason=internal-detail

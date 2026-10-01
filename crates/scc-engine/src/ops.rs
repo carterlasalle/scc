@@ -206,6 +206,9 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "plugin_state.put", description: "Write one namespaced plugin state key (StateWrite grant)", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "plugin_state.delete", description: "Delete one namespaced plugin state key (StateWrite grant)", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "plugin_state.scan", description: "Scan namespaced plugin state keys by prefix (StateRead grant)", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "sidecar.put", description: "Write one raw sidecar fact under (plugin, graph, key) (StateWrite grant; never authoritative)", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Experimental },
+    OperationDescriptor { id: "sidecar.get", description: "Read one raw sidecar fact (StateRead grant)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
+    OperationDescriptor { id: "sidecar.scan", description: "Scan raw sidecar facts by prefix within one plugin graph (StateRead grant)", mutation: MutationClass::Read, streaming: false , stability: Stability::Experimental },
 ];
 
 // trace:exempt reason=internal-detail

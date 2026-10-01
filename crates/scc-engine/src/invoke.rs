@@ -592,6 +592,35 @@ pub fn invoke(
                 }
             }
         }
+        "sidecar.put" | "sidecar.get" | "sidecar.scan" => {
+            // Raw sidecar storage (§124 item 35): (plugin, graph, key)
+            // namespaced analyzer facts. Grant-gated like plugin state;
+            // never consumed by ranking/context — promotion only.
+            let pid = input.get("plugin").and_then(|v| v.as_str()).unwrap_or("");
+            let ap = crate::plugins::active(root, &config);
+            let plug = ap.plugins.iter().find(|p| p.manifest.id == pid).ok_or_else(|| {
+                crate::EngineError::Other(format!("unknown plugin '{pid}' (not active)"))
+            })?;
+            match operation {
+                "sidecar.put" => {
+                    let graph = input.get("graph").and_then(|v| v.as_str()).unwrap_or("default");
+                    let key = input.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    let value = input.get("value").map(|v| v.to_string()).unwrap_or_default();
+                    crate::state::sidecar_put(&store, pid, &plug.grants, graph, key, &value)?
+                }
+                "sidecar.get" => {
+                    let graph = input.get("graph").and_then(|v| v.as_str()).unwrap_or("default");
+                    let key = input.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                    crate::state::sidecar_get(&store, pid, &plug.grants, graph, key)?
+                }
+                _ => {
+                    let graph = input.get("graph").and_then(|v| v.as_str()).unwrap_or("default");
+                    let prefix = input.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
+                    let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+                    crate::state::sidecar_scan(&store, pid, &plug.grants, graph, prefix, limit)?
+                }
+            }
+        }
         "plugins.invoke" => {
             let op = input.get("operation").and_then(|v| v.as_str()).unwrap_or(operation);
             let inner = input.get("input").cloned().unwrap_or(serde_json::json!({}));

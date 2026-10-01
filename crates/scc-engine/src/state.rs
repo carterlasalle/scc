@@ -226,6 +226,52 @@ pub fn plugin_state_scan(
     }))
 }
 
+/// Sidecar put/get/scan (§124 item 35, raw half): namespaced raw
+/// analyzer facts under (plugin, graph). Same grant gate as plugin state
+/// (StateRead for get/scan, StateWrite for put); values are opaque JSON
+/// text. Never consumed by ranking/context — promotion only.
+// trace:exempt reason=internal-detail
+pub fn sidecar_put(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    graph: &str,
+    key: &str,
+    value: &str,
+) -> crate::Result<serde_json::Value> {
+    require_state_grant(plugin_id, grants, true)?;
+    store.sidecar_put(plugin_id, graph, key, value)?;
+    Ok(serde_json::json!({"ok": true}))
+}
+
+// trace:exempt reason=internal-detail
+pub fn sidecar_get(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    graph: &str,
+    key: &str,
+) -> crate::Result<serde_json::Value> {
+    require_state_grant(plugin_id, grants, false)?;
+    Ok(store.sidecar_get(plugin_id, graph, key)?.into())
+}
+
+// trace:exempt reason=internal-detail
+pub fn sidecar_scan(
+    store: &scc_store::Store,
+    plugin_id: &str,
+    grants: &[scc_plugin_api::Permission],
+    graph: &str,
+    prefix: &str,
+    limit: usize,
+) -> crate::Result<serde_json::Value> {
+    require_state_grant(plugin_id, grants, false)?;
+    let rows = store.sidecar_scan(plugin_id, graph, prefix, limit)?;
+    Ok(serde_json::json!({
+        "keys": rows.iter().map(|(k, v)| serde_json::json!({"key": k, "value": v})).collect::<Vec<_>>(),
+    }))
+}
+
 // trace:exempt reason=internal-detail
 fn require_state_grant(
     plugin_id: &str,

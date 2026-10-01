@@ -237,6 +237,61 @@ fn contribution_mid_batch_failure_leaves_no_partial_state() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-plugins.sidecar-raw verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.promote-sidecar
+fn sidecar_round_trip_stays_out_of_canonical() {
+    // §124 item 35 (raw half): sidecar facts round-trip namespaced per
+    // (plugin, graph) and never leak into the canonical graph. Grant-gated
+    // like plugin state; promotion stays an explicit separate step.
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def hello():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let before = scc_engine::invoke(&root, "export.system_ir",
+        serde_json::json!({"format": "system-ir.json"})).unwrap();
+    let n_entities = before["entities"].as_array().unwrap().len();
+    // No grant: denied. (Manifest below grants state_*; probe first with
+    // a grantless plugin id — unknown plugin fails loudly.)
+    let denied = scc_engine::invoke(&root, "sidecar.put", serde_json::json!({
+        "plugin": "acme.ghost", "graph": "joern-cpg",
+        "key": "node/1", "value": {"kind": "METHOD"},
+    }));
+    assert!(denied.is_err(), "{denied:?}");
+    // Granted plugin: put/get/scan round-trip.
+    let plugdir = root.join(".scc").join("plugins").join("acme.side");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.side\"\nname = \"Side\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = []\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[permissions]\nstate_read = true\nstate_write = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json\nprint(json.dumps({\"output\": {}}))\n").unwrap();
+    let ok = scc_engine::invoke(&root, "sidecar.put", serde_json::json!({
+        "plugin": "acme.side", "graph": "joern-cpg",
+        "key": "node/1", "value": {"kind": "METHOD", "name": "hello"},
+    })).unwrap();
+    assert_eq!(ok["ok"], serde_json::json!(true), "{ok}");
+    let got = scc_engine::invoke(&root, "sidecar.get", serde_json::json!({
+        "plugin": "acme.side", "graph": "joern-cpg", "key": "node/1",
+    })).unwrap();
+    assert!(got.as_str().unwrap().contains("METHOD"), "{got}");
+    let scan = scc_engine::invoke(&root, "sidecar.scan", serde_json::json!({
+        "plugin": "acme.side", "graph": "joern-cpg", "prefix": "node/",
+    })).unwrap();
+    assert_eq!(scan["keys"].as_array().unwrap().len(), 1, "{scan}");
+    // Other graphs are isolated namespaces.
+    let scan2 = scc_engine::invoke(&root, "sidecar.scan", serde_json::json!({
+        "plugin": "acme.side", "graph": "other", "prefix": "",
+    })).unwrap();
+    assert!(scan2["keys"].as_array().unwrap().is_empty(), "{scan2}");
+    // Canonical graph untouched by raw storage.
+    let after = scc_engine::invoke(&root, "export.system_ir",
+        serde_json::json!({"format": "system-ir.json"})).unwrap();
+    assert_eq!(after["entities"].as_array().unwrap().len(), n_entities, "sidecar must not leak");
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-plugins.promote-sidecar verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.promote-sidecar
 fn promote_sidecar_enters_canonical_graph() {
     // §124 item 36 (promotion half): selected sidecar findings enter the
