@@ -118,9 +118,13 @@ pub fn resilient_index<T>(
     }
 }
 
-// trace:exempt reason=internal-detail
+/// Keep `.scc/` cache out of git while preserving committable project
+/// files (`intent.yaml`, `plugins.toml`, `plugins.lock`). A bare `.scc/`
+/// line would make git (and our gitignore-respecting walker) prune the
+/// whole directory including project files. Idempotent.
+// trace:v1 id=impl.scc-engine-workspace.ensure-scc-ignored work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn ensure_scc_ignored(root: &Path) {
-    const WANT: [&str; 2] = [".scc/*", "!.scc/intent.yaml"];
+    const WANT: [&str; 4] = [".scc/*", "!.scc/intent.yaml", "!.scc/plugins.toml", "!.scc/plugins.lock"];
     let gi = root.join(".gitignore");
     let content = std::fs::read_to_string(&gi).unwrap_or_default();
     let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();

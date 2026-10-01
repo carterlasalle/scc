@@ -1656,6 +1656,8 @@ mod tests {
         let gi = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert!(gi.contains(".scc/*"), "{gi}");
         assert!(gi.contains("!.scc/intent.yaml"), "{gi}");
+        assert!(gi.contains("!.scc/plugins.toml"), "{gi}");
+        assert!(gi.contains("!.scc/plugins.lock"), "{gi}");
         crate::ensure_scc_ignored(root);
         let gi2 = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert_eq!(gi, gi2, "idempotent");
