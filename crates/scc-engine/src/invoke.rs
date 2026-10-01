@@ -498,6 +498,21 @@ pub fn invoke(
                 None => serde_json::json!({"error": format!("entry {id} not in surface map")}),
             }
         }
+        "ranking.trace" => {
+            // Full ranking trace (§19): items + the seed/required
+            // inputs the blend consumed. Same computation as
+            // ranking.symbols; the envelope is the audit path.
+            let req: scc_api::RankRequest = serde_json::from_value(input)?;
+            let goal = req.goal.clone().unwrap_or_default();
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, &goal);
+            let (out, seeds, required) = engine.ranking().trace_with_hooks(&req, &hooks)?;
+            let mut v = serde_json::to_value(&out)?;
+            v["seeds"] = serde_json::json!(seeds);
+            v["required"] = serde_json::json!(required);
+            v
+        }
         "ranking.explain" | "surface.explain" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
@@ -580,15 +595,10 @@ pub fn invoke(
             let mut ap = crate::plugins::active(root, &config);
             crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
             let hooks = ranking_hooks_from_plugins(&mut ap, goal);
-            let mut required = engine.ranking().required_with(&hooks)?;
-            let mut contributed = 0usize;
-            for cov in &hooks.coverage {
-                for id in cov(goal) {
-                    if required.insert(id) { contributed += 1; }
-                }
-            }
-            let mut ids: Vec<String> = required.into_iter().collect();
+            let base: usize = engine.ranking().required_with("", &crate::ranking::RankHooks::default())?.len();
+            let mut ids: Vec<String> = engine.ranking().required_with(goal, &hooks)?.into_iter().collect();
             ids.sort();
+            let contributed = ids.len().saturating_sub(base);
             serde_json::json!({"required": ids, "plugin_contributed": contributed})
         }
         "selection.preview" => {

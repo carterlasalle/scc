@@ -184,6 +184,28 @@ fn seeds_op_merges_lexical_and_plugin() {
 }
 
 #[test]
+// trace:v1 id=test.scc-engine-ranking.trace-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
+fn trace_op_envelopes_items_with_inputs() {
+    // `ranking.trace`: items identical to symbols() for the same
+    // request, plus the seed/required inputs the blend consumed.
+    let (_dir, store) = fixture();
+    let (_g, _c, _s, engine) = ranker_of(&store);
+    let r = engine.ranking();
+    let req = scc_api::RankRequest { profile: None, goal: Some("zeta".into()), limit: 20, explain: true, include_features: true, include_intermediate: false };
+    let hooks = scc_engine::ranking::RankHooks::default();
+    let plain = r.symbols_with_hooks(&req, &hooks).unwrap();
+    let (traced, seeds, required) = r.trace_with_hooks(&req, &hooks).unwrap();
+    assert_eq!(traced.items.len(), plain.items.len());
+    for (a, b) in traced.items.iter().zip(plain.items.iter()) {
+        assert_eq!(a.id, b.id);
+        assert!((a.rank - b.rank).abs() < 1e-12, "{} vs {}", a.rank, b.rank);
+    }
+    assert!(!seeds.is_empty(), "zeta seeds feed the blend");
+    assert!(seeds.iter().all(|s| s.contains("a/mod.py")), "{seeds:?}");
+    let _ = required;
+}
+
+#[test]
 // trace:v1 id=test.scc-engine-ranking.score-entries-op verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-ranking.symbols
 fn score_entries_op_matches_single_blend() {
     // `ranking.score_entries`: batched pure blend — one row scores

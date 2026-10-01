@@ -151,10 +151,16 @@ impl<'a> Ranker<'a> {
     /// partitions on): invariant/invocation/flow/state-owner entries.
     /// The op unions plugin coverage providers over this.
     // trace:exempt reason=internal-detail
-    pub fn required_with(&self, _hooks: &RankHooks) -> crate::Result<std::collections::BTreeSet<String>> {
+    pub fn required_with(&self, goal: &str, hooks: &RankHooks) -> crate::Result<std::collections::BTreeSet<String>> {
         let ctx = self.ctx();
         let map = scc_context::surface::compile_surface_map(&ctx);
-        Ok(scc_context::surface::required_ids(&map, &ctx))
+        let mut required = scc_context::surface::required_ids(&map, &ctx);
+        for cov in &hooks.coverage {
+            for id in cov(goal) {
+                required.insert(id);
+            }
+        }
+        Ok(required)
     }
 
     /// Task-seed merge for goal (§123.11): lexical seeds + plugin
@@ -218,6 +224,21 @@ impl<'a> Ranker<'a> {
     // trace:v1 id=impl.scc-engine-ranking.symbols work=WORK-SI-MMMJA4G6 implements=PLAN-SI-SYKFPBEC
     pub fn symbols(&self, req: &RankRequest) -> crate::Result<RankResult> {
         self.symbols_with_hooks(req, &RankHooks::default())
+    }
+
+    /// Full ranking trace (§19): the RankResult plus the inputs the
+    /// blend consumed — seed ids and required entry ids. Same
+    /// computation as symbols_with_hooks (no new math); the envelope
+    /// makes the decision auditable without re-deriving inputs.
+    // trace:exempt reason=internal-detail
+    pub fn trace_with_hooks(&self, req: &RankRequest, hooks: &RankHooks) -> crate::Result<(RankResult, Vec<String>, Vec<String>)> {
+        let goal = req.goal.as_deref().unwrap_or("");
+        let out = self.symbols_with_hooks(req, hooks)?;
+        let mut seeds: Vec<String> = self.seeds_with(goal, hooks)?.into_iter().map(|x| x.id).collect();
+        seeds.sort();
+        let mut required: Vec<String> = self.required_with(goal, hooks)?.into_iter().collect();
+        required.sort();
+        Ok((out, seeds, required))
     }
 
     /// symbols() with explicit plugin hooks (one call, deterministic order).
