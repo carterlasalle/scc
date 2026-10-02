@@ -698,7 +698,12 @@ impl Store {
             probe_existing_schema(&conn)?;
         }
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "busy_timeout", 5000)?;
+        // 30s lock wait (issue: `scc index` failed instantly with
+        // "database is locked" while a watch/daemon writer held the DB;
+        // the old 5s timeout lost to multi-second index writes and the
+        // bare sqlite message told the user nothing retryable). Locks
+        // are transient contention, NOT corruption — never quarantine.
+        conn.pragma_update(None, "busy_timeout", 30000)?;
         // FULL durability: the store is the product (agent context reads it
         // directly), not a rebuildable cache — an OS crash or power loss
         // must never leave a half-written index behind. Speed comes from

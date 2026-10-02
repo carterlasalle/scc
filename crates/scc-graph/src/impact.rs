@@ -155,6 +155,7 @@ fn caller_wave(
 // trace:v1 id=impl.scc.impact work=WORK-SCC-013 satisfies=REQ-forgotten-impact-partners,REQ-SCC-IR
 // trace:v1 id=impl.scc.impact.importers work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 // trace:v1 id=impl.scc.impact.flowexact work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:v1 id=impl.impact-import-fallback work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP
 pub fn compute_impact(
     view: &TrustedGraphView,
     store: &Store,
@@ -288,6 +289,64 @@ pub fn compute_impact(
     }
 
     caller_wave(view, graph, &mut importer_depth, &mut importer_prov, IMPORTER_MAX_DEPTH);
+
+    // Issue #15 supplement: consult the indexed `imports` rows directly
+    // (the same table the tests-to-run signal uses) for any wanted file
+    // the edge waves missed. Edge BFS misses when the changed file is
+    // imported through a form the resolver marks External/Unresolved
+    // (`from src import util` -> external_api `src`), but the imports
+    // row still names the importing file. Runs as a supplement, not an
+    // all-or-nothing fallback: files the waves already found keep their
+    // wave depth (contains_key guard); only genuinely missed files are
+    // added, and only indexed files — never fabricated, never external.
+    {
+        // trace:inherit impl.scc.impact reason=import-row-supplement-inside-compute-impact
+        let wanted: std::collections::BTreeSet<String> = resolved_files
+            .iter()
+            .map(|f| (*f).clone())
+            .chain(resolved_sym_ids.iter().filter_map(|id| {
+                view.entity(id)
+                    .and_then(|e| e.attributes.get("file"))
+                    .and_then(|v| v.as_str())
+                    .map(|f| f.to_string())
+            }))
+            .collect();
+        if !wanted.is_empty() {
+            if let Ok(rows) = store.all_imports() {
+                for (file, module, names, _line, _typ) in &rows {
+                    if files.iter().any(|f| f == file) {
+                        continue;
+                    }
+                    if importer_depth.contains_key(file) {
+                        continue;
+                    }
+                    if view.entity(&scc_core::entity_id(&graph.repo_id, kinds::FILE, file)).is_none() {
+                        continue;
+                    }
+                    let target = module.replace('.', "/");
+                    let hit = wanted.iter().any(|w| {
+                        let stem = w.rsplit_once('.').map(|(s, _)| s).unwrap_or(w);
+                        // member-exact: `from src import util` names stem
+                        // `src/util` exactly — precise, no fuzzy over-match.
+                        let member_exact = names.iter().any(|(local, imported)| {
+                            format!("{target}/{imported}") == stem
+                                || format!("{target}/{local}") == stem
+                        });
+                        member_exact
+                            || *w == target
+                            || w.starts_with(&format!("{target}/"))
+                            || target == *stem
+                            || target.starts_with(&format!("{stem}/"))
+                            || w.ends_with(&format!("/{target}"))
+                    });
+                    if hit {
+                        importer_depth.insert(file.clone(), 1);
+                        importer_prov.insert(file.clone(), scc_core::Provenance::Extracted);
+                    }
+                }
+            }
+        }
+    }
 
     for (file, depth) in &importer_depth {
         if *depth == 0 {
@@ -621,6 +680,29 @@ mod tests {
             "calls-b-a".to_string(), b_sym, scc_core::predicates::CALLS, a_sym, scc_core::Provenance::Extracted,
         ), "b.go").unwrap();
         (dir, store)
+    }
+
+    #[test]
+    // trace:v1 id=test.impact-import-fallback-recall work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP exercises=impl.impact-import-fallback
+    fn import_row_fallback_names_package_member_importer() {
+        use scc_core::Entity;
+        // `from src import util` resolves External (no file edge), but the
+        // imports row still names the importing file — the fallback must
+        // surface it at file level instead of answering 0%.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let repo = store.repository().id.clone();
+        for path in ["src/util.py", "src/viapkg.py"] {
+            let fid = scc_core::entity_id(&repo, kinds::FILE, path);
+            store.insert_entity(&Entity::new(fid, kinds::FILE, path.to_string()), &[path.to_string()]).unwrap();
+        }
+        store.insert_imports("src/viapkg.py", &[("src".into(), vec![("util".into(), "util".into())], 1, "member".into())]).unwrap();
+        let g = crate::RealityGraph::load(&store).unwrap();
+        let v = TrustedGraphView::new(&g, &store, &[], crate::TrustPolicy::default());
+        let imp = compute_impact(&v, &store, &["src/util.py".to_string()], &[]).unwrap();
+        assert!(imp.importers.iter().any(|i| i.file == "src/viapkg.py"), "{imp:?}");
     }
 
     #[test]

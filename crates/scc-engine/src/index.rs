@@ -43,6 +43,7 @@ pub fn full(root: &Path, config: &scc_indexer::Config) -> crate::Result<scc_inde
         let _ = store.record_current_revision_with_config(
             &scc_indexer::semantic_config_hash(config),
         )?;
+        let _ = store.prune_revisions(config.history.max_revisions);
         Ok(report)
     })
 }
@@ -58,6 +59,7 @@ pub fn refresh_paths(root: &Path, config: &scc_indexer::Config, paths: &[String]
     let _ = store.record_current_revision_with_config(
         &scc_indexer::semantic_config_hash(config),
     )?;
+    let _ = store.prune_revisions(config.history.max_revisions);
     Ok(report)
 }
 

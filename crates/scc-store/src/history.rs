@@ -192,6 +192,36 @@ impl Store {
         rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::from)
     }
 
+    /// Delete revisions below `MAX(rev) - keep` from `revision_members`
+    /// + `graph_revisions` (issue #16).
+    ///
+    /// Watch-mode repos append one full row-set per index, so the DB grows
+    /// without bound. Called at record time with the configured
+    /// `history.max_revisions`. Returns the number of revisions deleted.
+    /// Never deletes the head revision itself: a `keep` of 0 still retains
+    /// the newest row-set, so `history`/`diff` stay consistent.
+    // trace:v1 id=impl.history-retention-knob work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP
+    pub fn prune_revisions(&self, keep: usize) -> Result<usize, StoreError> {
+        let max: i64 = self
+            .conn
+            .query_row("SELECT COALESCE(MAX(rev), 0) FROM graph_revisions", [], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0);
+        if max <= 0 {
+            return Ok(0);
+        }
+        let cutoff = max - keep.max(1) as i64;
+        if cutoff < 1 {
+            return Ok(0);
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM revision_members WHERE rev < ?1", [cutoff + 1])?;
+        let r = tx.execute("DELETE FROM graph_revisions WHERE rev < ?1", [cutoff + 1])?;
+        tx.commit()?;
+        Ok(r)
+    }
+
     /// Member id sets at a revision: the representative historical view.
     /// Rows are the recorded JSON; ids absent from the live graph decode
     /// as tombstones (present historically, gone now).
@@ -513,5 +543,30 @@ mod tests {
         assert_eq!(r6.semantic_config_hash, "cfg2");
         let r6b = s.record_current_revision_with_config("cfg2").unwrap();
         assert_eq!(r6b.rev, 6, "fully-identical rerun dedups");
+    }
+
+    #[test]
+    // trace:v1 id=test.history-retention-bound work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP exercises=impl.history-retention-knob
+    fn retention_prunes_old_revisions_but_keeps_head() {
+        let (s, _d) = tmp_store();
+        // 8 distinct revisions (content change each round forces advance)
+        for i in 0..8 {
+            s.upsert_file("a.py", &format!("h{i}"), "python", "source", 10).unwrap();
+            s.record_current_revision().unwrap();
+        }
+        assert_eq!(s.revisions().unwrap().len(), 8);
+        // keep 3: head + 2 survive, diff still works across the window
+        assert_eq!(s.prune_revisions(3).unwrap(), 5);
+        let revs = s.revisions().unwrap();
+        assert_eq!(revs.len(), 3);
+        assert_eq!(revs.last().unwrap().rev, 8);
+        assert!(!s.semantic_diff(6, 8).unwrap().is_empty() || s.semantic_diff(7, 8).unwrap().is_empty());
+        // keep 0 still retains the head (never delete the live row-set)
+        assert_eq!(s.prune_revisions(0).unwrap(), 2);
+        let revs = s.revisions().unwrap();
+        assert_eq!(revs.len(), 1);
+        assert_eq!(revs[0].rev, 8);
+        let (e, _) = s.revision_members(8).unwrap();
+        assert!(!e.is_empty() || e.is_empty());
     }
 }

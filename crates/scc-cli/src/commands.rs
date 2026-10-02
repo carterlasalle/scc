@@ -4,7 +4,18 @@ use crate::{config_path, load_config, open_store, scc_dir};
 
 // trace:exempt reason=internal-detail
 fn engine_err(e: scc_engine::EngineError) -> crate::CliError {
-    crate::CliError::Other(e.to_string())
+    // Transient lock contention (watch/daemon writer holds the DB) must
+    // read as retryable, not as store corruption: the 30s busy_timeout
+    // covers short writers, but a long index can still collide. Never
+    // quarantine on BUSY — the DB is healthy, just busy.
+    // trace:inherit impl.crates-scc-cli-src-commands.cmd-index reason=lock-retry-message-inside-engine-err-funnel
+    let msg = e.to_string();
+    if msg.contains("database is locked") || msg.contains("database table is locked") {
+        return crate::CliError::Other(format!(
+            "{msg} (another scc process holds the index — retry, or stop `scc watch`/`scc serve` first)"
+        ));
+    }
+    crate::CliError::Other(msg)
 }
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -814,11 +825,27 @@ pub fn cmd_export(root: &Path, format: &str) -> crate::Result<()> {
     Ok(())
 }
 
+// trace:v1 id=impl.query-where-first-header work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-query work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 // trace:v1 id=impl.cli.query.fallback work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_query(root: &Path, query: &str, limit: usize) -> crate::Result<()> {
     let store = open_store(root)?;
     let hit = scc_engine::graph::query(&store, &scc_api::QueryRequest { query: query.into(), limit }).map_err(engine_err)?;
+    // Issue #13: defining file:line is the answer to "where is X defined"
+    // and must lead the output — an agent skimming the top previously saw
+    // ~20 lines of bare entity names with no location. The symbol block
+    // (which carries file:line) now renders first as `where:`, then the
+    // full entity/symbol detail below for downstream consumers.
+    if !hit.symbols.is_empty() {
+        println!("— where —");
+        for (name, _sig, _kind, file, line) in &hit.symbols {
+            if *line > 0 {
+                println!("where: {name} {file}:{line}");
+            } else {
+                println!("where: {name} {file}");
+            }
+        }
+    }
     println!("— entities —");
     for e in &hit.entities {
         println!("{} [{}]", e.name, e.kind);

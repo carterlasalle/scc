@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub schema: u32,
     pub index: IndexConfig,
+    pub history: HistoryConfig,
     pub languages: LanguagesConfig,
     pub context: ContextConfig,
     pub inference: InferenceConfig,
@@ -41,6 +42,18 @@ pub struct IndexConfig {
     /// Run the language-aware semantic backends (pyright, tsserver) after
     /// every index, before the derived layer compiles (Wave 4 §24).
     pub auto_resolve: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+// trace:v1 id=impl.history-retention-config-struct work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP
+pub struct HistoryConfig {
+    /// Bound on retained graph revisions (issue #16): after recording a
+    /// revision, rows below `MAX(rev) - max_revisions` are deleted from
+    /// `revision_members` + `graph_revisions`. Watch-mode repos append one
+    /// full row-set per index; without a bound the DB grows without limit
+    /// (8.3M rows / 4.7GB observed). Default 50.
+    pub max_revisions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +186,7 @@ impl Default for Config {
         Config {
             schema: 1,
             index: IndexConfig::default(),
+            history: HistoryConfig::default(),
             languages: LanguagesConfig::default(),
             context: ContextConfig::default(),
             inference: InferenceConfig::default(),
@@ -186,12 +200,22 @@ impl Default for Config {
 }
 
 // trace:exempt reason=internal-detail
+impl Default for HistoryConfig {
+    // trace:exempt reason=internal-detail
+    fn default() -> Self {
+        HistoryConfig { max_revisions: 50 }
+    }
+}
+
+// trace:exempt reason=internal-detail
 impl Default for IndexConfig {
     // trace:exempt reason=internal-detail
     fn default() -> Self {
         IndexConfig {
             ignore: vec![
                 ".git/**".into(),
+                ".bughunt/**".into(),
+                ".bugcorpus/**".into(),
                 "vendor/**".into(),
                 "generated/**".into(),
                 "node_modules/**".into(),

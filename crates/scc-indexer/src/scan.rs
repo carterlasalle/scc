@@ -848,6 +848,21 @@ mod tests {
     }
 
     #[test]
+    // trace:v1 id=test.scc.scan.default-ignore-skips-tool-dirs work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP exercises=impl.history-retention-config-struct
+    fn default_ignore_skips_tool_dirs() {
+        // Tool working dirs (.bughunt cache/venvs/generated, .bugcorpus)
+        // are tool exhaust, never system facts — same class as target/,
+        // dist/, node_modules/. The user's scan showed 366 .bughunt/
+        // files indexed that were all cache/venv/generated noise.
+        let cfg = crate::config::IndexConfig::default();
+        assert!(is_ignored(".bughunt/cache/mypy/x.py", &cfg));
+        assert!(is_ignored(".bughunt/runtime/pysa-venv/y.py", &cfg));
+        assert!(is_ignored(".bughunt/generated/z.py", &cfg));
+        assert!(is_ignored(".bugcorpus/finding.json", &cfg));
+        assert!(!is_ignored("src/main.py", &cfg));
+    }
+
+    #[test]
     // trace:v1 id=test.scc.scan.default-ignore-skips-os-metadata verifies=REQ-SI-NX53P4B7
     fn default_ignore_skips_os_metadata() {
         // macOS/Windows metadata must never enter the inventory: Finder

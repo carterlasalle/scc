@@ -311,6 +311,8 @@ pub fn index_and_recompile(root: &Path, config: &Config) -> Result<scc_indexer::
         let _ = store.record_current_revision_with_config(
             &scc_indexer::semantic_config_hash(config),
         )?;
+        // trace:inherit impl.history-retention-knob reason=enforces-retention-at-record-site
+        let _ = store.prune_revisions(config.history.max_revisions);
         Ok(report)
     })
 }
