@@ -180,6 +180,7 @@ pub const OPERATIONS: &[OperationDescriptor] = &[
     OperationDescriptor { id: "import.beads", description: "Alias for import.scip format=beads", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "import.hindsight", description: "Alias for import.scip format=hindsight", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "import.cbm", description: "Alias for import.scip format=cbm", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Stable },
+    OperationDescriptor { id: "import.plugin", description: "Import evidence from an evidence-provider plugin: import.<plugin-id> commits the plugin evidence.import batch through validate+commit", mutation: MutationClass::ModelMutation, streaming: false , stability: Stability::Experimental },
     OperationDescriptor { id: "export.system_ir", description: "Export System IR (json/jsonl/ccg/flow-graphs)", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "model.get", description: "Complete live model: repository, epoch, files, entities, relationships, evidence, components, flows, invariants, stats", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },
     OperationDescriptor { id: "model.drift", description: "Alias for architecture.drift", mutation: MutationClass::Read, streaming: false , stability: Stability::Stable },

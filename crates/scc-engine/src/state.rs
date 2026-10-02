@@ -82,9 +82,7 @@ pub fn import_evidence(root: &Path, format: &str, file: &str) -> crate::Result<s
                 errors: r.errors,
             }),
         other => {
-            return Err(crate::EngineError::Other(format!(
-                "unknown import format '{other}' (use scip, ccg, gitnexus, beads, cbm, hindsight, or tracelayer)"
-            )))
+            return import_plugin_evidence(root, other, file);
         }
     }
     .map_err(crate::EngineError::Other)?;
@@ -291,4 +289,57 @@ fn require_state_grant(
             need.as_str()
         )))
     }
+}
+
+/// Plugin evidence import (spec §31 EvidenceProvider): `import.<plugin-id>`
+/// asks the plugin declaring the `evidence-provider` extension (or the
+/// legacy `evidence.import` operation) for a contribution batch, then
+/// commits it through the NORMAL validate+commit path — never a side
+/// door. Input carries the file path (`{"file": ...}`); the plugin
+/// answers `{"batch": {entities, relationships, evidence, diagnostics}}`.
+/// Unknown plugin ids fail with the same vocabulary as unknown formats.
+/// Counts map onto ImportReport so every transport renders one shape.
+// trace:v1 id=impl.scc-engine-state.plugin-evidence work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn import_plugin_evidence(
+    root: &Path,
+    plugin_id: &str,
+    file: &str,
+) -> crate::Result<scc_indexer::adapters::ImportReport> {
+    let config = crate::workspace::load_config(root)?;
+    let ap = crate::plugins::active(root, &config);
+    let plug = ap
+        .plugins
+        .iter()
+        .find(|p| {
+            p.manifest.id == plugin_id
+                && (p.manifest.extensions.iter().any(|e| e.extension_type == "evidence-provider")
+                    || p.manifest.operations.iter().any(|o| o == "evidence.import"))
+        })
+        .cloned()
+        .ok_or_else(|| {
+            crate::EngineError::Other(format!(
+                "unknown import format '{plugin_id}' (use scip, ccg, gitnexus, beads, cbm, hindsight, tracelayer, or a plugin id declaring evidence-provider)"
+            ))
+        })?;
+    let out = scc_plugin_host::call(
+        &plug,
+        "evidence.import",
+        serde_json::json!({"file": file}),
+        None,
+    )
+    .map_err(|e| crate::EngineError::Other(format!("plugin {plugin_id} evidence.import: {e}")))?;
+    let batch = out.get("batch").cloned().unwrap_or(serde_json::json!({}));
+    let store = crate::workspace::open_store(root)?;
+    let committed =
+        crate::plugins::commit_contribution(&store, plugin_id, &batch)?;
+    store
+        .bump_epoch(scc_store::ModelEpochKind::Evidence)
+        ?;
+    crate::index::recompile(&store)?;
+    Ok(scc_indexer::adapters::ImportReport {
+        symbols: committed.get("entities").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+        calls: committed.get("relationships").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+        imports: committed.get("evidence").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+        errors: committed.get("diagnostics").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+    })
 }

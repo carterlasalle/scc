@@ -1038,3 +1038,32 @@ fn candidate_provider_merges_by_id() {
     let scores: Vec<f64> = cands.iter().map(|c| c["score"].as_f64().unwrap()).collect();
     assert!(scores.windows(2).all(|w| w[0] >= w[1]), "sorted desc: {scores:?}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.evidence-provider verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-state.plugin-evidence
+fn evidence_provider_plugin_commits_batch() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    // Evidence-provider plugin: answers evidence.import with a batch
+    // carrying one custom-kind entity + one evidence record.
+    let plugdir = root.join(".scc").join("plugins").join("acme.ev");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.ev\"\nname = \"Ev\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"evidence.import\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"evidence-provider:acme.ev\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    )
+    .unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json\nprint(json.dumps({\"output\": {\"batch\": {\"entities\": [{\"id\": \"plugin:acme.ev/finding/1\", \"kind\": \"plugin:acme.ev/finding\", \"name\": \"finding-1\"}], \"relationships\": [], \"evidence\": [{\"id\": \"evidence:acme-ev-1\", \"type\": \"source\"}], \"diagnostics\": []}}}))\n").unwrap();
+    let out = scc_engine::invoke(&root, "import.acme.ev", serde_json::json!({"file": "main.py"})).unwrap();
+    assert_eq!(out.get("symbols").and_then(|v| v.as_u64()), Some(1), "one entity committed: {out}");
+    assert_eq!(out.get("imports").and_then(|v| v.as_u64()), Some(1), "one evidence committed: {out}");
+    // Unknown plugin id fails with the import vocabulary, not "unknown operation".
+    let err = scc_engine::invoke(&root, "import.acme.ghost", serde_json::json!({"file": "main.py"}));
+    assert!(err.is_err(), "unknown plugin must fail: {err:?}");
+    assert!(err.unwrap_err().to_string().contains("unknown import format"), "import vocabulary");
+}

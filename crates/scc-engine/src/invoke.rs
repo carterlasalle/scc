@@ -347,6 +347,19 @@ pub fn invoke(
                 "errors": r.errors,
             })
         }
+        _ if operation.starts_with("import.") => {
+            // Plugin evidence providers (spec §31): `import.<plugin-id>`
+            // commits the plugin's batch through validate+commit.
+            let format = operation.trim_start_matches("import.");
+            let file = input.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            let r = crate::state::import_evidence(root, format, file)?;
+            serde_json::json!({
+                "symbols": r.symbols,
+                "calls": r.calls,
+                "imports": r.imports,
+                "errors": r.errors,
+            })
+        }
         "export.diagram" | "diagram.render" => {
             let format = input.get("format").and_then(|v| v.as_str()).unwrap_or("mermaid");
             crate::exports::diagram(&store, format)?
