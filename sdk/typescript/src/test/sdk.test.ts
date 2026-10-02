@@ -105,6 +105,13 @@ test("historyList() reports the index revision", { skip: skip ? skipReason : fal
   assert.ok("rev" in got.revisions[0]);
 });
 
+test("graphSearchSymbols() finds the defining site", { skip: skip ? skipReason : false }, async () => {
+  const got = await scc().graphSearchSymbols("add");
+  assert.ok(got.symbols.length > 0);
+  for (const key of ["name", "file", "line"] as const)
+    assert.ok(key in got.symbols[0], `missing ${key}`);
+});
+
 test("graphSearch() finds the fixture entity", { skip: skip ? skipReason : false }, async () => {
   const got = await scc().graphSearch("add");
   assert.ok(got.entities.length > 0);

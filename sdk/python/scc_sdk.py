@@ -204,6 +204,14 @@ class SCC:
         provenance for what changed when."""
         return {"revisions": self.invoke("history.list", {})}
 
+    # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-search-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    def graphSearchSymbols(self, query: str, limit: int = 100) -> dict[str, Any]:
+        """FTS symbol search with LIKE fallback (graph.search_symbols):
+        ``[{name, signature, kind, file, line}]`` — the defining sites
+        behind the query where-first header. Entities live in
+        graphSearch; paths in traverse()."""
+        return {"symbols": self.invoke("graph.search_symbols", {"query": query, "limit": limit})["symbols"]}
+
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.graph-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     def graphSearch(self, query: str, limit: int = 100) -> dict[str, Any]:
         """FTS entity search with LIKE fallback (graph.search): raw

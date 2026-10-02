@@ -317,6 +317,18 @@ export class SCC {
    * Graph entities matching the query. Lexical lookup — use
    * traverse()/query() for structured multi-step traversal.
    */
+  /**
+   * FTS symbol search with LIKE fallback (graph.search_symbols):
+   * defining sites with signature + file:line behind the query
+   * where-first header. Entities live in graphSearch; paths in
+   * traverse().
+   */
+  // trace:v1 id=impl.sdk-typescript-src-index-scc.graph-search-symbols work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+  async graphSearchSymbols(query: string, limit?: number): Promise<{ symbols: Array<{ name: string; signature: string; kind: string; file: string; line: number }> }> {
+    const out = await this.invoke("graph.search_symbols", { query, limit: limit ?? 100 }) as { symbols: Array<{ name: string; signature: string; kind: string; file: string; line: number }> };
+    return { symbols: out.symbols };
+  }
+
   // trace:v1 id=impl.sdk-typescript-src-index-scc.graph-search work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
   async graphSearch(query: string, limit?: number): Promise<{ entities: Array<{ id: string; kind: string; name: string }> }> {
     return { entities: await this.invoke("graph.search", { query, limit: limit ?? 100 }) as Array<{ id: string; kind: string; name: string }> };

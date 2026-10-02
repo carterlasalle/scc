@@ -114,6 +114,15 @@ class TestSCCSDK(unittest.TestCase):
         self.assertIn("rev", got["revisions"][0], f"missing rev: {got}")
 
     # trace:exempt reason=unit-test
+    def test_graph_search_symbols_finds_defining_site(self):
+        got = self.scc.graphSearchSymbols("add")
+        self.assertIn("symbols", got, f"missing symbols: {got}")
+        self.assertTrue(got["symbols"], f"empty symbols: {got}")
+        hit = got["symbols"][0]
+        for key in ("name", "file", "line"):
+            self.assertIn(key, hit, f"missing {key}: {hit}")
+
+    # trace:exempt reason=unit-test
     def test_graph_search_finds_fixture_entity(self):
         got = self.scc.graphSearch("add")
         self.assertIn("entities", got, f"missing entities: {got}")
