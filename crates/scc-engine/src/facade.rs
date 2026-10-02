@@ -178,4 +178,84 @@ impl SccEngine {
     pub fn runtime_reconcile(&self) -> crate::Result<scc_indexer::runtime::Reconciliation> {
         crate::state::reconcile(&self.root)
     }
+
+    /// Surface build for a task goal + budget (spec §5 usage):
+    /// structured result plus rendered text. Same derivation as the
+    /// `surface.build` operation (one builder, two callers).
+    // trace:exempt reason=internal-detail
+    pub fn surface_build(
+        &self,
+        task: &str,
+        budget: usize,
+        explain: bool,
+    ) -> crate::Result<(scc_core::SurfaceRenderResult, String)> {
+        self.with_engine(|engine| {
+            let req = scc_api::SurfaceRequest {
+                task: Some(task.to_string()),
+                budget: Some(budget),
+                explain,
+                stages: None,
+            };
+            let (scorer, _) = crate::inference::rankers(engine.store, &self.config, task);
+            let semantic: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            engine.context().surface(&req, semantic)
+        })
+    }
+
+    /// Full per-symbol blend with feature decomposition (spec §5 usage):
+    /// same math as `surface_build` minus MMR/quotas/budget. Goal +
+    /// limit + explain map onto `RankRequest` exactly as the
+    /// `ranking.symbols` operation builds it.
+    // trace:exempt reason=internal-detail
+    pub fn ranking_symbols(
+        &self,
+        goal: &str,
+        limit: usize,
+        explain: bool,
+    ) -> crate::Result<scc_api::RankResult> {
+        self.with_engine(|engine| {
+            engine.ranking().symbols(&scc_api::RankRequest {
+                goal: Some(goal.to_string()),
+                profile: None,
+                limit,
+                explain,
+                include_features: false,
+                include_intermediate: false,
+            })
+        })
+    }
+
+    /// Task context artifact: pack + delta + ids + token count (spec §5
+    /// usage). Same builder the `context.task` operation calls.
+    // trace:exempt reason=internal-detail
+    pub fn context_task(
+        &self,
+        goal: &str,
+        budget: usize,
+    ) -> crate::Result<crate::task::TaskContextArtifact> {
+        self.with_engine(|engine| {
+            let req = scc_api::TaskContextRequest {
+                goal: goal.to_string(),
+                files: vec![],
+                symbols: vec![],
+                budget: Some(budget),
+                hook: false,
+                record_visibility: true,
+            };
+            let (scorer, reranker) = crate::inference::rankers(engine.store, &self.config, goal);
+            let scorer_trait: Option<&dyn scc_context::rank::SemanticScorer> =
+                scorer.as_ref().map(|s| s as &dyn scc_context::rank::SemanticScorer);
+            let reranker_trait: Option<&dyn scc_context::rank::Reranker> =
+                reranker.as_ref().map(|r| r as &dyn scc_context::rank::Reranker);
+            crate::task::build_task_context(&engine, &self.config, &self.root, &req, scorer_trait, reranker_trait)
+        })
+    }
+
+    /// System atlas pack (spec §5 usage): same builder the
+    /// `context.atlas` operation calls.
+    // trace:exempt reason=internal-detail
+    pub fn context_atlas(&self, budget: usize) -> crate::Result<scc_context::ContextPack> {
+        self.with_engine(|engine| engine.context().atlas(Some(budget), false, false))
+    }
 }

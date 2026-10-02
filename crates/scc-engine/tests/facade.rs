@@ -50,3 +50,20 @@ fn open_invoke_and_session_round_trip() {
     let model = engine.model().unwrap();
     assert!(model.get("entities").is_some(), "model via facade: {model}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-facade.namespaces verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-facade.handle
+fn spec_usage_namespaces_round_trip() {
+    let (_dir, root) = fixture();
+    let engine = scc_engine::facade::SccEngine::open(&root).unwrap();
+    let atlas = engine.context_atlas(8_000).unwrap();
+    assert!(!atlas.content.is_empty(), "atlas via facade");
+    let (result, text) = engine.surface_build("hello world", 8_000, true).unwrap();
+    assert!(!text.is_empty() && !result.rendered_ids.is_empty(), "surface via facade");
+    let ranked = engine.ranking_symbols("hello world", 10, true).unwrap();
+    assert!(!ranked.items.is_empty(), "ranking via facade");
+    assert!(ranked.items.iter().all(|i| !i.reasons.is_empty()), "explain recorded: {ranked:?}");
+    let artifact = engine.context_task("hello world", 8_000).unwrap();
+    assert!(!artifact.pack.content.is_empty(), "task pack via facade");
+    assert!(artifact.token_count > 0, "token count via facade");
+}
