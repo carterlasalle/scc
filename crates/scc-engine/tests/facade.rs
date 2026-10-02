@@ -67,3 +67,26 @@ fn spec_usage_namespaces_round_trip() {
     assert!(!artifact.pack.content.is_empty(), "task pack via facade");
     assert!(artifact.token_count > 0, "token count via facade");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-facade.namespace-chain verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-facade.context-ns
+fn namespace_chain_matches_flat_methods() {
+    let (_dir, root) = fixture();
+    let engine = scc_engine::facade::SccEngine::open(&root).unwrap();
+    // context_ns / surface_ns / ranking_ns / graph_ns reach the same
+    // derivations as the flat facade methods.
+    let via_ns = engine.context_ns().atlas(8_000).unwrap();
+    let via_flat = engine.context_atlas(8_000).unwrap();
+    assert_eq!(via_ns.content, via_flat.content, "atlas chain == flat");
+    let (r1, _) = engine.surface_ns().build("hello world", 8_000, false).unwrap();
+    let (r2, _) = engine.surface_build("hello world", 8_000, false).unwrap();
+    assert_eq!(r1.rendered_ids, r2.rendered_ids, "surface chain == flat");
+    let n1 = engine.ranking_ns().symbols("hello world", 10, false).unwrap();
+    let n2 = engine.ranking_symbols("hello world", 10, false).unwrap();
+    assert_eq!(n1.items.len(), n2.items.len(), "ranking chain == flat");
+    let g1 = engine.graph_ns().relationships(None, None, 100).unwrap();
+    let g2 = engine.graph_relationships(None, None, 100).unwrap();
+    assert_eq!(g1.len(), g2.len(), "graph chain == flat");
+    let hit = engine.graph_ns().query("hello", 5).unwrap();
+    assert!(!hit.entities.is_empty(), "graph query via chain");
+}

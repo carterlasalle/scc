@@ -258,4 +258,136 @@ impl SccEngine {
     pub fn context_atlas(&self, budget: usize) -> crate::Result<scc_context::ContextPack> {
         self.with_engine(|engine| engine.context().atlas(Some(budget), false, false))
     }
+
+    /// Spec §5 namespace chain: `scc.context()` — context packs behind a
+    /// namespace view instead of one flat method list.
+    // trace:exempt reason=internal-detail
+    pub fn context_ns(&self) -> ContextNs<'_> {
+        ContextNs { engine: self }
+    }
+
+    /// Spec §5 namespace chain: `scc.surface()`.
+    // trace:exempt reason=internal-detail
+    pub fn surface_ns(&self) -> SurfaceNs<'_> {
+        SurfaceNs { engine: self }
+    }
+
+    /// Spec §5 namespace chain: `scc.ranking()`.
+    // trace:exempt reason=internal-detail
+    pub fn ranking_ns(&self) -> RankingNs<'_> {
+        RankingNs { engine: self }
+    }
+
+    /// Spec §5 namespace chain: `scc.graph()`.
+    // trace:exempt reason=internal-detail
+    pub fn graph_ns(&self) -> GraphNs<'_> {
+        GraphNs { engine: self }
+    }
+}
+
+/// Namespace view: `scc.context_ns().atlas(..)` (spec §5 chain).
+// trace:v1 id=impl.scc-engine-facade.context-ns work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct ContextNs<'a> {
+    engine: &'a SccEngine,
+}
+
+// trace:exempt reason=internal-detail
+impl ContextNs<'_> {
+    // trace:exempt reason=internal-detail
+    pub fn overview(&self) -> crate::Result<scc_context::ContextPack> {
+        self.engine.with_engine(|e| e.context().overview())
+    }
+    // trace:exempt reason=internal-detail
+    pub fn atlas(&self, budget: usize) -> crate::Result<scc_context::ContextPack> {
+        self.engine.context_atlas(budget)
+    }
+    // trace:exempt reason=internal-detail
+    pub fn atlas_model(
+        &self,
+        scope: scc_context::atlas::AtlasScope,
+    ) -> crate::Result<scc_core::SystemAtlas> {
+        self.engine.with_engine(|e| e.context().atlas_model(scope))
+    }
+    // trace:exempt reason=internal-detail
+    pub fn task(
+        &self,
+        goal: &str,
+        budget: usize,
+    ) -> crate::Result<crate::task::TaskContextArtifact> {
+        self.engine.context_task(goal, budget)
+    }
+}
+
+/// Namespace view: `scc.surface_ns().build(..)` (spec §5 chain).
+// trace:v1 id=impl.scc-engine-facade.surface-ns work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct SurfaceNs<'a> {
+    engine: &'a SccEngine,
+}
+
+// trace:exempt reason=internal-detail
+impl SurfaceNs<'_> {
+    // trace:exempt reason=internal-detail
+    pub fn build(
+        &self,
+        task: &str,
+        budget: usize,
+        explain: bool,
+    ) -> crate::Result<(scc_core::SurfaceRenderResult, String)> {
+        self.engine.surface_build(task, budget, explain)
+    }
+}
+
+/// Namespace view: `scc.ranking_ns().symbols(..)` (spec §5 chain).
+// trace:v1 id=impl.scc-engine-facade.ranking-ns work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct RankingNs<'a> {
+    engine: &'a SccEngine,
+}
+
+// trace:exempt reason=internal-detail
+impl RankingNs<'_> {
+    // trace:exempt reason=internal-detail
+    pub fn symbols(
+        &self,
+        goal: &str,
+        limit: usize,
+        explain: bool,
+    ) -> crate::Result<scc_api::RankResult> {
+        self.engine.ranking_symbols(goal, limit, explain)
+    }
+}
+
+/// Namespace view: `scc.graph_ns().query(..)` (spec §5 chain).
+// trace:v1 id=impl.scc-engine-facade.graph-ns work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct GraphNs<'a> {
+    engine: &'a SccEngine,
+}
+
+// trace:exempt reason=internal-detail
+impl GraphNs<'_> {
+    // trace:exempt reason=internal-detail
+    pub fn entity(&self, id: &str) -> crate::Result<Option<scc_core::Entity>> {
+        self.engine.graph_entity(id)
+    }
+    // trace:exempt reason=internal-detail
+    pub fn relationships(
+        &self,
+        subject: Option<&str>,
+        predicate: Option<&str>,
+        limit: usize,
+    ) -> crate::Result<Vec<scc_core::Relationship>> {
+        self.engine.graph_relationships(subject, predicate, limit)
+    }
+    // trace:exempt reason=internal-detail
+    pub fn query(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> crate::Result<crate::graph::QueryHit> {
+        self.engine.with_engine(|_| {
+            crate::graph::query(
+                &self.engine.store,
+                &scc_api::QueryRequest { query: query.to_string(), limit },
+            )
+        })
+    }
 }
