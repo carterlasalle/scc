@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 scc-core.workspace = true
 scc-store.workspace = true
+scc-plugin-host.workspace = true
 tree-sitter = "0.24"
 tree-sitter-go = "0.23"
 tree-sitter-python = "0.23"

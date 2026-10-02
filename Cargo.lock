@@ -1667,6 +1667,7 @@ dependencies = [
  "ruzstd",
  "scc-core",
  "scc-graph",
+ "scc-plugin-host",
  "scc-store",
  "serde",
  "serde_json",

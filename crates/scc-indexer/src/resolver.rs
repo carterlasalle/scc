@@ -78,6 +78,7 @@ pub fn files_with_candidate_edges(
 
 /// Run every applicable semantic backend over the repository's candidate
 /// files. Missing backends degrade; the run never fails on tool absence.
+// trace:v1 id=impl.scc-indexer-resolver.plugin-resolvers work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn resolve_repository(
     store: &Store,
     root: &Path,
@@ -156,7 +157,207 @@ pub fn resolve_repository(
     if !ts_files.is_empty() {
         run_backend("tsserver", &ts_files)?;
     }
+    // Plugin precision resolvers (spec §31 SemanticResolver): external
+    // processes answering `resolution.resolve` with edge upgrades. Runs
+    // after built-ins; same EXTRACTED->RESOLVED contract, same epoch bump
+    // per applied upgrade. Discovered via `SCC_PLUGIN_PATH`-style dirs +
+    // `.scc/plugins` through the plugin host; absent plugins = no-op.
+    // Signature kept (store, root): callers never choose resolvers.
+    let extra = plugin_resolutions(store, root, &files)?;
+    report.upgraded += extra.upgraded;
+    report.unresolved += extra.unresolved;
+    report.errors += extra.errors;
+    if !extra.backends_used.is_empty() {
+        report.backends_used.extend(extra.backends_used);
+    }
     Ok(report)
+}
+
+/// One plugin resolver's upgrades over candidate files.
+///
+/// Input: the same `(file, sites)` candidate list the built-ins consume.
+/// Protocol: the host spawns each plugin declaring the `resolver`
+/// extension (or the legacy `resolution.resolve` operation) once per
+/// candidate file with `{"file": ..., "calls": [{subject, object, line,
+/// evidence}]}`; the plugin answers `{"upgrades": [{subject, object,
+/// line, evidence, target_path, target_name}]}`. Each upgrade must name
+/// an existing EXTRACTED `calls` edge (by subject+object+line) and an
+/// existing target symbol id — invented endpoints fail the file without
+/// touching the model (validate-then-commit per file).
+// trace:v1 id=impl.scc-indexer-resolver.plugin-fn work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn plugin_resolutions(
+    store: &Store,
+    root: &Path,
+    files: &[(String, usize)],
+) -> Result<ResolveReport, String> {
+    let mut report = ResolveReport::default();
+    let plugins = scc_plugin_host::discover(root);
+    let resolvers: Vec<_> = plugins
+        .into_iter()
+        .filter(|p| {
+            p.manifest.extensions.iter().any(|e| e.extension_type == "resolver")
+                || p.manifest.operations.iter().any(|o| o == "resolution.resolve")
+        })
+        .collect();
+    if resolvers.is_empty() {
+        return Ok(report);
+    }
+    for plug in &resolvers {
+        let mut upgraded = 0usize;
+        let mut unresolved = 0usize;
+        let mut errors = 0usize;
+        for (file, _) in files {
+            let calls = candidate_calls(store, file)?;
+            if calls.is_empty() {
+                continue;
+            }
+            let input = serde_json::json!({"file": file, "calls": calls});
+            let out = match scc_plugin_host::call(plug, "resolution.resolve", input, None) {
+                Ok(v) => v,
+                Err(e) => {
+                    errors += 1;
+                    report.errors += 1;
+                    let _ = e;
+                    continue;
+                }
+            };
+            let upgrades = out.get("upgrades").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            match apply_plugin_upgrades(store, file, &calls, &upgrades, &plug.manifest.id) {
+                Ok(n) => {
+                    upgraded += n;
+                    unresolved += calls.len().saturating_sub(n);
+                }
+                Err(_) => {
+                    errors += 1;
+                    unresolved += calls.len();
+                }
+            }
+        }
+        let _ = upgraded;
+        let _ = unresolved;
+        report.upgraded += upgraded;
+        report.unresolved += unresolved;
+        report.errors += errors;
+        report.backends_used.push(format!("plugin:{}", plug.manifest.id));
+    }
+    Ok(report)
+}
+
+/// EXTRACTED `calls` edges in `file` as plugin input rows.
+// trace:exempt reason=internal-detail
+fn candidate_calls(
+    store: &Store,
+    file: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let rel_ids: std::collections::HashSet<String> = store
+        .relationship_ids_with_source(file, scc_core::predicates::CALLS)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
+    if rel_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for r in store.all_relationships().map_err(|e| e.to_string())? {
+        if r.predicate != scc_core::predicates::CALLS
+            || r.provenance != Provenance::Extracted
+            || !rel_ids.contains(&r.id)
+        {
+            continue;
+        }
+        let line = r.evidence.first()
+            .and_then(|id| store.get_evidence(id).ok().flatten())
+            .and_then(|ev| ev.start_line)
+            .unwrap_or(0);
+        out.push(serde_json::json!({
+            "subject": r.subject, "object": r.object,
+            "line": line, "evidence": r.evidence,
+        }));
+    }
+    Ok(out)
+}
+
+/// Validate-then-commit one file's plugin upgrades: every upgrade names
+/// an existing candidate edge and an existing target entity; the commit
+/// replaces EXTRACTED with RESOLVED (confidence 0.99, same as LSP exact)
+/// and bumps the semantic epoch once per file with any upgrade.
+// trace:exempt reason=internal-detail
+fn apply_plugin_upgrades(
+    store: &Store,
+    file: &str,
+    calls: &[serde_json::Value],
+    upgrades: &[serde_json::Value],
+    plugin_id: &str,
+) -> Result<usize, String> {
+    use scc_core::EvidenceType;
+    let known: std::collections::BTreeSet<(String, String, u64)> = calls
+        .iter()
+        .map(|c| {
+            (
+                c.get("subject").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                c.get("object").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                c.get("line").and_then(|v| v.as_u64()).unwrap_or(0),
+            )
+        })
+        .collect();
+    // Validate everything before touching the model.
+    let mut plan: Vec<(String, scc_core::Relationship, scc_core::Evidence)> = Vec::new();
+    for (i, u) in upgrades.iter().enumerate() {
+        let (sub, obj, line) = (
+            u.get("subject").and_then(|v| v.as_str()).unwrap_or(""),
+            u.get("object").and_then(|v| v.as_str()).unwrap_or(""),
+            u.get("line").and_then(|v| v.as_u64()).unwrap_or(0),
+        );
+        if !known.contains(&(sub.to_string(), obj.to_string(), line)) {
+            return Err(format!("plugin {plugin_id} upgrade #{i}: no such EXTRACTED calls edge {sub} -> {obj}:{line}"));
+        }
+        let target = u.get("target").and_then(|v| v.as_str()).unwrap_or("");
+        if store.get_entity(target).map_err(|e| e.to_string())?.is_none() {
+            return Err(format!("plugin {plugin_id} upgrade #{i}: unknown target entity {target}"));
+        }
+        let ev_in: Vec<String> = u
+            .get("evidence")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        for id in &ev_in {
+            if store.get_evidence(id).map_err(|e| e.to_string())?.is_none() {
+                return Err(format!("plugin {plugin_id} upgrade #{i}: unknown evidence {id}"));
+            }
+        }
+        let old_id = crate::write::rel_id(&["calls", sub, obj]);
+        let new_rel = scc_core::Relationship::new(
+            crate::write::rel_id(&["calls", sub, target]),
+            sub.to_string(),
+            scc_core::predicates::CALLS,
+            target.to_string(),
+            Provenance::Resolved,
+        )
+        .with_confidence(scc_core::resolution::confidence::LSP_EXACT)
+        .with_evidence(ev_in);
+        let ev = scc_core::Evidence {
+            id: crate::write::evidence_id(file, "call", obj, line as u32),
+            r#type: EvidenceType::Source,
+            path: Some(file.to_string()),
+            symbol: Some(obj.to_string()),
+            start_line: Some(line as u32),
+            end_line: None,
+            revision: None,
+            content_hash: None,
+            extractor: Some(format!("plugin:{plugin_id}")),
+            extractor_version: None,
+        };
+        plan.push((old_id, new_rel, ev));
+    }
+    for (old_id, new_rel, ev) in plan {
+        store.insert_evidence(&ev).map_err(|e| e.to_string())?;
+        store.delete_relationship(&old_id).map_err(|e| e.to_string())?;
+        store.insert_relationship(&new_rel, file).map_err(|e| e.to_string())?;
+    }
+    if !upgrades.is_empty() {
+        store.bump_epoch(scc_store::ModelEpochKind::Semantic).map_err(|e| e.to_string())?;
+    }
+    Ok(upgrades.len())
 }
 
 /// The trait implementations live with their servers (lsp.rs / lsp_ts.rs);
