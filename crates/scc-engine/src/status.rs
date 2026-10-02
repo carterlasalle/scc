@@ -77,13 +77,22 @@ pub fn scan(
             serde_json::json!({"path": f.path, "language": f.language.as_str(), "kind": f.kind.as_str(), "bytes": f.size})
         })
         .collect();
+    // Scale cap (mockingbird receipt: 100k skipped rows serialize to
+    // multi-MB JSON and dominate `scc scan` render). Counts in stats stay
+    // exact; only the per-file detail list is capped, with the cap
+    // disclosed in the payload so no one mistakes it for completeness.
+    const MAX_SKIPPED_DETAIL: usize = 5000;
+    let skipped_total = exp.skipped.len();
     let skipped: Vec<serde_json::Value> = exp
         .skipped
         .into_iter()
+        .take(MAX_SKIPPED_DETAIL)
         .map(|sk| serde_json::json!({"path": sk.path, "reason": sk.reason, "rule": sk.rule}))
         .collect();
+    let skipped_capped = skipped_total.saturating_sub(skipped.len());
     let st = &exp.stats;
     Ok(serde_json::json!({"indexed": indexed, "skipped": skipped,
+        "skipped_detail_capped": skipped_capped,
         "stats": {"discovered": st.discovered, "indexed": st.indexed, "ignored": st.ignored,
                   "unsupported": st.unsupported, "oversized": st.oversized, "unreadable": st.unreadable,
                   "symlink_escape": st.symlink_escape}}))

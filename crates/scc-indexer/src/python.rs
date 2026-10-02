@@ -1510,16 +1510,24 @@ impl PythonExtractor {
     /// argparse CLI surface: `sub.add_parser("serve")` registers a
     /// subcommand entrypoint; `p.add_argument("--port", ...)` contributes
     /// `--`/`-` flags to the enclosing function (the parser owner).
+    // trace:v1 id=impl.scc.extract.python.cli-dedup work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP
     fn record_cli_surface(&self, node: Node, callee: &str, ctx: &mut Ctx, src: &[u8]) {
         let method = callee.rsplit('.').next().unwrap_or("");
         match method {
             "add_parser" => {
                 if let Some(name) = first_string_arg(node, src) {
-                    ctx.entrypoints.push(Entrypoint {
-                        symbol: name,
-                        kind: "cli-subcommand".to_string(),
-                        line: node.start_position().row as u32 + 1,
-                    });
+                    // Dedup (mockingbird receipt: 12 cli modules each call
+                    // add_ingest_*_parser registering the same subcommand
+                    // names — without this the atlas lists _demo ×6).
+                    // Same (symbol, kind) from another file is the same
+                    // subcommand, not a new entrypoint.
+                    if !ctx.entrypoints.iter().any(|e| e.symbol == name && e.kind == "cli-subcommand") {
+                        ctx.entrypoints.push(Entrypoint {
+                            symbol: name,
+                            kind: "cli-subcommand".to_string(),
+                            line: node.start_position().row as u32 + 1,
+                        });
+                    }
                 }
             }
             "add_argument" => {

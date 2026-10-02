@@ -362,6 +362,28 @@ pub fn scan_repo_with_stats(
         if e.depth() == 0 {
             return true;
         }
+        // Descent prune for heavyweight tool dot-dirs (mockingbird receipt
+        // 2026-10-02: .venv/ alone cost ~30k file stats on a 25s scan).
+        // ignore-glob semantics already exclude them; pruning at descent
+        // skips the stat+classify per file. Narrow: exact top-level names
+        // only — deeper `.venv` copies still match via ignore globs.
+        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if let Some(name) = e.file_name().to_str() {
+                let rel = e
+                    .path()
+                    .strip_prefix(&filter_root)
+                    .map(|r| r.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                let top = rel.split('/').next().unwrap_or("");
+                const PRUNE_TOPS: &[&str] = &[
+                    ".venv", "venv", ".bughunt", ".bugcorpus", ".codeops", ".opencode",
+                    "node_modules", "dist", "target", ".git",
+                ];
+                if top == name && PRUNE_TOPS.contains(&name) {
+                    return false;
+                }
+            }
+        }
         let rel = match e.path().strip_prefix(&filter_root) {
             Ok(r) => r,
             Err(_) => return true,

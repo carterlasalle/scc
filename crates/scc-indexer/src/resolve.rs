@@ -396,6 +396,33 @@ impl SymbolIndex {
     }
 
     fn resolve_python_import_target(&self, from_file: &str, import: &Import) -> ImportTarget {
+        // Member-submodule (mockingbird receipt 2026-10-02): `from
+        // mockingbird import observability` where observability.py is a
+        // submodule FILE. The module probe alone lands on
+        // mockingbird/__init__.py and the member call dangles. Probe
+        // module/member.py first; a hit there is the precise target.
+        // Unique-or-degrade preserved: at most one file wins.
+        if import.r#type == ImportType::Member && !import.names.is_empty() {
+            let mut sub_hits: Vec<String> = Vec::new();
+            for (_, imported) in &import.names {
+                if imported == "*" {
+                    continue;
+                }
+                let sub = format!("{}.{}", import.module, imported);
+                if let UniqueHit::One(f) = self.resolve_python_import(from_file, &sub) {
+                    sub_hits.push(f);
+                }
+            }
+            sub_hits.sort();
+            sub_hits.dedup();
+            if sub_hits.len() == 1 {
+                return ImportTarget::Internal {
+                    file: sub_hits.into_iter().next().unwrap(),
+                    name_map: HashMap::new(),
+                    namespace: false,
+                };
+            }
+        }
         import_hit_to_target(
             self.resolve_python_import(from_file, &import.module),
             &import.module,
@@ -1551,7 +1578,9 @@ fn unique_function_id(
         }
         let fs = index.files.get(target_file.as_str())?;
         let (sym, id) = fs.by_name.get(exported.as_str())?;
-        return is_fn_alias_target(sym).then(|| id.clone());
+        // Defining-file lookup (import binding), not a call pin:
+        // Const counts (see is_defining_site).
+        return is_defining_site(sym).then(|| id.clone());
     }
     if let Some(id) = rule3_include_file_id(index, local_path, name, imported_files) {
         return Some(id);
@@ -1574,6 +1603,16 @@ fn unique_function_id(
 
 fn is_fn_alias_target(sym: &Symbol) -> bool {
     sym.kind == SymbolKind::Function || (sym.kind == SymbolKind::Const && sym.signature.is_some())
+}
+
+/// Defining site for bare-name import lookup (Rule 3, binding): module
+/// constants (ALPHA = 1, no signature) ARE defining sites — a bare-name
+/// use matching exactly one imported Const resolves to its file
+/// (mockingbird receipt: re-exported constants dangled). Distinct from
+/// [`is_fn_alias_target`], which gates CALL targets (a signature-less
+/// const is not callable and must not pin `h()`).
+fn is_defining_site(sym: &Symbol) -> bool {
+    sym.kind == SymbolKind::Function || sym.kind == SymbolKind::Const
 }
 
 /// Ripwire `rule3IncludeFile` analog: pin a bare name to the unique
@@ -1609,7 +1648,7 @@ fn rule3_include_file_id(
         let Some((sym, _)) = fs.by_name.get(name) else {
             continue;
         };
-        if !is_fn_alias_target(sym) {
+        if !is_defining_site(sym) {
             continue;
         }
         match chosen {
@@ -2041,6 +2080,34 @@ mod tests {
         );
         // unused import var
         let _ = &import;
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.resolve.member-submodule-file work=WORK-SI-Z1KJWXDQ satisfies=REQ-SI-503JSBGP exercises=impl.scc.extract.python.cli-dedup
+    fn resolves_member_submodule_file() {
+        // `from mockingbird import observability` where
+        // mockingbird/observability.py exists: the import targets the
+        // submodule file, not mockingbird/__init__.py.
+        let mut idx = SymbolIndex::new("repo");
+        idx.add_file("mockingbird/__init__.py", &[]);
+        idx.add_file(
+            "mockingbird/observability.py",
+            &[mk_symbol("is_enabled", SymbolKind::Function)],
+        );
+        idx.add_file("a.py", &[mk_symbol("f", SymbolKind::Function)]);
+        let imp = Import {
+            module: "mockingbird".into(),
+            names: vec![("observability".into(), "observability".into())],
+            line: 1,
+            r#type: ImportType::Member,
+        };
+        let target = idx.resolve_import("a.py", &imp);
+        match target {
+            ImportTarget::Internal { file, .. } => {
+                assert_eq!(file, "mockingbird/observability.py", "member file wins");
+            }
+            other => panic!("expected Internal member file, got {other:?}"),
+        }
     }
 
     #[test]

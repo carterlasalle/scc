@@ -322,6 +322,7 @@ enum Commands {
     },
 
     /// List registered engine operations (introspection)
+    #[command(alias = "operation")]
     Operations {
         /// Describe one operation in detail
         #[arg(long)]

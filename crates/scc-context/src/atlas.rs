@@ -1811,6 +1811,8 @@ pub fn render_atlas(
         // model; the agent-facing artifact caps the listing (a framework
         // repo can have thousands of export surfaces).
         const EP_RENDER_CAP: usize = 200;
+        // trace:inherit impl.scc.atlas.render reason=same-name-entrypoint-disambiguation
+        let mut seen_ep_names: std::collections::BTreeMap<String, usize> = Default::default();
         for e in atlas.entrypoints.iter().take(EP_RENDER_CAP) {
             // Framework-surface kinds render as compact `kind: name` lines
             // (`queue: consume_order`, `schedule: daily_job`,
@@ -1831,10 +1833,21 @@ pub fn render_atlas(
                     purpose.push_str(&format!("  {}: {}\n", e.kind, label));
                 }
                 _ => {
-                    if e.trigger == e.name {
-                        purpose.push_str(&format!("  {} [{}]\n", e.name, e.kind));
+                    // Same-name distinct symbols (mockingbird: _demo ×6
+                    // across files) render identically without this: append
+                    // the file on repeats so each line names its owner.
+                    let n = seen_ep_names.entry(e.name.clone()).or_insert(0);
+                    *n += 1;
+                    let label = if *n > 1 {
+                        let file = e.symbol.rsplit('/').next().unwrap_or("").split(':').next().unwrap_or("");
+                        format!("{} ({})", e.name, file)
                     } else {
-                        purpose.push_str(&format!("  {} [{}] — {}\n", e.name, e.kind, e.trigger));
+                        e.name.clone()
+                    };
+                    if e.trigger == e.name {
+                        purpose.push_str(&format!("  {} [{}]\n", label, e.kind));
+                    } else {
+                        purpose.push_str(&format!("  {} [{}] — {}\n", label, e.kind, e.trigger));
                     }
                 }
             }

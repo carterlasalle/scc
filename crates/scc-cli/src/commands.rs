@@ -179,6 +179,14 @@ pub fn cmd_scan(root: &Path, path: Option<&str>, json: bool) -> crate::Result<()
             println!("  {n:>6}  {rule}");
         }
     }
+    // trace:inherit impl.crates-scc-cli-src-commands.cmd-scan reason=skipped-detail-cap-note
+    if v.get("skipped_detail_capped").and_then(|x| x.as_u64()).unwrap_or(0) > 0 {
+        println!(
+            "\n(detail capped: showing {} of {} skipped paths; counts above are exact — rerun with a path (`scc scan <path>`) or `--json` for one verdict)",
+            skipped.len(),
+            skipped.len() + v.get("skipped_detail_capped").and_then(|x| x.as_u64()).unwrap_or(0) as usize
+        );
+    }
     // Indexed files: top-level dir histogram (where the index weight is).
     {
         use std::collections::BTreeMap;
@@ -609,7 +617,11 @@ pub fn cmd_verify(
         println!("{}", serde_json::to_string_pretty(&pack)?);
         return Ok(());
     }
+    // trace:inherit impl.crates-scc-cli-src-commands.cmd-verify reason=trailing-newline-for-shell-glue
     print!("{}", pack.content);
+    if !pack.content.ends_with('\n') {
+        println!();
+    }
     Ok(())
 }
 
@@ -1386,15 +1398,22 @@ pub fn cmd_runtime_reconcile(root: &Path, json: bool) -> crate::Result<()> {
     println!("  matched:             {}", rec.matched.len());
     println!("  observed not static: {}", rec.observed_not_static.len());
     println!("  static not observed: {}", rec.static_not_observed.len());
-    for e in &rec.matched {
-        println!("  [matched] {e}");
-    }
-    for e in &rec.observed_not_static {
-        println!("  [runtime-only] {e}");
-    }
-    for e in &rec.static_not_observed {
-        println!("  [static-only] {e}");
-    }
+    // trace:inherit impl.crates-scc-cli-src-commands.cmd-runtime-reconcile reason=detail-cap-note
+    const MAX_RECONCILE_DETAIL: usize = 20;
+    let cap = |label: &str, items: &[String]| {
+        for e in items.iter().take(MAX_RECONCILE_DETAIL) {
+            println!("  [{label}] {e}");
+        }
+        if items.len() > MAX_RECONCILE_DETAIL {
+            println!(
+                "  …and {} more [{label}] (counts exact; --json for the full list)",
+                items.len() - MAX_RECONCILE_DETAIL
+            );
+        }
+    };
+    cap("matched", &rec.matched);
+    cap("runtime-only", &rec.observed_not_static);
+    cap("static-only", &rec.static_not_observed);
     Ok(())
 }
 
