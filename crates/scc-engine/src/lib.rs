@@ -51,12 +51,14 @@ pub mod invoke;
 // trace:exempt reason=module-facade
 pub mod misc;
 // trace:exempt reason=module-facade
+pub mod facade;
 pub mod ranking;
 
 
 
 pub use context::SccContext;
 pub use error::{EngineError, Result};
+pub use facade::SccEngine;
 pub use workspace::{Engine, open_engine};
 pub use invoke::invoke;
 pub use ops::{describe as describe_operation, OPERATIONS};

@@ -52,6 +52,40 @@ fn null_inputs_yield_error_json_never_null() {
     unsafe { scc_ffi::scc_string_free(p); }
 }
 
+// trace:exempt reason=test-helper
+fn open_handle(root: &str) -> *mut scc_ffi::SccEngineHandle {
+    let o = CString::new(format!("{{\"root\": \"{root}\"}}")).unwrap();
+    let h = scc_ffi::scc_engine_open(o.as_ptr());
+    assert!(!h.is_null(), "engine open failed for {root}");
+    h
+}
+
+// trace:exempt reason=test-helper
+fn handle_call(h: *mut scc_ffi::SccEngineHandle, op: &str, input: &str) -> serde_json::Value {
+    let o = CString::new(op).unwrap();
+    let i = CString::new(input).unwrap();
+    let p = unsafe { scc_ffi::scc_engine_invoke(h, o.as_ptr(), i.as_ptr()) };
+    assert!(!p.is_null());
+    let s = unsafe { CStr::from_ptr(p).to_string_lossy().into_owned() };
+    unsafe { scc_ffi::scc_string_free(p); }
+    serde_json::from_str(&s).unwrap()
+}
+
+#[test]
+// trace:v1 id=test.scc-ffi.engine-handle verifies=REQ-SI-503JSBGP exercises=impl.scc-ffi.engine-open
+fn engine_handle_open_invoke_close() {
+    let (_dir, root) = fixture();
+    let h = open_handle(root.to_str().unwrap());
+    let v = handle_call(h, "workspace.status", "{}");
+    assert!(v.get("output").is_some(), "handle invoke: {v}");
+    // NULL handle and NULL operation fail as error JSON, never NULL/UB.
+    let p = unsafe { scc_ffi::scc_engine_invoke(std::ptr::null_mut(), c"workspace.status".as_ptr(), c"{}".as_ptr()) };
+    assert!(!p.is_null());
+    unsafe { scc_ffi::scc_string_free(p); }
+    unsafe { scc_ffi::scc_engine_close(h); }
+    unsafe { scc_ffi::scc_engine_close(std::ptr::null_mut()); }
+}
+
 #[test]
 // trace:v1 id=test.scc-ffi.registry verifies=REQ-SI-503JSBGP exercises=impl.scc-ffi.operations
 fn operations_lists_registry() {

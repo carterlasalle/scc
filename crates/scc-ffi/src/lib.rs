@@ -74,6 +74,97 @@ pub unsafe extern "C" fn scc_string_free(s: *mut c_char) {
     }
 }
 
+/// Opaque engine handle for the spec §11 C ABI (`scc_engine_open` /
+/// `scc_engine_invoke` / `scc_engine_close`). The handle owns an
+/// [`scc_engine::facade::SccEngine`]; invoke reuses the same operation
+/// registry as every other transport (no per-transport behavior).
+// trace:exempt reason=internal-detail
+pub struct SccEngineHandle {
+    engine: scc_engine::facade::SccEngine,
+}
+
+/// Open an owned engine handle from a JSON options object.
+///
+/// `options_json` is `{"root": "<repo-root>", ...}` (unknown keys
+/// ignored; NULL/empty/invalid JSON falls back to `"."` for the root,
+/// matching `scc_invoke_json` leniency). Returns an opaque handle the
+/// caller releases with [`scc_engine_close`], or NULL when the engine
+/// cannot be opened (unknown root, corrupt config, ...).
+#[no_mangle]
+// trace:v1 id=impl.scc-ffi.engine-open work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub extern "C" fn scc_engine_open(options_json: *const c_char) -> *mut SccEngineHandle {
+    let root = match c_str(options_json) {
+        None => ".".to_string(),
+        Some(s) if s.trim().is_empty() => ".".to_string(),
+        Some(s) => match serde_json::from_str::<serde_json::Value>(&s) {
+            Ok(v) => v
+                .get("root")
+                .and_then(|r| r.as_str())
+                .unwrap_or(".")
+                .to_string(),
+            Err(_) => ".".to_string(),
+        },
+    };
+    match scc_engine::facade::SccEngine::open(&root) {
+        Ok(engine) => Box::into_raw(Box::new(SccEngineHandle { engine })),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Invoke any registered engine operation on an open handle.
+///
+/// Returns heap JSON the caller frees with [`scc_string_free`]:
+/// success `{"output": ...}`, failure `{"error": "..."}`. NULL handle
+/// or NULL operation yields an error string (never NULL, never UB).
+/// # Safety
+///
+/// `engine` must be a handle returned by [`scc_engine_open`] (null yields
+/// an error string); `operation`/`input_json` follow [`scc_invoke_json`].
+#[no_mangle]
+// trace:v1 id=impl.scc-ffi.engine-invoke work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub unsafe extern "C" fn scc_engine_invoke(
+    engine: *mut SccEngineHandle,
+    operation: *const c_char,
+    input_json: *const c_char,
+) -> *mut c_char {
+    if engine.is_null() {
+        return to_json_string(&serde_json::json!({"error": "NULL engine handle"}));
+    }
+    let Some(operation) = c_str(operation) else {
+        return to_json_string(&serde_json::json!({"error": "NULL operation"}));
+    };
+    let input: serde_json::Value = match c_str(input_json) {
+        None => serde_json::json!({}),
+        Some(s) if s.trim().is_empty() => serde_json::json!({}),
+        Some(s) => match serde_json::from_str(&s) {
+            Ok(v) => v,
+            Err(e) => return to_json_string(&serde_json::json!({"error": format!("invalid input JSON: {e}")})),
+        },
+    };
+    let handle = unsafe { &*engine };
+    match handle.engine.invoke(&operation, input) {
+        Ok(output) => to_json_string(&serde_json::json!({"output": output})),
+        Err(e) => to_json_string(&serde_json::json!({"error": e.to_string()})),
+    }
+}
+
+/// Close an engine handle opened with [`scc_engine_open`].
+///
+/// # Safety
+///
+/// `engine` must be a handle returned by [`scc_engine_open`] (or null,
+/// which is a no-op); anything else is undefined behavior.
+// trace:exempt reason=internal-detail
+#[no_mangle]
+// trace:v1 id=impl.scc-ffi.engine-close work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub unsafe extern "C" fn scc_engine_close(engine: *mut SccEngineHandle) {
+    if !engine.is_null() {
+        unsafe {
+            drop(Box::from_raw(engine));
+        }
+    }
+}
+
 /// The operation registry as JSON. Same ownership as [`scc_invoke_json`].
 #[no_mangle]
 // trace:v1 id=impl.scc-ffi.operations work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
