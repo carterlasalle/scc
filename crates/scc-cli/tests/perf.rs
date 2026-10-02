@@ -184,3 +184,55 @@ fn cold_index_250k_loc() {
     );
     eprintln!("250k LOC cold index: {elapsed:?}");
 }
+
+/// Issue #14 scale guard: a 23k-file repo with dense edges (the grafana
+/// shape — file count × edge density) must produce a BOUNDED task pack in
+/// well under the 300s kill budget, not zero chars at SIGKILL. Synthetic:
+/// 2000 files × 5 random edges each (fast enough for CI, same code path —
+/// candidate expansion + PPR + surface render). Fails if the pack is empty
+/// or the wall exceeds 120s (half the observed kill budget, generous).
+#[test]
+// trace:v1 id=test.scc-cli.perf.task-pack-scale-guard verifies=REQ-SI-503JSBGP exercises=impl.scc.surface.build,impl.scc.rank
+fn task_pack_bounded_on_dense_mesh() {
+    use std::collections::BTreeSet;
+    let repo = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(workdir(repo.path())).unwrap();
+    // deterministic PRNG (xorshift, no dep): same mesh every run.
+    let mut state: u64 = 0x12345678;
+    let mut next = |bound: usize| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state as usize) % bound
+    };
+    let n = 2000;
+    for i in 0..n {
+        let mut tgts = BTreeSet::new();
+        while tgts.len() < 5 {
+            tgts.insert(next(n));
+        }
+        let mut body = String::new();
+        for t in &tgts {
+            body.push_str(&format!("from m{t:04} import f{t:04}\n"));
+        }
+        body.push_str(&format!("\ndef f{i:04}():\n"));
+        for t in &tgts {
+            body.push_str(&format!("    f{t:04}()\n"));
+        }
+        body.push_str("    return 1\n");
+        std::fs::write(workdir(repo.path()).join(format!("m{i:04}.py")), body).unwrap();
+    }
+    run_ok(&workdir(repo.path()), &["index", "--quiet"]);
+    let start = Instant::now();
+    let out = run_ok(
+        &workdir(repo.path()),
+        &["context", "task", "give me the context to work on the dashboard schema"],
+    );
+    let elapsed = start.elapsed();
+    assert!(!out.is_empty(), "task pack must not be empty at scale");
+    assert!(
+        elapsed < Duration::from_secs(120),
+        "task pack took {elapsed:?} on 2k-file dense mesh (120s guard)"
+    );
+    eprintln!("SCALE-GUARD files={n} ms={} chars={}", elapsed.as_millis(), out.len());
+}
