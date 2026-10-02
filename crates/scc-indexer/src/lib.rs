@@ -107,6 +107,77 @@ type ExtractedEntry = (
 /// resolver switches): part of revision identity, so enabling a backend
 /// without touching files still advances graph history. Computed by index
 /// callers, which record the revision after recompile.
+/// Append whitelisted plugin rows onto a builtin extraction via a JSON
+/// round-trip (plugin rows use the exact shapes ExtractedFile serializes
+/// to). Undecodable merged payloads keep the builtin rows.
+fn merge_extracted_rows(ef: &mut ExtractedFile, out: &serde_json::Value) {
+    let mut ef_json = serde_json::to_value(&*ef).unwrap_or(serde_json::json!({}));
+    if let Some(obj) = ef_json.as_object_mut() {
+        for key in [
+            "symbols", "imports", "calls", "routes", "tests", "store_refs", "retries",
+            "entrypoints", "facts",
+        ] {
+            let mut merged: Vec<serde_json::Value> =
+                obj.get(key).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            if let Some(arr) = out.get(key).and_then(|v| v.as_array()) {
+                merged.extend(arr.clone());
+            }
+            obj.insert(key.into(), serde_json::Value::Array(merged));
+        }
+        if let (Some(b), Some(x)) = (obj.get("cli_flags"), out.get("cli_flags")) {
+            if let (Some(b), Some(x)) = (b.as_object(), x.as_object()) {
+                let mut flags = b.clone();
+                for (k, v) in x {
+                    flags.insert(k.clone(), v.clone());
+                }
+                obj.insert("cli_flags".into(), serde_json::Value::Object(flags));
+            }
+        }
+        if let Ok(back) = serde_json::from_value::<ExtractedFile>(ef_json) {
+            *ef = back;
+        }
+    }
+}
+
+/// Merge plugin extractor rows into a builtin extraction.
+///
+/// Each plugin declaring the `extractor` extension (or the legacy
+/// `extraction.extract` operation) is spawned once per file with
+/// `{"path", "language", "content"}` and answers `{"symbols": [...],
+/// ...}` using the same JSON shapes `ExtractedFile` serializes to. Only
+/// whitelisted vec fields merge; `cli_flags` unions per symbol. Unknown
+/// fields are ignored, never stored. A failing plugin degrades to
+/// builtin-only (no file failure).
+// trace:v1 id=impl.scc-indexer-extractor.plugin-merge work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+fn merge_plugin_extraction(
+    root: &std::path::Path,
+    f: &ScannedFile,
+    content: &str,
+    ef: &mut ExtractedFile,
+) {
+    let plugins = scc_plugin_host::discover(root);
+    let extractors: Vec<_> = plugins
+        .into_iter()
+        .filter(|p| {
+            p.manifest.extensions.iter().any(|e| e.extension_type == "extractor")
+                || p.manifest.operations.iter().any(|o| o == "extraction.extract")
+        })
+        .collect();
+    if extractors.is_empty() {
+        return;
+    }
+    for plug in &extractors {
+        let input = serde_json::json!({
+            "path": f.path, "language": f.language.as_str(), "content": content,
+        });
+        let out = match scc_plugin_host::call(plug, "extraction.extract", input, None) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        merge_extracted_rows(ef, &out);
+    }
+}
+
 pub fn semantic_config_hash(config: &Config) -> String {
     let l = &config.languages;
     let v = serde_json::json!({
@@ -358,7 +429,8 @@ impl Indexer {
                 )?;
                 continue;
             };
-            let ef = self.extract(f, &content);
+            let mut ef = self.extract(f, &content);
+            merge_plugin_extraction(&self.store.root, f, &content, &mut ef);
             let cfg_hits = configrefs::scan_config_refs(&content, f.language.as_str());
             let fail_hits = failures::scan_failures(&content, f.language.as_str());
             index.add_file(path, &ef.symbols);
@@ -555,6 +627,8 @@ impl Indexer {
             _ => ExtractedFile::default(),
         }
     }
+
+
 
     // trace:exempt reason=internal-detail
     fn load_symbols(&self, path: &str) -> Result<Vec<model::Symbol>, scc_store::StoreError> {
@@ -755,7 +829,8 @@ impl Indexer {
                 continue;
             };
             self.store.purge_path(p)?;
-            let ef = self.extract(f, &content);
+            let mut ef = self.extract(f, &content);
+            merge_plugin_extraction(&self.store.root, f, &content, &mut ef);
             let cfg_hits = configrefs::scan_config_refs(&content, f.language.as_str());
             let fail_hits = failures::scan_failures(&content, f.language.as_str());
             index.add_file(p, &ef.symbols);
