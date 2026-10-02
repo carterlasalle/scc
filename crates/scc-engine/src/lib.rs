@@ -53,6 +53,7 @@ pub mod misc;
 // trace:exempt reason=module-facade
 pub mod facade;
 pub mod ranking;
+pub mod startup_model;
 
 
 

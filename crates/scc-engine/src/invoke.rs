@@ -29,9 +29,23 @@ pub fn invoke(
             let budget: Option<usize> = input.get("budget").and_then(|v| v.as_u64()).map(|v| v as usize);
             let full: bool = input.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
             let unbounded: bool = input.get("unbounded").and_then(|v| v.as_bool()).unwrap_or(false);
-            serde_json::to_value(ctx.atlas(budget, full, unbounded)?)?
+            let model: bool = input.get("model").and_then(|v| v.as_bool()).unwrap_or(false);
+            // §74: `model: true` returns the structured SystemAtlas
+            // alongside the pack — one derivation, two views.
+            if model {
+                let scope = if full {
+                    scc_context::atlas::AtlasScope::Full
+                } else {
+                    scc_context::atlas::AtlasScope::Production
+                };
+                let pack = ctx.atlas(budget, full, unbounded)?;
+                serde_json::json!({"pack": pack, "model": ctx.atlas_model(scope)?})
+            } else {
+                serde_json::to_value(ctx.atlas(budget, full, unbounded)?)?
+            }
         }
         "context.startup" => {
+            let want_model = input.get("model").and_then(|v| v.as_bool()).unwrap_or(false);
             let req: scc_api::StartupRequest = serde_json::from_value(input).unwrap_or(scc_api::StartupRequest { budget: None });
             // Structured triple: text + budget + artifact. Transports that
             // need a bare string take `.text`; nothing re-derives startup.
@@ -47,7 +61,13 @@ pub fn invoke(
             for n in notes {
                 text.push_str(&format!("\n(startup section skipped: {n})\n"));
             }
-            serde_json::json!({"text": text, "budget": budget, "artifact": startup.artifact})
+            // §75: `model: true` adds the structured decomposition
+            // (atlas/skeleton/surface/coverage/omissions by key).
+            let mut out = serde_json::json!({"text": text, "budget": budget, "artifact": startup.artifact});
+            if want_model {
+                out["model"] = serde_json::to_value(ctx.startup_model(&req)?)?;
+            }
+            out
         }
         "context.task" => {
             let req: scc_api::TaskContextRequest = serde_json::from_value(input)?;

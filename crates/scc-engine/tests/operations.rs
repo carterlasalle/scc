@@ -615,3 +615,26 @@ fn mutation_classes_name_side_effects() {
         assert_eq!(v["mutation"], serde_json::json!(want), "{op}: {v}");
     }
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-operations.structured-models verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn structured_atlas_and_startup_models() {
+    let (_dir, root) = fixture();
+    // Atlas: model:true returns pack + structured SystemAtlas, same revision.
+    let out = scc_engine::invoke(&root, "context.atlas", serde_json::json!({"model": true})).unwrap();
+    assert!(out.get("pack").is_some() && out.get("model").is_some(), "pack + model: {out}");
+    assert!(
+        out["pack"]["repository_revision"] == out["model"]["revision"],
+        "same derivation: {out}"
+    );
+    assert!(out["model"].get("components").is_some(), "structured components: {out}");
+    // Default unchanged: bare pack, no model key.
+    let bare = scc_engine::invoke(&root, "context.atlas", serde_json::json!({})).unwrap();
+    assert!(bare.get("content").is_some() && bare.get("model").is_none(), "bare pack: {bare}");
+    // Startup: model:true adds the keyed decomposition.
+    let st = scc_engine::invoke(&root, "context.startup", serde_json::json!({"model": true})).unwrap();
+    assert!(st.get("text").is_some() && st.get("model").is_some(), "startup + model: {st}");
+    for key in ["atlas_text", "skeleton", "surface_text", "coverage", "omissions", "artifact"] {
+        assert!(st["model"].get(key).is_some(), "missing {key}: {st}");
+    }
+}

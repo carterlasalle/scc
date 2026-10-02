@@ -80,6 +80,29 @@ impl SccContext<'_> {
         })
     }
 
+    /// Structured SystemAtlas model (§74): the same compilation the
+    /// atlas pack renders, as its actual type — no text scraping.
+    // trace:exempt reason=internal-detail
+    pub fn atlas_model(
+        &self,
+        scope: scc_context::atlas::AtlasScope,
+    ) -> crate::Result<scc_core::SystemAtlas> {
+        let ctx = self.engine.ctx();
+        Ok(scc_context::atlas::build_atlas_scoped(&ctx, scope))
+    }
+
+    /// Structured startup decomposition (§75): atlas model + skeleton +
+    /// surface render + coverage + omissions + artifact, each addressable
+    /// without parsing the rendered text.
+    // trace:exempt reason=internal-detail
+    pub fn startup_model(
+        &self,
+        req: &StartupRequest,
+    ) -> crate::Result<crate::startup_model::StartupModel> {
+        let (startup, _text) = self.startup(req)?;
+        Ok(crate::startup_model::StartupModel::from_context(startup))
+    }
+
     // trace:exempt reason=internal-detail
     pub fn startup(&self, req: &StartupRequest) -> crate::Result<(StartupContext, String)> {
         let ctx = self.engine.ctx();
