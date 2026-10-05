@@ -1264,3 +1264,39 @@ fn semantic_provider_feeds_blend_slot() {
         "semantic source recorded: {items}"
     );
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.runtime-evidence verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-state.plugin-runtime
+fn runtime_evidence_plugin_edges_land_in_status() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    // Baseline: no runtime edges.
+    let base = scc_engine::invoke(&root, "runtime.status", serde_json::json!({})).unwrap();
+    assert!(base.as_array().unwrap().is_empty(), "no edges yet: {base}");
+    // Runtime-evidence plugin contributes one edge per ingest; plus a
+    // crashing provider that must degrade silently.
+    for (pid, ext, body) in [
+        ("acme.rt", "runtime-evidence:acme.r",
+         "import json, sys\nprint(json.dumps({\"output\": {\"edges\": [{\"source\": \"web\", \"target\": \"api\", \"count\": 3}]}}))\n"),
+        ("acme.dead", "runtime-evidence:acme.d", "import sys\nsys.exit(7)\n"),
+    ] {
+        let plugdir = root.join(".scc").join("plugins").join(pid);
+        std::fs::create_dir_all(&plugdir).unwrap();
+        std::fs::write(
+            plugdir.join("scc-plugin.toml"),
+            format!("[plugin]\nid = \"{pid}\"\nname = \"P\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"runtime.evidence\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"{ext}\" = {{priority=1}}\n\n[permissions]\nrepo_read = true\n"),
+        ).unwrap();
+        let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+    }
+    let out = scc_engine::invoke(&root, "runtime.ingest", serde_json::json!({"body": "[]"})).unwrap();
+    assert_eq!(out["status"], serde_json::json!("accepted"), "{out}");
+    let st = scc_engine::invoke(&root, "runtime.status", serde_json::json!({})).unwrap();
+    let hit = st.as_array().unwrap().iter()
+        .find(|e| e["source"] == "web" && e["target"] == "api").unwrap();
+    assert_eq!(hit["count"].as_u64().unwrap(), 3, "plugin edge landed: {st}");
+}

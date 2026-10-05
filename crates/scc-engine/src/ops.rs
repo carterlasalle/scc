@@ -309,7 +309,7 @@ pub fn capabilities() -> serde_json::Value {
             {"id": "renderer.extend", "description": "Export/diagram rendering via export.* operations and exporter:<format> extensions"},
         ],
         "extension_points": [
-            "candidate-provider", "seed-provider", "rank-feature", "rank-edge", "criticality-provider", "novelty-provider", "risk-provider", "semantic-provider", "edge-weight",
+            "candidate-provider", "seed-provider", "rank-feature", "rank-edge", "criticality-provider", "novelty-provider", "risk-provider", "semantic-provider", "runtime-evidence", "edge-weight",
             "reranker", "similarity", "blend-profile", "coverage", "verify-diagnostic",
             "context-section", "startup-section", "exporter", "viewer-panel",
             "quota-policy", "budget-optimizer", "diversity-policy",

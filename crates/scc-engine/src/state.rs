@@ -103,11 +103,56 @@ pub fn ingest_runtime(root: &Path, body: &str) -> crate::Result<()> {
     if body.contains("resourceSpans") {
         scc_indexer::runtime::ingest_otlp_json(&store, body)
             .map_err(crate::EngineError::Other)?;
-        return Ok(());
+    } else {
+        scc_indexer::runtime::ingest_simple_edges(&store, body)
+            .map_err(crate::EngineError::Other)?;
     }
-    scc_indexer::runtime::ingest_simple_edges(&store, body)
-        .map_err(crate::EngineError::Other)?;
+    // Runtime-evidence plugins (§31 RuntimeEvidenceProvider): fan out the
+    // same raw body; contributed edges land in runtime_edges (OBSERVED
+    // path) via the normal ingest. Failures degrade to builtin-only.
+    ingest_plugin_runtime_edges(root, &store, body);
     Ok(())
+}
+
+/// Fan out one ingest body to `runtime-evidence` plugins. Each plugin
+/// declaring the extension (or the legacy op) is called once with
+/// `{"body": ...}` and answers `{"edges": [...]}` in the simple-edges
+/// shape. Malformed plugin rows fail that plugin only (degrade, never
+/// the ingest); a crashing plugin is skipped with no model change.
+// trace:v1 id=impl.scc-engine-state.plugin-runtime work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn ingest_plugin_runtime_edges(
+    root: &Path,
+    store: &scc_store::Store,
+    body: &str,
+) {
+    let config = match crate::workspace::load_config(root) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let ap = crate::plugins::active(root, &config);
+    for plug in &ap.plugins {
+        let is_provider = plug.manifest.extensions.iter().any(|e| e.extension_type == "runtime-evidence")
+            || plug.manifest.operations.iter().any(|o| o == "runtime.evidence");
+        if !is_provider {
+            continue;
+        }
+        let out = match scc_plugin_host::call(
+            plug,
+            "runtime.evidence",
+            serde_json::json!({"body": body}),
+            None,
+        ) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let edges = out.get("edges").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        if edges.is_empty() {
+            continue;
+        }
+        let payload = serde_json::Value::Array(edges);
+        let text = payload.to_string();
+        let _ = scc_indexer::runtime::ingest_simple_edges(store, &text);
+    }
 }
 
 // trace:exempt reason=internal-detail
