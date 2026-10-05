@@ -158,6 +158,7 @@ pub fn symbol_component_map(graph: &RealityGraph) -> HashMap<String, String> {
 // trace:v1 id=impl.scc-graph.compilation-pipeline work=WORK-SCC-004 satisfies=REQ-SCC-IR
 pub struct CompilationPipeline<'a> {
     store: &'a Store,
+    component_signals: Vec<components::ComponentSignal>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,11 +180,24 @@ pub struct StageCounts {
     pub boundaries: usize,
 }
 
+// trace:exempt reason=internal-detail
 impl<'a> CompilationPipeline<'a> {
+    // trace:exempt reason=internal-detail
     pub fn new(store: &'a Store) -> CompilationPipeline<'a> {
-        CompilationPipeline { store }
+        CompilationPipeline { store, component_signals: Vec::new() }
     }
 
+    /// Plugin component signals (§31 ComponentSignalProvider): merged by
+    /// name into the builtin candidate set before clustering. Same-name
+    /// signal dirs append (never rename or re-rank); new names enter at
+    /// plugin rank; failures upstream degrade to empty (never fail here).
+    // trace:exempt reason=internal-detail
+    pub fn component_signals(mut self, signals: Vec<components::ComponentSignal>) -> Self {
+        self.component_signals = signals;
+        self
+    }
+
+    // trace:exempt reason=internal-detail
     pub fn run(self) -> Result<RecompileReport> {
         // invalidate epoch-keyed context caches before any derived write
         self.store
@@ -203,7 +217,7 @@ impl<'a> CompilationPipeline<'a> {
         // is non-fatal — empty pairs, same as a non-git repo — so the
         // atlas/index never waits on git history.
         let pairs = cochange::cached_cochange_pairs(self.store).unwrap_or_default();
-        let comps = components::compile_components(&graph, self.store, &intent, &pairs)?;
+        let comps = components::compile_components_with_signals(&graph, self.store, &intent, &pairs, &self.component_signals)?;
         self.store.replace_components(&comps)?;
         cochange::enrich_components(self.store, &pairs).map_err(GraphError::Cochange)?;
 

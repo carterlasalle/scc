@@ -262,7 +262,7 @@ pub fn invoke(
         }
         "resolution.run" => serde_json::to_value(crate::index::resolve_and_recompile(root)?)?,
         "graph.recompile" => {
-            let r = crate::index::recompile(&store)?;
+            let r = crate::index::recompile_with_signals(root, &config, &store)?;
             serde_json::json!({
                 "components": r.components,
                 "flows": r.flows,

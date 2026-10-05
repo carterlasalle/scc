@@ -1300,3 +1300,36 @@ fn runtime_evidence_plugin_edges_land_in_status() {
         .find(|e| e["source"] == "web" && e["target"] == "api").unwrap();
     assert_eq!(hit["count"].as_u64().unwrap(), 3, "plugin edge landed: {st}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.component-signal verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn component_signal_plugin_nominates_component() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(root.join("acme")).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\n").unwrap();
+    std::fs::write(root.join("acme").join("widget.py"), "def widget():\n    return 3\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let base = scc_engine::invoke(&root, "graph.entities", serde_json::json!({})).unwrap();
+    assert!(
+        base.as_array().unwrap().iter().all(|e| e["name"] != "acme-widget"),
+        "no widget component before the plugin: {base}"
+    );
+    // Plugin nominates a new component + one malformed entry (must abstain).
+    let plugdir = root.join(".scc").join("plugins").join("acme.comp");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.comp\"\nname = \"Comp\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"components.signals\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"component-signal:acme.c\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json\nprint(json.dumps({\"output\": {\"signals\": [{\"name\": \"acme-widget\", \"dirs\": [\"acme\"]}, {\"name\": \"\", \"dirs\": []}]}}))\n").unwrap();
+    scc_engine::invoke(&root, "graph.recompile", serde_json::json!({})).unwrap();
+    let after = scc_engine::invoke(&root, "graph.entities", serde_json::json!({})).unwrap();
+    let widget = after.as_array().unwrap().iter()
+        .find(|e| e["name"] == "acme-widget")
+        .unwrap_or_else(|| panic!("plugin component landed: {after}"));
+    assert_eq!(widget["attributes"]["boundary_kind"], serde_json::json!("plugin"), "{widget}");
+}
