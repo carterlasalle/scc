@@ -340,8 +340,9 @@ impl<'a> Ranker<'a> {
             let (novelty, novelty_src) = resolve_override(&hooks.novelty, &e.symbol_id, goal, 1.0);
             let default_risk = if !e.path.is_empty() && ctx.stale_paths.iter().any(|p| p == &e.path) { 1.0 } else { 0.0 };
             let (change_risk, risk_src) = resolve_override(&hooks.risk, &e.symbol_id, goal, default_risk);
+            let (semantic, semantic_src) = resolve_override(&hooks.semantic, &e.symbol_id, goal, 0.0);
             let blend = match profile_w.as_ref() {
-                None => scc_context::pagerank::final_importance(task_ppr, global_ppr, lexical, 0.0, confidence, criticality, change_risk, 0.0, has_task),
+                None => scc_context::pagerank::final_importance(task_ppr, global_ppr, lexical, semantic, confidence, criticality, change_risk, 0.0, has_task),
                 Some(w) => {
                     use scc_context::pagerank as pr;
                     let (tw, gw) = if has_task { (w.task_ppr.unwrap_or(pr::TASK_PPR_WEIGHT), w.global_ppr.unwrap_or(pr::GLOBAL_PPR_WEIGHT)) }
@@ -349,7 +350,7 @@ impl<'a> Ranker<'a> {
                     tw * task_ppr
                         + gw * global_ppr
                         + w.lexical.unwrap_or(pr::LEXICAL_WEIGHT) * lexical
-                        + w.semantic.unwrap_or(pr::SEMANTIC_WEIGHT) * 0.0
+                        + w.semantic.unwrap_or(pr::SEMANTIC_WEIGHT) * semantic
                         + w.confidence.unwrap_or(pr::CONFIDENCE_WEIGHT) * confidence
                         + w.criticality.unwrap_or(pr::CRITICALITY_WEIGHT) * criticality
                         + w.change_risk.unwrap_or(pr::CHANGE_RISK_WEIGHT) * change_risk
@@ -365,6 +366,7 @@ impl<'a> Ranker<'a> {
             if let Some(src) = criticality_src { reasons.push(format!("criticality:{src}")); }
             if let Some(src) = novelty_src { reasons.push(format!("novelty:{src}")); }
             if let Some(src) = risk_src { reasons.push(format!("risk:{src}")); }
+            if let Some(src) = semantic_src { reasons.push(format!("semantic:{src}")); }
             if required_by > 0 && required.contains(&e.id) && !seed_ids.contains(e.symbol_id.as_str()) { reasons.push(format!("required-by:plugin({required_by})")); }
             let mut total = total;
             for feat in &hooks.features {
@@ -378,7 +380,7 @@ impl<'a> Ranker<'a> {
             }
             let specificity = if e.exported { 1.15 } else { 1.0 };
             let item = RankItem { id: e.symbol_id.clone(), rank: total, position: 0,
-                features: RankFeatures { task_ppr, global_ppr, lexical, semantic: 0.0,
+                features: RankFeatures { task_ppr, global_ppr, lexical, semantic,
                     confidence, criticality, change_risk, novelty },
                 specificity, reasons, plugin_features };
             match best.get(&e.symbol_id.as_str()) {
@@ -530,6 +532,15 @@ pub type NoveltyProvider =
 // trace:exempt reason=internal-detail
 pub type RiskProvider = ScalarOverrideProvider;
 
+/// Semantic-score override (§53 SemanticProvider): per-symbol semantic
+/// relevance in [0,1] against the goal, or `None` to keep the engine
+/// default of 0.0 (no scorer configured). Same first-Some-wins and range
+/// discipline as [`CriticalityProvider`]. When any provider contributes,
+/// the blend keeps the documented redistribution math: the semantic
+/// share is real, so no renormalization applies.
+// trace:exempt reason=internal-detail
+pub type SemanticProvider = ScalarOverrideProvider;
+
 /// One scalar-override provider (criticality or novelty): `None` abstains.
 // trace:exempt reason=internal-detail
 pub type ScalarOverrideProvider =
@@ -565,6 +576,8 @@ pub struct RankHooks {
     pub novelty: Vec<NoveltyProvider>,
     /// Change-risk overrides (§53): first `Some` in chain order wins.
     pub risk: Vec<RiskProvider>,
+    /// Semantic-score overrides (§53): first `Some` in chain order wins.
+    pub semantic: Vec<SemanticProvider>,
     /// Named blend profiles: profile name -> per-feature weight
     /// overrides for the linear blend (feature keys: task_ppr,
     /// global_ppr, lexical, semantic, confidence, criticality,

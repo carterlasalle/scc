@@ -1014,6 +1014,17 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
+        if wants("semantic-provider", "ranking.semantic") {
+            // §53: per-symbol semantic relevance in [0,1]; None abstains.
+            let plug = Arc::clone(&plug);
+            hooks.semantic.push(Box::new(move |sym: &str, goal: &str| {
+                let input = serde_json::json!({"symbol": sym, "goal": goal});
+                match scc_plugin_host::call(&plug, "ranking.semantic", input, None) {
+                    Ok(v) => v.get("semantic").and_then(|x| x.as_f64()),
+                    Err(_) => None,
+                }
+            }));
+        }
         if wants("edge-weight", "ranking.edge_weight") {
             let plug = Arc::clone(&plug);
             hooks.edge_weights.push(std::sync::Arc::new(move |subject, predicate, object, base| {
