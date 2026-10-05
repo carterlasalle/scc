@@ -461,12 +461,14 @@ export class SCC {
   /**
    * Rank-universe stage views (§123.8/12): universe nodes, rank edges
    * (pre-aggregation weights), and the reference graph — the structure
-   * the PPR vectors diffuse over. Three read-only invokes.
+   * the PPR vectors diffuse over. Three read-only invokes. `goal`
+   * threads into the universe call so plugin rank-node providers
+   * (goal-conditioned) show in the returned table.
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.ranking-graph work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-  async rankGraph(): Promise<{ universe: unknown; edges: unknown; reference_graph: unknown }> {
+  async rankGraph(goal?: string): Promise<{ universe: unknown; edges: unknown; reference_graph: unknown }> {
     const [universe, edges, reference_graph] = await Promise.all([
-      this.invoke("ranking.universe", {}),
+      this.invoke("ranking.universe", { goal: goal ?? "" }),
       this.invoke("ranking.edges", {}),
       this.invoke("ranking.reference_graph", {}),
     ]);

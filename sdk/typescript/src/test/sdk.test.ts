@@ -256,6 +256,15 @@ test("rankGraph() returns universe, edges, reference graph", { skip: skip ? skip
   assert.ok(edges.length > 0);
 });
 
+test("rankGraph(goal) matches the default universe without plugins", { skip: skip ? skipReason : false }, async () => {
+  const plain = await scc().rankGraph();
+  const goaled = await scc().rankGraph("hello");
+  const pn = (plain.universe as { nodes: unknown[] }).nodes;
+  const gn = (goaled.universe as { nodes: unknown[] }).nodes;
+  assert.equal(gn.length, pn.length);
+  assert.ok(gn.length > 0);
+});
+
 test("rankingFeatures() returns feature rows", { skip: skip ? skipReason : false }, async () => {
   const out = await scc().rankingFeatures({ goal: "add numbers", limit: 5 });
   assert.ok(out.features.length > 0);

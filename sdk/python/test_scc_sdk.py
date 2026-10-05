@@ -272,6 +272,17 @@ class TestSCCSDK(unittest.TestCase):
         self.assertTrue(out["edges"]["edges"], f"empty edges: {out}")
 
     # trace:exempt reason=unit-test
+    def test_rank_graph_accepts_goal_for_plugin_nodes(self):
+        # rankGraph(goal) must not break the default call: same tables,
+        # goal threaded into the universe invoke for rank-node providers.
+        plain = self.scc.rankGraph()
+        goaled = self.scc.rankGraph(goal="hello")
+        self.assertEqual(
+            len(plain["universe"]["nodes"]), len(goaled["universe"]["nodes"]),
+            f"goal must not change the no-plugin universe: {goaled}")
+        self.assertTrue(goaled["universe"]["nodes"], f"empty universe: {goaled}")
+
+    # trace:exempt reason=unit-test
     def test_ranking_features_returns_feature_rows(self):
         out = self.scc.rankingFeatures(goal="add numbers", limit=5)
         self.assertIn("features", out)

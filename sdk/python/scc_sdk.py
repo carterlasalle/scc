@@ -352,12 +352,14 @@ class SCC:
         return self.invoke("ranking.seeds", {"goal": goal})
 
     # trace:v1 id=impl.sdk-python-scc-sdk-scc.ranking-graph work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-    def rankGraph(self) -> dict[str, Any]:
+    def rankGraph(self, goal: str | None = None) -> dict[str, Any]:
         """Rank-universe stage views (§123.8/12): universe nodes, rank
         edges (pre-aggregation weights), and the reference graph — the
-        structure the PPR vectors diffuse over. Three read-only invokes."""
+        structure the PPR vectors diffuse over. Three read-only invokes.
+        `goal` threads into the universe call so plugin rank-node
+        providers (goal-conditioned) show in the returned table."""
         return {
-            "universe": self.invoke("ranking.universe", {}),
+            "universe": self.invoke("ranking.universe", {"goal": goal or ""}),
             "edges": self.invoke("ranking.edges", {}),
             "reference_graph": self.invoke("ranking.reference_graph", {}),
         }
