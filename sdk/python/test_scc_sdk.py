@@ -337,6 +337,24 @@ class TestSCCSDK(unittest.TestCase):
             f"calls should outweigh imports: {calls} vs {imports}")
 
     # trace:exempt reason=unit-test
+    def test_edge_weight_factors_multiply_to_weight(self):
+        # Provenance-aware decomposition (§49): RESOLVED outranks
+        # EXTRACTED on the same predicate, and factors multiply to weight.
+        ext = self.scc.edgeWeight(predicate="calls", confidence=1.0,
+            total_symbols=100, target_in_degree=3, provenance="EXTRACTED")
+        res = self.scc.edgeWeight(predicate="calls", confidence=1.0,
+            total_symbols=100, target_in_degree=3, provenance="RESOLVED")
+        for r in (ext, res):
+            f = r["factors"]
+            self.assertAlmostEqual(
+                f["predicate"] * f["provenance"] * f["confidence"] * f["rarity"],
+                r["weight"], places=9, msg=f"factors must multiply: {r}")
+        self.assertGreater(res["weight"], ext["weight"],
+            f"resolved should outweigh extracted: {res} vs {ext}")
+        self.assertGreater(res["factors"]["provenance"], ext["factors"]["provenance"],
+            f"provenance factor carries the difference: {res} vs {ext}")
+
+    # trace:exempt reason=unit-test
     def test_final_importance_matches_score_entries(self):
         feats = {"task_ppr": 0.9, "global_ppr": 0.5, "lexical": 0.8,
                  "semantic": 0.7, "confidence": 0.9, "criticality": 1.0,

@@ -312,6 +312,17 @@ test("edgeWeight() distinguishes calls from imports", { skip: skip ? skipReason 
   assert.ok(calls.weight > imports.weight);
 });
 
+test("edgeWeight() factors multiply to weight with provenance", { skip: skip ? skipReason : false }, async () => {
+  const ext = await scc().edgeWeight({ predicate: "calls", confidence: 1.0, totalSymbols: 100, targetInDegree: 3, provenance: "EXTRACTED" });
+  const res = await scc().edgeWeight({ predicate: "calls", confidence: 1.0, totalSymbols: 100, targetInDegree: 3, provenance: "RESOLVED" });
+  for (const r of [ext, res]) {
+    const f = r.factors;
+    assert.ok(Math.abs(f.predicate * f.provenance * f.confidence * f.rarity - r.weight) < 1e-9);
+  }
+  assert.ok(res.weight > ext.weight);
+  assert.ok(res.factors.provenance > ext.factors.provenance);
+});
+
 test("finalImportance() matches scoreEntries() on one row", { skip: skip ? skipReason : false }, async () => {
   const feats = { task_ppr: 0.9, global_ppr: 0.5, lexical: 0.8, semantic: 0.7, confidence: 0.9, criticality: 1.0, change_risk: 0.4, novelty: 0.5 };
   const one = await scc().finalImportance(feats, true);

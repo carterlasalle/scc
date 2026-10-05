@@ -581,10 +581,11 @@ export class SCC {
    * hooks alter live ranking, not this probe.
    */
   // trace:v1 id=impl.sdk-typescript-src-index-scc.edge-weight work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-  async edgeWeight(args?: { predicate?: string; confidence?: number; totalSymbols?: number; targetInDegree?: number }): Promise<{ weight: number }> {
+  async edgeWeight(args?: { predicate?: string; confidence?: number; totalSymbols?: number; targetInDegree?: number; provenance?: string }): Promise<{ weight: number; factors: { predicate: number; provenance: number; confidence: number; rarity: number } }> {
     return this.invoke("ranking.edge_weight", {
       predicate: args?.predicate ?? "calls", confidence: args?.confidence ?? 1.0,
       total_symbols: args?.totalSymbols ?? 1, target_in_degree: args?.targetInDegree ?? 0,
+      provenance: args?.provenance ?? "EXTRACTED",
     });
   }
 

@@ -530,7 +530,27 @@ pub fn invoke(
             let confidence = input.get("confidence").and_then(|v| v.as_f64()).unwrap_or(1.0);
             let total = input.get("total_symbols").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
             let indeg = input.get("target_in_degree").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            serde_json::json!({"weight": scc_context::pagerank::edge_weight(predicate, scc_core::Provenance::Extracted, confidence, total, indeg)})
+            // Provenance-aware weight math (§49 EdgeWeightProvider): the
+            // caller names the provenance; the op decomposes the weight
+            // into its predicate/provenance/confidence/rarity factors so a
+            // plugin can reason about each factor before contributing.
+            let prov = match input.get("provenance").and_then(|v| v.as_str()).unwrap_or("EXTRACTED") {
+                "RESOLVED" => scc_core::Provenance::Resolved,
+                "OBSERVED" => scc_core::Provenance::Observed,
+                "DECLARED" => scc_core::Provenance::Declared,
+                "INFERRED" => scc_core::Provenance::Inferred,
+                "STALE" => scc_core::Provenance::Stale,
+                _ => scc_core::Provenance::Extracted,
+            };
+            serde_json::json!({
+                "weight": scc_context::pagerank::edge_weight(predicate, prov, confidence, total, indeg),
+                "factors": {
+                    "predicate": scc_context::pagerank::predicate_weight(predicate, prov),
+                    "provenance": scc_context::pagerank::provenance_weight(prov),
+                    "confidence": confidence.clamp(0.0, 1.0),
+                    "rarity": scc_context::pagerank::rarity(total, indeg),
+                },
+            })
         }
         "ranking.architectural_specificity" => {
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
