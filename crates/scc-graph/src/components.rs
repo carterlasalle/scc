@@ -44,12 +44,14 @@ pub const SERVICE_THRESHOLD: i32 = 12;
 /// Authority order for `boundary_kind` when one candidate is created by
 /// several sources: declared intent > deployment units > workspace
 /// packages > directory fallback. Deterministic (fixed precedence).
+// trace:v1 id=impl.crates-scc-graph-src-components.boundary-rank
 pub(crate) fn boundary_rank(kind: &str) -> u8 {
     match kind {
         BOUNDARY_DECLARED => 3,
         BOUNDARY_DEPLOYMENT => 2,
         BOUNDARY_CLI => 2,
         BOUNDARY_PACKAGE => 1,
+        BOUNDARY_PLUGIN => 1,
         _ => 0,
     }
 }
@@ -653,15 +655,77 @@ pub(crate) fn build_candidates(
     candidates
 }
 
+/// One plugin component signal (§31 ComponentSignalProvider): a
+/// component candidacy claim. `name` is the component name, `dirs` the
+/// repo-relative directories it owns. Plugin candidates enter with the
+/// `plugin` boundary kind (rank 1, same as packages — never above
+/// declared/deployment/cli), merge by name with builtin candidates, and
+/// lose every conflict: a plugin may nominate architecture, never rename it.
+#[derive(Debug, Clone)]
+// trace:exempt reason=internal-detail
+pub struct ComponentSignal {
+    pub name: String,
+    pub dirs: Vec<String>,
+    pub provider: String,
+}
+
+/// Boundary kind for plugin-nominated candidates. Rank 1 (package tier):
+/// visible in compilation, never overriding declared/deployment/cli.
+pub const BOUNDARY_PLUGIN: &str = "plugin";
+
+/// Merge plugin component signals into the builtin candidate set by name.
+/// Same-name signal dirs append (never rename or re-rank); new names enter
+/// at plugin rank; empty names and empty dir lists abstain.
+// trace:exempt reason=internal-detail
+fn merge_component_signals(candidates: &mut Vec<ComponentCandidate>, signals: &[ComponentSignal]) {
+    for sig in signals {
+        if sig.name.is_empty() || sig.dirs.is_empty() {
+            continue;
+        }
+        match candidates.iter_mut().find(|c| c.name == sig.name) {
+            Some(c) => {
+                for d in &sig.dirs {
+                    if !c.dirs.contains(d) {
+                        c.dirs.push(d.clone());
+                    }
+                }
+            }
+            None => candidates.push(ComponentCandidate {
+                name: sig.name.clone(),
+                dirs: sig.dirs.clone(),
+                boundary_kind: BOUNDARY_PLUGIN.to_string(),
+                intent: None,
+            }),
+        }
+    }
+}
+
 // trace:v1 id=impl.scc.components.compile work=WORK-SCC-001 satisfies=REQ-SCC-IR
+// trace:v1 id=impl.crates-scc-graph-src-components.compile-components
 pub fn compile_components(
     graph: &RealityGraph,
     store: &Store,
     intent: &[(String, serde_json::Value)],
     pairs: &[crate::cochange::CochangePair],
 ) -> Result<Vec<scc_core::Entity>> {
+    compile_components_with_signals(graph, store, intent, pairs, &[])
+}
+
+/// [`compile_components`] plus plugin component signals. Signals merge
+/// by name into the builtin candidate set before clustering; empty names
+/// and empty dir lists are skipped (a contributor that cannot name a
+/// component abstains).
+// trace:v1 id=impl.scc-components-signals.work work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn compile_components_with_signals(
+    graph: &RealityGraph,
+    store: &Store,
+    intent: &[(String, serde_json::Value)],
+    pairs: &[crate::cochange::CochangePair],
+    signals: &[ComponentSignal],
+) -> Result<Vec<scc_core::Entity>> {
     let repo_id = &store.repo_id;
-    let candidates = build_candidates(graph, store, intent);
+    let mut candidates = build_candidates(graph, store, intent);
+    merge_component_signals(&mut candidates, signals);
 
     // ---- semantic clustering over REGIONS (generalization wave):
     // files belong to architecture because of BEHAVIOR, not directories.
@@ -1443,6 +1507,37 @@ mod tests {
             !owns.iter().any(|r| r.provenance == Provenance::Resolved),
             "no provenance promotion allowed: {owns:?}"
         );
+    }
+
+    #[test]
+// trace:exempt reason=internal-detail
+    fn plugin_signals_merge_without_renaming() {
+        // §31 ComponentSignalProvider through the real merge path: same-name
+        // signal dirs append (boundary kind untouched); new names enter at
+        // plugin rank; empty names/dirs abstain.
+        let unit = |name: &str, dirs: &[&str], kind: &str| ComponentCandidate {
+            name: name.into(),
+            dirs: dirs.iter().map(|d| d.to_string()).collect(),
+            boundary_kind: kind.into(),
+            intent: None,
+        };
+        let mut cands = vec![unit("web", &["src/web"], BOUNDARY_PACKAGE)];
+        merge_component_signals(
+            &mut cands,
+            &[
+                ComponentSignal { name: "web".into(), dirs: vec!["src/extra".into()], provider: "acme".into() },
+                ComponentSignal { name: "novel".into(), dirs: vec!["src/novel".into()], provider: "acme".into() },
+                ComponentSignal { name: "".into(), dirs: vec!["src/void".into()], provider: "acme".into() },
+                ComponentSignal { name: "hollow".into(), dirs: vec![], provider: "acme".into() },
+            ],
+        );
+        let web = cands.iter().find(|c| c.name == "web").unwrap();
+        assert_eq!(web.dirs, vec!["src/web".to_string(), "src/extra".to_string()]);
+        assert_eq!(web.boundary_kind, BOUNDARY_PACKAGE);
+        let novel = cands.iter().find(|c| c.name == "novel").unwrap();
+        assert_eq!(novel.boundary_kind, BOUNDARY_PLUGIN);
+        assert!(cands.iter().all(|c| !c.name.is_empty() && !c.dirs.is_empty()));
+        assert_eq!(boundary_rank(BOUNDARY_PLUGIN), boundary_rank(BOUNDARY_PACKAGE));
     }
 
     #[test]
