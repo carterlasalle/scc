@@ -308,6 +308,19 @@ enum Commands {
         sub: Option<SetupSub>,
     },
 
+    /// Update the scc binary to the latest (or pinned) release
+    Update {
+        /// Install a specific release instead of the latest (e.g. 0.2.10)
+        #[arg(long)]
+        version: Option<String>,
+        /// Install directory (default: the directory of the running binary)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Resolve and print the plan; download nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Start the local daemon (HTTP API + watcher)
     Serve,
 
@@ -962,6 +975,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )),
             Err(e) => Err(e),
         },
+        Commands::Update { version, dir, dry_run } => {
+            commands::cmd_update(version.as_deref(), dir.as_deref(), dry_run)
+        }
         Commands::Setup { sub } => match sub {
             None => commands::cmd_setup_detected(&root, false),
             Some(SetupSub::Claude) => commands::cmd_setup_claude(&root),

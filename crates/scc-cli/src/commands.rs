@@ -1202,6 +1202,80 @@ pub fn cmd_adapters(root: &Path, json: bool) -> crate::Result<()> {
     Ok(())
 }
 
+/// `scc update [--version V] [--dir D] [--dry-run]` — self-update the
+/// binary through the same installer `docs/INSTALL.md` documents
+/// (`scripts/install.sh`): checksum-verified download from the GitHub
+/// release assets, then the binary's own smoke test.
+///
+/// The installer is fetched from the local release when `SCC_DOWNLOAD_BASE`
+/// points at one (the contract test does this); otherwise it comes from
+/// the published release path. This keeps `scc update` and the documented
+/// install in agreement — one mechanism, not two.
+///
+/// Default install dir is the directory holding the running binary (so a
+/// `~/.local/bin/scc` updates in place); `--dir` overrides it.
+// trace:v1 id=impl.scc-cli-update work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_update(version: Option<&str>, dir: Option<&std::path::Path>, dry_run: bool) -> crate::Result<()> {
+    let exe = std::env::current_exe().map_err(|e| crate::CliError::Other(format!("cannot locate running binary: {e}")))?;
+    let default_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let target_dir = dir.map(|p| p.to_path_buf()).unwrap_or(default_dir);
+    // Resolve `latest` through the releases API (the installer only knows
+    // concrete versions); a pinned --version skips the lookup entirely.
+    let resolved: String = match version {
+        Some(v) => v.to_string(),
+        None => latest_release_tag()?,
+    };
+    // The installer lives next to the release binaries, so it comes from
+    // the same release path by construction. A `SCC_DOWNLOAD_BASE` fixture
+    // (the contract test layout) resolves the same way — `scc update` and
+    // the documented install stay one mechanism.
+    let base = std::env::var("SCC_DOWNLOAD_BASE").unwrap_or_else(|_| {
+        "https://github.com/carterlasalle/scc/releases/download".to_string()
+    });
+    let trimmed = base.trim_end_matches('/');
+    let release_dir = trimmed.strip_suffix("/releases/download").map(|prefix| {
+        format!("{prefix}/releases/download/v{resolved}")
+    });
+    let installer_url = match release_dir {
+        Some(dir) => format!("{dir}/install.sh"),
+        None => format!("{trimmed}/install.sh"),
+    };
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(format!(
+        "curl -fsSL {url:?} | sh -s -- --version {ver} {dir} {dry}",
+        url = installer_url,
+        ver = resolved,
+        dir = format!("--dir {}", target_dir.display()),
+        dry = if dry_run { "--dry-run" } else { "" },
+    ));
+    let status = cmd.status().map_err(|e| crate::CliError::Other(format!("update failed to launch installer: {e}")))?;
+    if !status.success() {
+        return Err(crate::CliError::Other(format!("installer exited with status {status}")));
+    }
+    Ok(())
+}
+
+// trace:exempt reason=internal-detail
+fn latest_release_tag() -> crate::Result<String> {
+    let api_base = std::env::var("SCC_API_BASE")
+        .unwrap_or_else(|_| "https://api.github.com/repos/carterlasalle/scc".to_string());
+    let url = format!("{}/releases/latest", api_base.trim_end_matches('/'));
+    let out = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "15", &url])
+        .output()
+        .map_err(|e| crate::CliError::Other(format!("latest-release lookup failed: {e}")))?;
+    if !out.status.success() {
+        return Err(crate::CliError::Other(format!("latest-release lookup failed: {url}")));
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| crate::CliError::Other(format!("latest-release response not JSON: {e}")))?;
+    let tag = v.get("tag_name").and_then(|t| t.as_str()).unwrap_or("").trim_start_matches('v');
+    if tag.is_empty() {
+        return Err(crate::CliError::Other("latest release has no tag_name".to_string()));
+    }
+    Ok(tag.to_string())
+}
+
 /// `scc doctor` — integration health from THE Integration Registry
 /// (`scc_indexer::adapters::integration_registry`), offline, read-only and
 /// fast. Default never touches the network and never spawns a subprocess:

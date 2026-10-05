@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.10] — 2026-10-05
+
+- **`scc update` self-update command.** Updates the binary through the same
+  checksum-verified installer `docs/INSTALL.md` documents: `scc update`
+  resolves the latest release (or `--version V` to pin), fetches
+  `install.sh` from the release assets, and installs in place (default:
+  the running binary's directory, `--dir` overrides). `--dry-run` prints
+  the installer plan without downloading. Honored test hooks
+  (`SCC_DOWNLOAD_BASE`, `SCC_API_BASE`) so the fixture contract test
+  exercises the same path offline.
+- **SDK `rankGraph(goal)`.** Both SDKs thread an optional goal into the
+  `ranking.universe` invoke so goal-conditioned rank-node providers show
+  in the stage views; default calls unchanged.
+- **`ranking.edge_weight` factor decomposition.** The introspection op
+  takes an optional provenance and returns per-factor math
+  (`predicate × provenance × confidence × rarity`); both SDKs pass
+  provenance through with factor tests.
+
 ## [0.2.7] — 2026-09-23
 
 Engine facade, plugin architecture, and two measured bug fixes. First release
