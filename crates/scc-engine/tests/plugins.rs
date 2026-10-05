@@ -1126,3 +1126,54 @@ fn rank_edge_provider_adds_diffusion_without_canonical_facts() {
     let after = scc_engine::invoke(&root, "graph.relationships", serde_json::json!({})).unwrap();
     assert_eq!(after.as_array().unwrap().len(), n_rels, "rank edges never canonical");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.novelty-criticality verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn novelty_and_criticality_providers_override_blend() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\ndef zeta():\n    return alpha()\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let feat_of = |v: &serde_json::Value, sub: &str| -> serde_json::Value {
+        v["features"].as_array().unwrap().iter()
+            .find(|f| f["id"].as_str().unwrap_or("").contains(sub)).unwrap().clone()
+    };
+    let base = scc_engine::invoke(&root, "ranking.features",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    assert_eq!(feat_of(&base, "alpha")["novelty"].as_f64().unwrap(), 1.0, "default novelty 1.0: {base}");
+    // Criticality provider: 0.0 for everything; novelty provider: 0.0 for
+    // everything; plus a bad provider answering 99.0 (must abstain).
+    for (pid, ext, op, key) in [
+        ("acme.crit", "criticality-provider:acme.c", "ranking.criticality", "criticality"),
+        ("acme.nov", "novelty-provider:acme.n", "ranking.novelty", "novelty"),
+        ("acme.bad", "novelty-provider:acme.b", "ranking.novelty", "novelty"),
+    ] {
+        let plugdir = root.join(".scc").join("plugins").join(pid);
+        std::fs::create_dir_all(&plugdir).unwrap();
+        std::fs::write(
+            plugdir.join("scc-plugin.toml"),
+            format!("[plugin]\nid = \"{pid}\"\nname = \"P\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"{op}\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"{ext}\" = {{priority=1}}\n\n[permissions]\nrepo_read = true\n"),
+        ).unwrap();
+        let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+        let val = if pid == "acme.bad" { "99.0" } else { "0.0" };
+        let body = format!("import json\nprint(json.dumps({{\"output\": {{\"{key}\": {val}}}}}))\n");
+        f.write_all(body.as_bytes()).unwrap();
+    }
+    let out = scc_engine::invoke(&root, "ranking.features",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    let alpha = feat_of(&out, "alpha");
+    assert_eq!(alpha["criticality"].as_f64().unwrap(), 0.0, "criticality overridden: {out}");
+    // Novelty 0.0 wins over the bad 99.0 (first-Some-wins in chain order:
+    // acme.nov sorts before acme.bad — but either way 99.0 abstains).
+    assert_eq!(alpha["novelty"].as_f64().unwrap(), 0.0, "novelty overridden, bad value abstained: {out}");
+    let items = scc_engine::invoke(&root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    assert!(
+        items["items"].as_array().unwrap().iter().all(|i|
+            i["reasons"].as_array().unwrap().iter().any(|r| r.as_str().unwrap_or("").starts_with("criticality:provider"))
+            && i["reasons"].as_array().unwrap().iter().any(|r| r.as_str().unwrap_or("").starts_with("novelty:provider"))),
+        "override sources recorded: {items}"
+    );
+}

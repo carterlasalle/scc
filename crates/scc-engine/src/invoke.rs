@@ -979,6 +979,30 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
+        if wants("criticality-provider", "ranking.criticality") {
+            // §53: per-symbol criticality override in [0,1]; None abstains.
+            // One call per (symbol, goal) pair at blend time; failures and
+            // out-of-range values abstain (resolve_override degrades).
+            let plug = Arc::clone(&plug);
+            hooks.criticality.push(Box::new(move |sym: &str, goal: &str| {
+                let input = serde_json::json!({"symbol": sym, "goal": goal});
+                match scc_plugin_host::call(&plug, "ranking.criticality", input, None) {
+                    Ok(v) => v.get("criticality").and_then(|x| x.as_f64()),
+                    Err(_) => None,
+                }
+            }));
+        }
+        if wants("novelty-provider", "ranking.novelty") {
+            // §53: per-symbol novelty override in [0,1]; None abstains.
+            let plug = Arc::clone(&plug);
+            hooks.novelty.push(Box::new(move |sym: &str, goal: &str| {
+                let input = serde_json::json!({"symbol": sym, "goal": goal});
+                match scc_plugin_host::call(&plug, "ranking.novelty", input, None) {
+                    Ok(v) => v.get("novelty").and_then(|x| x.as_f64()),
+                    Err(_) => None,
+                }
+            }));
+        }
         if wants("edge-weight", "ranking.edge_weight") {
             let plug = Arc::clone(&plug);
             hooks.edge_weights.push(std::sync::Arc::new(move |subject, predicate, object, base| {

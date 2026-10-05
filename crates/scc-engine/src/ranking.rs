@@ -335,7 +335,9 @@ impl<'a> Ranker<'a> {
             let global_ppr = global_of.get(&e.symbol_id).copied().unwrap_or(0.0);
             let lexical = scc_context::surface::entry_lexical(e, &goal_terms);
             let confidence = e.confidence as f64;
-            let criticality = if seed_ids.contains(e.symbol_id.as_str()) || required.contains(&e.id) { 1.0 } else { importance_file_score(&e.path) };
+            let default_criticality = if seed_ids.contains(e.symbol_id.as_str()) || required.contains(&e.id) { 1.0 } else { importance_file_score(&e.path) };
+            let (criticality, criticality_src) = resolve_override(&hooks.criticality, &e.symbol_id, goal, default_criticality);
+            let (novelty, novelty_src) = resolve_override(&hooks.novelty, &e.symbol_id, goal, 1.0);
             let change_risk = if !e.path.is_empty() && ctx.stale_paths.iter().any(|p| p == &e.path) { 1.0 } else { 0.0 };
             let blend = match profile_w.as_ref() {
                 None => scc_context::pagerank::final_importance(task_ppr, global_ppr, lexical, 0.0, confidence, criticality, change_risk, 0.0, has_task),
@@ -355,10 +357,12 @@ impl<'a> Ranker<'a> {
             };
             let scale = 1.0 / (1.0 - scc_context::pagerank::SEMANTIC_WEIGHT);
             let novelty_w = profile_w.as_ref().and_then(|w| w.novelty).unwrap_or(scc_context::pagerank::NOVELTY_WEIGHT);
-            let total = blend * scale + novelty_w * 1.0;
+            let total = blend * scale + novelty_w * novelty;
             let mut plugin_features = std::collections::BTreeMap::new();
             let mut reasons: Vec<String> = Vec::new();
             if seed_ids.contains(e.symbol_id.as_str()) { reasons.push("task-seed".into()); }
+            if let Some(src) = criticality_src { reasons.push(format!("criticality:{src}")); }
+            if let Some(src) = novelty_src { reasons.push(format!("novelty:{src}")); }
             if required_by > 0 && required.contains(&e.id) && !seed_ids.contains(e.symbol_id.as_str()) { reasons.push(format!("required-by:plugin({required_by})")); }
             let mut total = total;
             for feat in &hooks.features {
@@ -373,7 +377,7 @@ impl<'a> Ranker<'a> {
             let specificity = if e.exported { 1.15 } else { 1.0 };
             let item = RankItem { id: e.symbol_id.clone(), rank: total, position: 0,
                 features: RankFeatures { task_ppr, global_ppr, lexical, semantic: 0.0,
-                    confidence, criticality, change_risk, novelty: 1.0 },
+                    confidence, criticality, change_risk, novelty },
                 specificity, reasons, plugin_features };
             match best.get(&e.symbol_id.as_str()) {
                 Some(prev) if prev.rank >= total => {}
@@ -501,6 +505,27 @@ pub type CoverageProvider =
 pub type RankEdgeProvider =
     Box<dyn Fn(&str) -> Vec<(String, String, String, f64)> + Send + Sync>;
 
+/// Criticality override (§53 CriticalityProvider): per-symbol criticality
+/// in [0,1], or `None` to keep the engine default (seed/required =>
+/// 1.0, else file-importance score). First `Some` in chain order wins;
+/// out-of-range values degrade to the default (never clamp silently into
+/// the blend — a contributor that cannot name a valid score abstains).
+// trace:exempt reason=internal-detail
+pub type CriticalityProvider =
+    Box<dyn Fn(&str, &str) -> Option<f64> + Send + Sync>;
+
+/// Novelty override (§53 NoveltyProvider): per-symbol novelty in [0,1],
+/// or `None` to keep the engine default of 1.0. Same first-Some-wins and
+/// range discipline as [`CriticalityProvider`].
+// trace:exempt reason=internal-detail
+pub type NoveltyProvider =
+    Box<dyn Fn(&str, &str) -> Option<f64> + Send + Sync>;
+
+/// One scalar-override provider (criticality or novelty): `None` abstains.
+// trace:exempt reason=internal-detail
+pub type ScalarOverrideProvider =
+    Box<dyn Fn(&str, &str) -> Option<f64> + Send + Sync>;
+
 // trace:exempt reason=internal-detail
 pub type SimilarityFn = std::sync::Arc<dyn Fn(&str, &str, Option<&str>, Option<&str>) -> f64 + Send + Sync>;
 
@@ -525,12 +550,38 @@ pub struct RankHooks {
     /// Extra rank-time edges (§48): merged into diffusion, never into the
     /// canonical graph. Deterministic chain order.
     pub rank_edges: Vec<RankEdgeProvider>,
+    /// Criticality overrides (§53): first `Some` in chain order wins.
+    pub criticality: Vec<CriticalityProvider>,
+    /// Novelty overrides (§53): first `Some` in chain order wins.
+    pub novelty: Vec<NoveltyProvider>,
     /// Named blend profiles: profile name -> per-feature weight
     /// overrides for the linear blend (feature keys: task_ppr,
     /// global_ppr, lexical, semantic, confidence, criticality,
     /// change_risk, novelty). Missing keys keep default weights.
     /// Applied inside the same linear math; recorded in reasons.
     pub profiles: std::collections::BTreeMap<String, BlendWeights>,
+}
+
+/// First-`Some`-wins override resolution: providers abstain with
+/// `None`; out-of-range values ([0,1] required) abstain too. Returns the
+/// value plus a `provider(N)` source tag for reasons, or `None` source
+/// when every provider abstained and the default stands.
+// trace:exempt reason=internal-detail
+pub fn resolve_override(
+    providers: &[ScalarOverrideProvider],
+    symbol: &str,
+    goal: &str,
+    default: f64,
+) -> (f64, Option<String>) {
+    for (i, prov) in providers.iter().enumerate() {
+        match prov(symbol, goal) {
+            Some(v) if v.is_finite() && (0.0..=1.0).contains(&v) => {
+                return (v, Some(format!("provider({i})")));
+            }
+            _ => {}
+        }
+    }
+    (default, None)
 }
 
 // trace:exempt reason=internal-detail

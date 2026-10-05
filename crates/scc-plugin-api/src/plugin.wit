@@ -34,7 +34,8 @@ interface types {
     /// A single extension registration.
     record extension-registration {
         /// Extension-point id: `rank-feature`, `reranker`, `seed-provider`,
-        /// `candidate-provider`, `rank-edge`, `edge-weight`, `similarity`,
+        /// `candidate-provider`, `rank-edge`, `criticality-provider`,
+        /// `novelty-provider`, `edge-weight`, `similarity`,
         /// `blend-profile`, `context-section`, `renderer`, `exporter`,
         /// `evidence-provider`, `resolver`, `operation`, …
         extension-type: string,
