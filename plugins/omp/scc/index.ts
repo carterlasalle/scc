@@ -485,6 +485,8 @@ export default function hook(pi: ExtensionAPI): void {
 
     let content = "";
     let injectedStartup = false;
+    let startupTokens = 0;
+    let taskTokens = 0;
     // Startup capsule: once per branch (branch-aware key) AND skipped on
     // resumed conversations that already carry an SCC startup capsule
     // (a `-c`/`-r` resume in a fresh process has an empty Set but the
@@ -497,6 +499,7 @@ export default function hook(pi: ExtensionAPI): void {
         content += startup.out.trim() + "\n\n";
         startupInjected.add(key);
         injectedStartup = true;
+        startupTokens = Math.ceil(startup.out.trim().length / 4);
       }
     }
     if (prompt) {
@@ -509,9 +512,16 @@ export default function hook(pi: ExtensionAPI): void {
       const task = await scc(pi, ["context", "task", prompt, "--budget", "1500"], ctx.cwd, CONTEXT_MS, dl.signal);
       if (task.code === 0 && task.out.trim()) {
         content += task.out.trim();
+        taskTokens = Math.ceil(task.out.trim().length / 4);
       }
     }
     if (!content.trim()) return;
+    logEvent(ctx.cwd, "inject", {
+      startup_tokens: startupTokens,
+      task_tokens: taskTokens,
+      total_tokens: startupTokens + taskTokens,
+      hasStartup: injectedStartup,
+    });
     return {
       message: {
         customType: "scc-context",

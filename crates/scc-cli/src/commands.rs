@@ -260,12 +260,36 @@ pub fn cmd_atlas(
 /// task deltas suppress already-visible APIs.
 // trace:exempt reason=internal-detail
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-context-startup work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
-pub fn cmd_context_startup(root: &Path, budget_tokens: Option<usize>) -> crate::Result<()> {
+pub fn cmd_context_startup(root: &Path, budget_tokens: Option<usize>, full_size: bool) -> crate::Result<()> {
     let store = open_store(root)?;
     let config = load_config(root)?;
     let stale = crate::stale_paths(&store)?;
     let engine = scc_engine::workspace::open_engine(&store, &config, stale).map_err(engine_err)?;
-    let (_startup, text) = engine.context().startup(&scc_api::StartupRequest { budget: budget_tokens }).map_err(engine_err)?;
+    let (startup, text) = engine.context().startup(&scc_api::StartupRequest { budget: budget_tokens }).map_err(engine_err)?;
+    if full_size {
+        // Full-size accounting: what the pack cost, what didn't fit, and
+        // how to see each dropped piece. Agents use this to decide the
+        // next narrower command (surface/task/structural per section).
+        let delivered: usize = scc_core::estimate_tokens(&text);
+        println!("startup full-size accounting");
+        println!("  delivered_tokens: {delivered}");
+        println!("  surface_tokens: {}", startup.surface_render.token_count);
+        println!("  atlas_budget_used: {}", startup.atlas_budget_used);
+        println!("  coverage_notes: {}", startup.coverage.len());
+        if startup.omissions.iter().any(|o| o != "none") {
+            println!("dropped/truncated sections:");
+            for o in &startup.omissions {
+                if o == "none" {
+                    continue;
+                }
+                println!("  - {o}");
+            }
+            println!("recover with: scc surface --explain | scc context task <goal> | scc context structural --files <paths>");
+        } else {
+            println!("dropped/truncated sections: none (pack is complete)");
+        }
+        return Ok(());
+    }
     print!("{text}");
     Ok(())
 }
@@ -1242,10 +1266,10 @@ pub fn cmd_update(version: Option<&str>, dir: Option<&std::path::Path>, dry_run:
     };
     let mut cmd = std::process::Command::new("sh");
     cmd.arg("-c").arg(format!(
-        "curl -fsSL {url:?} | sh -s -- --version {ver} {dir} {dry}",
+        "curl -fsSL {url:?} | sh -s -- --version {ver} --dir {dir} {dry}",
         url = installer_url,
         ver = resolved,
-        dir = format!("--dir {}", target_dir.display()),
+        dir = target_dir.display(),
         dry = if dry_run { "--dry-run" } else { "" },
     ));
     let status = cmd.status().map_err(|e| crate::CliError::Other(format!("update failed to launch installer: {e}")))?;
@@ -1274,6 +1298,182 @@ fn latest_release_tag() -> crate::Result<String> {
         return Err(crate::CliError::Other("latest release has no tag_name".to_string()));
     }
     Ok(tag.to_string())
+}
+
+/// `scc timing [--all] [--last N] [--json]` — summarize extension spawn
+/// timings from `~/.cache/scc/extension.log` (the same log `trace timing`
+/// reads for tracelayer: per-command n/total/p50/p95/max).
+///
+/// Per-project by default (rows whose repo path is the current root or its
+/// parent chain); `--all` summarizes every repository. `--last N` keeps
+/// only the N most recent records. `--json` emits the machine-readable
+/// report. Missing/empty log prints an empty table, never an error.
+// trace:v1 id=impl.scc-cli-timing work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_timing(root: &Path, all: bool, last: usize, json: bool) -> crate::Result<()> {
+    let home = std::env::var("HOME").map_err(|e| crate::CliError::Other(format!("cannot locate HOME: {e}")))?;
+    let log = std::path::PathBuf::from(home).join(".cache").join("scc").join("extension.log");
+    let raw = std::fs::read_to_string(&log).unwrap_or_default();
+    let mut rows: Vec<(String, String, f64, bool)> = Vec::new();
+    for line in raw.lines() {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let event = v.get("event").and_then(|e| e.as_str()).unwrap_or("");
+        if event == "inject" {
+            // Token injections aggregate separately below; skip the
+            // spawn-command grouping (no `cmd`/`ms` on these rows).
+            continue;
+        }
+        if event != "spawn" {
+            continue;
+        }
+        let ms = match v.get("ms").and_then(|m| m.as_f64()) {
+            Some(m) => m,
+            None => continue,
+        };
+        let cmd = v.get("cmd").and_then(|c| c.as_str()).unwrap_or("?").to_string();
+        let repo = v.get("repo").and_then(|r| r.as_str()).unwrap_or("?").to_string();
+        let ok = v.get("ok").and_then(|o| o.as_bool()).unwrap_or(true);
+        rows.push((cmd, repo, ms, ok));
+    }
+    let root_str = root.to_string_lossy().to_string();
+    if last > 0 && rows.len() > last {
+        rows = rows.split_off(rows.len() - last);
+    }
+    if !all {
+        rows.retain(|(_, repo, _, _)| repo == &root_str || root_str.starts_with(&format!("{repo}/")));
+    }
+    let mut groups: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
+    let mut fails: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for (cmd, _, ms, ok) in &rows {
+        // Group by the scc subcommand, not the full argv: `scc index
+        // --paths a b` and `scc index --quiet` are one row.
+        let short = cmd.strip_prefix("scc ").unwrap_or(cmd).split_whitespace().next().unwrap_or(cmd);
+        let key = format!("scc {short}");
+        groups.entry(key.clone()).or_default().push(*ms);
+        if !ok {
+            *fails.entry(key).or_default() += 1;
+        }
+    }
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for (cmd, mut ms) in groups {
+        ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let n = ms.len();
+        let total: f64 = ms.iter().sum();
+        let pct = |p: f64| ms[((p * n as f64).ceil() as usize).saturating_sub(1).min(n - 1)];
+        out.push(serde_json::json!({
+            "cmd": cmd, "n": n, "total_ms": (total * 10.0).round() / 10.0,
+            "p50_ms": (pct(0.5) * 10.0).round() / 10.0,
+            "p95_ms": (pct(0.95) * 10.0).round() / 10.0,
+            "max_ms": ms[n - 1],
+            "failed": fails.get(&cmd).cloned().unwrap_or(0),
+        }));
+    }
+    out.sort_by(|a, b| {
+        b.get("total_ms").and_then(|t| t.as_f64()).unwrap_or(0.0)
+            .partial_cmp(&a.get("total_ms").and_then(|t| t.as_f64()).unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "log": log.display().to_string(), "repo": if all { None } else { Some(root_str) }, "commands": out,
+        }))?);
+        return Ok(());
+    }
+    if out.is_empty() {
+        println!("no timing records ({}; use --all for every repository)", log.display());
+        return Ok(());
+    }
+    println!("{:<28} {:>5} {:>10} {:>8} {:>8} {:>8} {:>6}", "command", "n", "total_ms", "p50", "p95", "max", "fail");
+    for c in &out {
+        println!("{:<28} {:>5} {:>10} {:>8} {:>8} {:>8} {:>6}",
+            c.get("cmd").and_then(|v| v.as_str()).unwrap_or("?"),
+            c.get("n").and_then(|v| v.as_u64()).unwrap_or(0),
+            c.get("total_ms").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            c.get("p50_ms").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            c.get("p95_ms").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            c.get("max_ms").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            c.get("failed").and_then(|v| v.as_u64()).unwrap_or(0));
+    }
+    // Token injections (rtk-gain style): every hook firing logs its
+    // startup/task/total tokens; here they sum per repo scope.
+    let raw2 = std::fs::read_to_string(&log).unwrap_or_default();
+    let mut injections = 0usize;
+    let mut startup_tok = 0u64;
+    let mut task_tok = 0u64;
+    // Re-walk with the same scope filter: parse once, filter by repo.
+    let all_rows: Vec<serde_json::Value> = raw2.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let scoped: Vec<&serde_json::Value> = if last > 0 && all_rows.len() > last {
+        all_rows[all_rows.len() - last..].iter().collect()
+    } else {
+        all_rows.iter().collect()
+    };
+    for v in scoped {
+        if v.get("event").and_then(|e| e.as_str()) != Some("inject") {
+            continue;
+        }
+        let repo = v.get("repo").and_then(|r| r.as_str()).unwrap_or("?");
+        if !all && !(repo == root_str.as_str() || root_str.starts_with(&format!("{repo}/"))) {
+            continue;
+        }
+        injections += 1;
+        startup_tok += v.get("startup_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+        task_tok += v.get("task_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
+    }
+    println!();
+    if injections == 0 {
+        println!("tokens injected: no hook firings recorded (update the extension, then prompt once)");
+    } else {
+        println!("tokens injected: {injections} hook firing(s), startup {startup_tok}, task {task_tok}, total {}",
+            startup_tok + task_tok);
+    }
+    Ok(())
+}
+
+/// `scc clean [--force]` — remove the index database (`.scc/scc.db`,
+/// WAL/SHM sidecars) for the current repo so the next `scc index` is a
+/// clean cold build. Config and plugins are untouched. Without `--force`,
+/// prints the bytes to be freed and asks for confirmation.
+// trace:v1 id=impl.scc-cli-clean work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn cmd_clean(root: &Path, force: bool) -> crate::Result<()> {
+    let db = root.join(".scc").join("scc.db");
+    let sidecars = [".scc/scc.db-wal", ".scc/scc.db-shm"];
+    let mut targets: Vec<std::path::PathBuf> = Vec::new();
+    if db.exists() {
+        targets.push(db.clone());
+    }
+    for s in sidecars {
+        let p = root.join(s);
+        if p.exists() {
+            targets.push(p);
+        }
+    }
+    if targets.is_empty() {
+        println!("nothing to clean (no .scc/scc.db at {})", root.display());
+        return Ok(());
+    }
+    let bytes: u64 = targets.iter().map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum();
+    if !force {
+        println!("will remove {} file(s), freeing {} bytes:", targets.len(), bytes);
+        for t in &targets {
+            println!("  {}", t.display());
+        }
+        print!("proceed? [y/N] ");
+        use std::io::Write;
+        std::io::stdout().flush().map_err(|e| crate::CliError::Other(e.to_string()))?;
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer).map_err(|e| crate::CliError::Other(e.to_string()))?;
+        if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+            println!("aborted");
+            return Ok(());
+        }
+    }
+    for t in &targets {
+        std::fs::remove_file(t).map_err(|e| crate::CliError::Other(format!("cannot remove {}: {e}", t.display())))?;
+    }
+    println!("removed {} file(s), freed {} bytes; next `scc index` is a cold build", targets.len(), bytes);
+    Ok(())
 }
 
 /// `scc doctor` — integration health from THE Integration Registry

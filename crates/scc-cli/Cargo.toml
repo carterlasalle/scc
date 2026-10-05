@@ -37,6 +37,8 @@ scc-api.workspace = true
 # trace:exempt reason=internal-detail
 clap = { version = "4", features = ["derive"] }
 # trace:exempt reason=internal-detail
+clap_complete = "4"
+# trace:exempt reason=internal-detail
 serde.workspace = true
 # trace:exempt reason=internal-detail
 serde_json.workspace = true

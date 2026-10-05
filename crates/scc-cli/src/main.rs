@@ -1,6 +1,6 @@
 //! `scc` — System Context Compiler CLI (docs/API_AND_INTEGRATIONS.md §4).
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use scc_cli::commands;
 use scc_core::estimate_tokens;
 use std::collections::BTreeMap;
@@ -401,6 +401,32 @@ enum Commands {
         strict: bool,
     },
 
+    /// Extension spawn timings (per-project by default, --all for every repo)
+    Timing {
+        /// Summarize every repository instead of the current one
+        #[arg(long)]
+        all: bool,
+        /// Only consider the last N log records (0 = all)
+        #[arg(long, default_value_t = 0)]
+        last: usize,
+        /// Machine-readable report
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Remove the index database (.scc/scc.db) for the current repo
+    Clean {
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Print shell completions (bash, zsh, fish, powershell, elvish)
+    Completions {
+        /// Shell to generate for
+        shell: clap_complete::Shell,
+    },
+
     /// Manage the Hindsight lesson bank (.scc/lessons.jsonl)
     Lessons {
         /// Bare `scc lessons` lists stored lessons (limit: --limit)
@@ -677,6 +703,10 @@ enum ContextSub {
         /// Token budget (default: the full startup split, 20000)
         #[arg(long)]
         budget: Option<usize>,
+        /// Print the full-size accounting + every dropped/truncated
+        /// section instead of the pack (agents: what didn't fit)
+        #[arg(long)]
+        full_size: bool,
     },
     /// Structural Source: per-file signature/structural representation of
     /// the requested files, or of the files matched to a task goal
@@ -881,7 +911,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Watch => commands::cmd_watch(&root),
         Commands::Overview { json } => commands::cmd_overview(&root, json),
         Commands::Context { sub } => match sub {
-            ContextSub::Startup { budget } => commands::cmd_context_startup(&root, budget),
+            ContextSub::Startup { budget, full_size } => commands::cmd_context_startup(&root, budget, full_size),
             ContextSub::Structural { files, task, budget } => {
                 let out =
                     commands::cmd_context_structural(&root, &files, task.as_deref(), budget)?;
@@ -1010,6 +1040,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::cmd_important(&root, limit, component.as_deref(), task.as_deref(), json)
         }
         Commands::Adapters { json } => commands::cmd_adapters(&root, json),
+        Commands::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "scc", &mut std::io::stdout());
+            Ok(())
+        }
+        Commands::Timing { all, last, json } => commands::cmd_timing(&root, all, last, json),
+        Commands::Clean { force } => commands::cmd_clean(&root, force),
         Commands::Doctor { json, deep, network, strict } => match commands::cmd_doctor(&root, json, deep, network, strict) {
             Ok(true) => Ok(()),
             Ok(false) => Err(scc_cli::CliError::Other("scc doctor: issues found".into())),
