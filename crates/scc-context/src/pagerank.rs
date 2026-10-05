@@ -628,11 +628,40 @@ impl<'a> SystemRanker<'a> {
     where
         F: for<'x, 'y, 'z> Fn(&'x str, &'y str, &'z str, f64) -> Option<(String, f64)>,
     {
+        Self::with_edge_adjust_extra_and_nodes(view, adjust, extra, &[])
+    }
+
+    /// Build the ranker with adjust + extra edges + extra rank nodes
+    /// (§124 item 17 RankNodeProvider): `(id, kind)` pairs merged into the
+    /// rank universe before edge indexing. Only ids with a rankable kind
+    /// enter (unknown kinds abstain — a contributor that cannot name a
+    /// real kind abstains); duplicates of view nodes are skipped; the
+    /// universe stays id-sorted and deterministic. Extra nodes are
+    /// rank-time only: no entity, relationship, or evidence is written.
+// trace:exempt reason=internal-detail
+    pub fn with_edge_adjust_extra_and_nodes<F>(
+        view: &'a TrustedGraphView<'a>,
+        adjust: F,
+        extra: &[(String, String, String, f64)],
+        extra_nodes: &[(String, String)],
+    ) -> SystemRanker<'a>
+    where
+        F: for<'x, 'y, 'z> Fn(&'x str, &'y str, &'z str, f64) -> Option<(String, f64)>,
+    {
         let mut pairs: Vec<(String, String)> = view
             .entities()
             .filter(|e| RANKABLE_KINDS.contains(&e.kind.as_str()))
             .map(|e| (e.id.clone(), e.kind.clone()))
             .collect();
+        for (id, kind) in extra_nodes {
+            if id.is_empty() || !RANKABLE_KINDS.contains(&kind.as_str()) {
+                continue;
+            }
+            if pairs.iter().any(|(eid, _)| eid == id) {
+                continue;
+            }
+            pairs.push((id.clone(), kind.clone()));
+        }
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         let nodes: Vec<String> = pairs.iter().map(|(id, _)| id.clone()).collect();
         let kinds: Vec<String> = pairs.iter().map(|(_, k)| k.clone()).collect();

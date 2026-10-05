@@ -72,8 +72,25 @@ impl<'a> Ranker<'a> {
     /// vector is indexed by — the node table for pagerank.global/task.
     // trace:exempt reason=internal-detail
     pub fn universe(&self) -> crate::Result<Vec<(String, String)>> {
+        self.universe_with(&RankHooks::default(), "")
+    }
+
+    /// Rank universe merged with plugin rank-node providers (§124 item
+    /// 17): the same table `symbols_with_hooks` diffuses over. Read-only
+    /// stage view — no entity, relationship, or evidence is written.
+    // trace:exempt reason=internal-detail
+    pub fn universe_with(&self, hooks: &RankHooks, goal: &str) -> crate::Result<Vec<(String, String)>> {
         let ctx = self.ctx();
-        let ranker = scc_context::pagerank::SystemRanker::new(&ctx.view);
+        let mut extra_nodes: Vec<(String, String)> = Vec::new();
+        for prov in &hooks.rank_nodes {
+            extra_nodes.extend(prov(goal));
+        }
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust_extra_and_nodes(
+            &ctx.view,
+            |_s: &str, _p: &str, _o: &str, _b: f64| None,
+            &[],
+            &extra_nodes,
+        );
         Ok(ranker.nodes().iter().cloned().zip(ranker.kinds().iter().cloned()).collect())
     }
 
@@ -308,10 +325,18 @@ impl<'a> Ranker<'a> {
             extra.extend(prov(goal));
         }
         let extra_count = extra.len();
-        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust_and_extra(
+        // Extra rank-universe nodes (§124 item 17): merged before edge
+        // indexing so provider edges can attach to provider nodes.
+        let mut extra_nodes: Vec<(String, String)> = Vec::new();
+        for prov in &hooks.rank_nodes {
+            extra_nodes.extend(prov(goal));
+        }
+        let node_count = extra_nodes.len();
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust_extra_and_nodes(
             &ctx.view,
             move |s, p, o, b| Self::fold_edge_contributors(&owned, s, p, o, b).0,
             &extra,
+            &extra_nodes,
         );
         let global_of: std::collections::BTreeMap<String, f64> =
             ranker.project_to_symbols(&ranker.global_vector()).into_iter().collect();
@@ -399,6 +424,11 @@ impl<'a> Ranker<'a> {
                 it.reasons.push(format!("rank-edges({extra_count})"));
             }
         }
+        if node_count > 0 {
+            for it in items.iter_mut() {
+                it.reasons.push(format!("rank-nodes({node_count})"));
+            }
+        }
         for r in &hooks.rerankers { r(&mut items, goal); }
         items.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
         items.truncate(req.limit.max(1));
@@ -413,6 +443,11 @@ impl<'a> Ranker<'a> {
         if extra_count > 0 {
             warnings.push(format!(
                 "{extra_count} extra rank-time edge(s) merged into diffusion (never canonical)"
+            ));
+        }
+        if node_count > 0 {
+            warnings.push(format!(
+                "{node_count} extra rank-universe node(s) merged into diffusion (never canonical)"
             ));
         }
         Ok(RankResult { items, omitted_ids: Vec::new(), warnings })
@@ -509,6 +544,16 @@ pub type CoverageProvider =
 pub type RankEdgeProvider =
     Box<dyn Fn(&str) -> Vec<(String, String, String, f64)> + Send + Sync>;
 
+/// Rank-universe node contributor (§124 item 17 RankNodeProvider):
+/// `(id, kind)` pairs merged into the rank universe before edge indexing.
+/// Only rankable kinds enter (the ranker's RANKABLE_KINDS gate); empty ids,
+/// unknown kinds, and duplicates of view nodes abstain. Rank-time only:
+/// no entity, relationship, or evidence is written. Deterministic chain
+/// order; the universe stays id-sorted regardless of provider order.
+// trace:exempt reason=internal-detail
+pub type RankNodeProvider =
+    Box<dyn Fn(&str) -> Vec<(String, String)> + Send + Sync>;
+
 /// Criticality override (§53 CriticalityProvider): per-symbol criticality
 /// in [0,1], or `None` to keep the engine default (seed/required =>
 /// 1.0, else file-importance score). First `Some` in chain order wins;
@@ -570,6 +615,10 @@ pub struct RankHooks {
     /// Extra rank-time edges (§48): merged into diffusion, never into the
     /// canonical graph. Deterministic chain order.
     pub rank_edges: Vec<RankEdgeProvider>,
+    /// Extra rank-universe nodes (§124 item 17): merged before edge
+    /// indexing so provider edges can attach to provider nodes.
+    /// Deterministic chain order.
+    pub rank_nodes: Vec<RankNodeProvider>,
     /// Criticality overrides (§53): first `Some` in chain order wins.
     pub criticality: Vec<CriticalityProvider>,
     /// Novelty overrides (§53): first `Some` in chain order wins.

@@ -1333,3 +1333,47 @@ fn component_signal_plugin_nominates_component() {
         .unwrap_or_else(|| panic!("plugin component landed: {after}"));
     assert_eq!(widget["attributes"]["boundary_kind"], serde_json::json!("plugin"), "{widget}");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.rank-node verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn rank_node_plugin_extends_universe_without_canonical_facts() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let base = scc_engine::invoke(&root, "ranking.universe", serde_json::json!({})).unwrap();
+    let n_base = base["nodes"].as_array().unwrap().len();
+    let n_entities = scc_engine::invoke(&root, "graph.entities", serde_json::json!({})).unwrap();
+    let n_ents = n_entities.as_array().unwrap().len();
+    // Plugin contributes one rankable node + one unknown kind (abstains)
+    // + one empty id (abstains).
+    let plugdir = root.join(".scc").join("plugins").join("acme.rnode");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.rnode\"\nname = \"Rnode\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.rank_nodes\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"rank-node:acme.rnode\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json\nprint(json.dumps({\"output\": {\"nodes\": [{\"id\": \"plugin://acme/hotspot\", \"kind\": \"symbol\"}, {\"id\": \"plugin://acme/weird\", \"kind\": \"nonsense\"}, {\"id\": \"\", \"kind\": \"symbol\"}]}}))\n").unwrap();
+    let out = scc_engine::invoke(&root, "ranking.universe", serde_json::json!({})).unwrap();
+    let ids: Vec<&str> = out["nodes"].as_array().unwrap().iter()
+        .map(|n| n["id"].as_str().unwrap_or("")).collect();
+    assert_eq!(ids.len(), n_base + 1, "exactly one node admitted: {out}");
+    assert!(ids.contains(&"plugin://acme/hotspot"), "{out}");
+    // Reasons + warnings recorded on the ranked path.
+    let syms = scc_engine::invoke(&root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    assert!(
+        syms["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap_or("").contains("rank-universe node")),
+        "node warning recorded: {syms}"
+    );
+    assert!(
+        syms["items"].as_array().unwrap().iter().all(|i| i["reasons"].as_array().unwrap().iter().any(|r| r.as_str().unwrap_or("").starts_with("rank-nodes("))),
+        "node reasons recorded: {syms}"
+    );
+    // No canonical facts written: entity count identical.
+    let after = scc_engine::invoke(&root, "graph.entities", serde_json::json!({})).unwrap();
+    assert_eq!(after.as_array().unwrap().len(), n_ents, "rank nodes never canonical");
+}

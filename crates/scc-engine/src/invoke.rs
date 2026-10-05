@@ -467,7 +467,14 @@ pub fn invoke(
             serde_json::to_value(&edges)?
         }
         "ranking.universe" => {
-            let nodes = engine.ranking().universe()?;
+            // Universe introspection: base view nodes merged with plugin
+            // rank-node providers (same merge symbols_with_hooks diffuses
+            // over) — the node table every vector is indexed by.
+            let goal = input.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+            let mut ap = crate::plugins::active(root, &config);
+            crate::plugins::order_extensions(&crate::plugins::collect_extensions(&ap))?;
+            let hooks = ranking_hooks_from_plugins(&mut ap, goal);
+            let nodes = engine.ranking().universe_with(&hooks, goal)?;
             serde_json::json!({"nodes": nodes.iter().map(|(id, k)| serde_json::json!({"id": id, "kind": k})).collect::<Vec<_>>()})
         }
         "ranking.edges" => {
@@ -950,6 +957,28 @@ fn ranking_hooks_from_plugins(
                         reason: v.get("reason").and_then(|x| x.as_str()).unwrap_or("").into(),
                     },
                     Err(_) => crate::ranking::RankFeatureValue { name: format!("{pid}.feature"), score: 0.0, weight: 0.0, reason: String::new() },
+                }
+            }));
+        }
+        if wants("rank-node", "ranking.rank_nodes") {
+            // §124 item 17: rank-universe nodes without canonical facts.
+            // One call per request (input: goal); the plugin answers
+            // `{"nodes": [{id, kind}]}`. Empty ids, unknown kinds, and
+            // duplicates of view nodes degrade inside the ranker.
+            let plug = Arc::clone(&plug);
+            let g = goal.to_string();
+            hooks.rank_nodes.push(Box::new(move |_goal| {
+                let input = serde_json::json!({"goal": g});
+                match scc_plugin_host::call(&plug, "ranking.rank_nodes", input, None) {
+                    Ok(v) => v.get("nodes").and_then(|s| s.as_array()).map(|a| {
+                        a.iter().filter_map(|e| {
+                            let id = e.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                            let kind = e.get("kind").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                            if id.is_empty() || kind.is_empty() { return None; }
+                            Some((id, kind))
+                        }).collect()
+                    }).unwrap_or_default(),
+                    Err(_) => Vec::new(),
                 }
             }));
         }
