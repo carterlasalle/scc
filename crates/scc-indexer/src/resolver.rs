@@ -157,88 +157,33 @@ pub fn resolve_repository(
     if !ts_files.is_empty() {
         run_backend("tsserver", &ts_files)?;
     }
-    // Plugin precision resolvers (spec §31 SemanticResolver): external
-    // processes answering `resolution.resolve` with edge upgrades. Runs
-    // after built-ins; same EXTRACTED->RESOLVED contract, same epoch bump
-    // per applied upgrade. Discovered via `SCC_PLUGIN_PATH`-style dirs +
-    // `.scc/plugins` through the plugin host; absent plugins = no-op.
-    // Signature kept (store, root): callers never choose resolvers.
-    let extra = plugin_resolutions(store, root, &files)?;
-    report.upgraded += extra.upgraded;
-    report.unresolved += extra.unresolved;
-    report.errors += extra.errors;
-    if !extra.backends_used.is_empty() {
-        report.backends_used.extend(extra.backends_used);
-    }
-    Ok(report)
-}
-
-/// One plugin resolver's upgrades over candidate files.
-///
-/// Input: the same `(file, sites)` candidate list the built-ins consume.
-/// Protocol: the host spawns each plugin declaring the `resolver`
-/// extension (or the legacy `resolution.resolve` operation) once per
-/// candidate file with `{"file": ..., "calls": [{subject, object, line,
-/// evidence}]}`; the plugin answers `{"upgrades": [{subject, object,
-/// line, evidence, target_path, target_name}]}`. Each upgrade must name
-/// an existing EXTRACTED `calls` edge (by subject+object+line) and an
-/// existing target symbol id — invented endpoints fail the file without
-/// touching the model (validate-then-commit per file).
-// trace:v1 id=impl.scc-indexer-resolver.plugin-fn work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
-pub fn plugin_resolutions(
-    store: &Store,
-    root: &Path,
-    files: &[(String, usize)],
-) -> Result<ResolveReport, String> {
-    let mut report = ResolveReport::default();
-    let plugins = scc_plugin_host::discover(root);
-    let resolvers: Vec<_> = plugins
-        .into_iter()
-        .filter(|p| {
-            p.manifest.extensions.iter().any(|e| e.extension_type == "resolver")
-                || p.manifest.operations.iter().any(|o| o == "resolution.resolve")
-        })
-        .collect();
-    if resolvers.is_empty() {
-        return Ok(report);
-    }
-    for plug in &resolvers {
-        let mut upgraded = 0usize;
-        let mut unresolved = 0usize;
-        let mut errors = 0usize;
-        for (file, _) in files {
-            let calls = candidate_calls(store, file)?;
-            if calls.is_empty() {
-                continue;
-            }
-            let input = serde_json::json!({"file": file, "calls": calls});
-            let out = match scc_plugin_host::call(plug, "resolution.resolve", input, None) {
-                Ok(v) => v,
+    // Plugin precision resolvers (§31 SemanticResolver): declared `resolver`
+    // plugins run as backends after the built-ins, through the same
+    // SemanticResolver contract and validate-then-commit path. Absent
+    // plugins = no-op; dead plugins degrade per file, never fatal.
+    for mut plugin in PluginResolver::all(root) {
+        let pid = plugin.plugin.manifest.id.clone();
+        report.backends_used.push(format!("plugin:{pid}"));
+        let mut fatal: Option<String> = None;
+        for (file, _) in &files {
+            match plugin.resolve(store, file) {
+                Ok(r) => {
+                    report.upgraded += r.upgraded;
+                    report.unresolved += r.unresolved;
+                    report.errors += r.errors;
+                    if r.upgraded > 0 {
+                        report.remaining_candidates = report.remaining_candidates.saturating_sub(1);
+                    }
+                }
                 Err(e) => {
-                    errors += 1;
-                    report.errors += 1;
-                    let _ = e;
-                    continue;
-                }
-            };
-            let upgrades = out.get("upgrades").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-            match apply_plugin_upgrades(store, file, &calls, &upgrades, &plug.manifest.id) {
-                Ok(n) => {
-                    upgraded += n;
-                    unresolved += calls.len().saturating_sub(n);
-                }
-                Err(_) => {
-                    errors += 1;
-                    unresolved += calls.len();
+                    fatal = Some(e);
+                    break;
                 }
             }
         }
-        let _ = upgraded;
-        let _ = unresolved;
-        report.upgraded += upgraded;
-        report.unresolved += unresolved;
-        report.errors += errors;
-        report.backends_used.push(format!("plugin:{}", plug.manifest.id));
+        if let Some(e) = fatal {
+            return Err(format!("plugin:{pid}: {e}"));
+        }
     }
     Ok(report)
 }
@@ -358,6 +303,74 @@ fn apply_plugin_upgrades(
         store.bump_epoch(scc_store::ModelEpochKind::Semantic).map_err(|e| e.to_string())?;
     }
     Ok(upgrades.len())
+}
+
+/// A plugin precision resolver: answers `resolution.resolve` for one file's
+/// candidate calls with `{"upgrades": [{subject, object, line, evidence,
+/// target}]}`. Runs after the built-ins through the same validate-then-commit
+/// path (unknown edges/targets/evidence fail the file without touching the
+/// model); a dead plugin degrades to zero upgrades, never a fatal error.
+// trace:v1 id=impl.scc-indexer-resolver.plugin-backend work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct PluginResolver {
+    plugin: scc_plugin_host::LoadedPlugin,
+}
+
+// trace:exempt reason=internal-detail
+impl PluginResolver {
+    /// Whether this plugin declares the `resolver` extension (or the legacy
+    /// `resolution.resolve` operation).
+    // trace:exempt reason=internal-detail
+    pub fn declares(plugin: &scc_plugin_host::LoadedPlugin) -> bool {
+        plugin.manifest.extensions.iter().any(|e| e.extension_type == "resolver")
+            || plugin.manifest.operations.iter().any(|o| o == "resolution.resolve")
+    }
+
+    /// All declared plugin resolvers, in discovery order (deterministic).
+    // trace:exempt reason=internal-detail
+    pub fn all(root: &Path) -> Vec<Self> {
+        scc_plugin_host::discover(root)
+            .into_iter()
+            .filter(Self::declares)
+            .map(|plugin| Self { plugin })
+            .collect()
+    }
+}
+
+// trace:exempt reason=internal-detail
+impl SemanticResolver for PluginResolver {
+    // trace:exempt reason=internal-detail
+    fn supports(&self, _file: &str) -> bool {
+        true
+    }
+
+    // trace:exempt reason=internal-detail
+    fn resolve(&mut self, store: &Store, file: &str) -> Result<LspResult, String> {
+        let calls = candidate_calls(store, file)?;
+        if calls.is_empty() {
+            return Ok(LspResult::default());
+        }
+        let pid = self.plugin.manifest.id.clone();
+        let input = serde_json::json!({"file": file, "calls": calls});
+        let out = match scc_plugin_host::call(&self.plugin, "resolution.resolve", input, None) {
+            Ok(v) => v,
+            Err(_) => {
+                return Ok(LspResult { unresolved: calls.len(), errors: 1, ..Default::default() });
+            }
+        };
+        let upgrades: Vec<serde_json::Value> = out
+            .get("upgrades")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        match apply_plugin_upgrades(store, file, &calls, &upgrades, &pid) {
+            Ok(n) => Ok(LspResult {
+                upgraded: n,
+                unresolved: calls.len().saturating_sub(n),
+                ..Default::default()
+            }),
+            Err(_) => Ok(LspResult { unresolved: calls.len(), errors: 1, ..Default::default() }),
+        }
+    }
 }
 
 /// The trait implementations live with their servers (lsp.rs / lsp_ts.rs);

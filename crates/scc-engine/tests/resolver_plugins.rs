@@ -68,7 +68,9 @@ fn plugin_resolver_upgrades_extracted_edges() {
     let store = scc_engine::workspace::open_store(&root).unwrap();
     let files = scc_indexer::resolver::files_with_candidate_edges(&store, 500).unwrap();
     assert!(!files.is_empty(), "candidate file present");
-    let report = scc_indexer::resolver::plugin_resolutions(&store, &root, &files).unwrap();
+    drop(store);
+    let store = scc_engine::workspace::open_store(&root).unwrap();
+    let report = scc_indexer::resolver::resolve_repository(&store, &root, 500).unwrap();
     assert!(report.upgraded > 0, "plugin resolver must upgrade edges: {report:?}");
     assert!(
         report.backends_used.iter().any(|b| b == "plugin:acme.resolve"),
@@ -160,7 +162,9 @@ fn plugin_invented_target_fails_file_cleanly() {
     let files = scc_indexer::resolver::files_with_candidate_edges(&store, 500).unwrap();
     assert!(!files.is_empty(), "candidate file present");
     let before = store.all_relationships().unwrap();
-    let report = scc_indexer::resolver::plugin_resolutions(&store, &root, &files).unwrap();
+    drop(store);
+    let store = scc_engine::workspace::open_store(&root).unwrap();
+    let report = scc_indexer::resolver::resolve_repository(&store, &root, 500).unwrap();
     assert!(report.errors > 0, "invented target must error: {report:?}");
     assert_eq!(report.upgraded, 0, "nothing upgraded: {report:?}");
     let after = store.all_relationships().unwrap();
