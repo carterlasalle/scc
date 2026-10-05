@@ -953,6 +953,32 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
+        if wants("rank-edge", "ranking.rank_edges") {
+            // §48: rank-time edges without canonical facts. One call per
+            // request (input: goal); the plugin answers
+            // `{"edges": [{subject, predicate, object, weight}]}`. Unknown
+            // ids and bad weights degrade inside the ranker, never fail.
+            let plug = Arc::clone(&plug);
+            let g = goal.to_string();
+            hooks.rank_edges.push(Box::new(move |_goal| {
+                let input = serde_json::json!({"goal": g});
+                match scc_plugin_host::call(&plug, "ranking.rank_edges", input, None) {
+                    Ok(v) => v.get("edges").and_then(|s| s.as_array()).map(|a| {
+                        a.iter().filter_map(|e| {
+                            let (sub, pred, obj) = (
+                                e.get("subject").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                                e.get("predicate").and_then(|x| x.as_str()).unwrap_or("calls").to_string(),
+                                e.get("object").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                            );
+                            let w = e.get("weight").and_then(|x| x.as_f64()).unwrap_or(0.0);
+                            if sub.is_empty() || obj.is_empty() { return None; }
+                            Some((sub, pred, obj, w))
+                        }).collect()
+                    }).unwrap_or_default(),
+                    Err(_) => Vec::new(),
+                }
+            }));
+        }
         if wants("edge-weight", "ranking.edge_weight") {
             let plug = Arc::clone(&plug);
             hooks.edge_weights.push(std::sync::Arc::new(move |subject, predicate, object, base| {

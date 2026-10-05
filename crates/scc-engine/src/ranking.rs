@@ -36,11 +36,22 @@ impl<'a> Ranker<'a> {
         &self,
         contributors: &[EdgeWeightFn],
     ) -> crate::Result<Vec<(String, f64)>> {
+        self.pagerank_global_with_hooks(contributors, &[])
+    }
+
+    /// Global vector with edge weights and extra rank-time edges applied.
+    // trace:exempt reason=internal-detail
+    pub fn pagerank_global_with_hooks(
+        &self,
+        contributors: &[EdgeWeightFn],
+        extra: &[(String, String, String, f64)],
+    ) -> crate::Result<Vec<(String, f64)>> {
         let ctx = self.ctx();
         let owned: Vec<EdgeWeightFn> = contributors.iter().cloned().collect();
-        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust_and_extra(
             &ctx.view,
             move |s, p, o, b| Self::fold_edge_contributors(&owned, s, p, o, b).0,
+            extra,
         );
         let v = ranker.global_vector();
         Ok(ranker.nodes().iter().cloned().zip(v).collect())
@@ -104,11 +115,23 @@ impl<'a> Ranker<'a> {
         goal: &str,
         contributors: &[EdgeWeightFn],
     ) -> crate::Result<Vec<(String, f64)>> {
+        self.pagerank_task_with_hooks(goal, contributors, &[])
+    }
+
+    /// Task vector with edge weights and extra rank-time edges applied.
+    // trace:exempt reason=internal-detail
+    pub fn pagerank_task_with_hooks(
+        &self,
+        goal: &str,
+        contributors: &[EdgeWeightFn],
+        extra: &[(String, String, String, f64)],
+    ) -> crate::Result<Vec<(String, f64)>> {
         let ctx = self.ctx();
         let owned: Vec<EdgeWeightFn> = contributors.iter().cloned().collect();
-        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust_and_extra(
             &ctx.view,
             move |s, p, o, b| Self::fold_edge_contributors(&owned, s, p, o, b).0,
+            extra,
         );
         let seeds = lexical_seeds(&ctx, goal);
         let v = ranker.task_vector(&seeds);
@@ -278,9 +301,17 @@ impl<'a> Ranker<'a> {
         let seed_ids: std::collections::BTreeSet<&str> =
             seeds.iter().map(|s| s.id.as_str()).collect();
         let owned: Vec<EdgeWeightFn> = hooks.edge_weights.iter().cloned().collect();
-        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust(
+        // Extra rank-time edges (§48): collected per request, merged into
+        // diffusion, never into the canonical graph.
+        let mut extra: Vec<(String, String, String, f64)> = Vec::new();
+        for prov in &hooks.rank_edges {
+            extra.extend(prov(goal));
+        }
+        let extra_count = extra.len();
+        let ranker = scc_context::pagerank::SystemRanker::with_edge_adjust_and_extra(
             &ctx.view,
             move |s, p, o, b| Self::fold_edge_contributors(&owned, s, p, o, b).0,
+            &extra,
         );
         let global_of: std::collections::BTreeMap<String, f64> =
             ranker.project_to_symbols(&ranker.global_vector()).into_iter().collect();
@@ -355,6 +386,11 @@ impl<'a> Ranker<'a> {
                 it.reasons.push(format!("edge-weights({})", hooks.edge_weights.len()));
             }
         }
+        if extra_count > 0 {
+            for it in items.iter_mut() {
+                it.reasons.push(format!("rank-edges({extra_count})"));
+            }
+        }
         for r in &hooks.rerankers { r(&mut items, goal); }
         items.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
         items.truncate(req.limit.max(1));
@@ -364,6 +400,11 @@ impl<'a> Ranker<'a> {
             warnings.push(format!(
                 "{} edge-weight contributor(s) applied to the rank graph",
                 hooks.edge_weights.len()
+            ));
+        }
+        if extra_count > 0 {
+            warnings.push(format!(
+                "{extra_count} extra rank-time edge(s) merged into diffusion (never canonical)"
             ));
         }
         Ok(RankResult { items, omitted_ids: Vec::new(), warnings })
@@ -451,6 +492,15 @@ pub struct BlendWeights {
 pub type CoverageProvider =
     Box<dyn Fn(&str) -> Vec<String> + Send + Sync>;
 
+/// Rank-time edge contributor (§48): `(subject, predicate, object,
+/// weight)` triples that enter diffusion without becoming canonical
+/// architecture facts. Every edge records its source (see the
+/// `rank-edges(N)` reason); endpoint ids outside the rank universe and
+/// non-positive/non-finite weights are skipped by the ranker.
+// trace:exempt reason=internal-detail
+pub type RankEdgeProvider =
+    Box<dyn Fn(&str) -> Vec<(String, String, String, f64)> + Send + Sync>;
+
 // trace:exempt reason=internal-detail
 pub type SimilarityFn = std::sync::Arc<dyn Fn(&str, &str, Option<&str>, Option<&str>) -> f64 + Send + Sync>;
 
@@ -472,6 +522,9 @@ pub struct RankHooks {
 /// Extra candidate providers (spec 18): merged with the lexical base
     /// by canonical id, max score wins. Deterministic chain order.
     pub candidates: Vec<CandidateProvider>,
+    /// Extra rank-time edges (§48): merged into diffusion, never into the
+    /// canonical graph. Deterministic chain order.
+    pub rank_edges: Vec<RankEdgeProvider>,
     /// Named blend profiles: profile name -> per-feature weight
     /// overrides for the linear blend (feature keys: task_ppr,
     /// global_ppr, lexical, semantic, confidence, criticality,

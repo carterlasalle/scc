@@ -609,6 +609,25 @@ impl<'a> SystemRanker<'a> {
     where
         F: for<'x, 'y, 'z> Fn(&'x str, &'y str, &'z str, f64) -> Option<(String, f64)>,
     {
+        Self::with_edge_adjust_and_extra(view, adjust, &[])
+    }
+
+    /// Build the ranker with an adjust hook plus extra rank-time edges
+    /// (§48): `(subject, predicate, object, weight)` triples that enter
+    /// diffusion without becoming canonical facts. Both endpoints must be
+    /// rankable universe nodes; unknown ids and non-positive/non-finite
+    /// weights are skipped (a bad contributor degrades to no extra edges,
+    /// never a failed build). Surviving edges take the same adjust +
+    /// rarity path as view edges.
+// trace:exempt reason=internal-detail
+    pub fn with_edge_adjust_and_extra<F>(
+        view: &'a TrustedGraphView<'a>,
+        adjust: F,
+        extra: &[(String, String, String, f64)],
+    ) -> SystemRanker<'a>
+    where
+        F: for<'x, 'y, 'z> Fn(&'x str, &'y str, &'z str, f64) -> Option<(String, f64)>,
+    {
         let mut pairs: Vec<(String, String)> = view
             .entities()
             .filter(|e| RANKABLE_KINDS.contains(&e.kind.as_str()))
@@ -681,6 +700,18 @@ impl<'a> SystemRanker<'a> {
                     in_sources[ti].insert(si);
                     edges.push((si, ti, rel.predicate.clone(), w));
                 }
+            }
+        }
+        for (subj, pred, obj, w) in extra {
+            if !w.is_finite() || *w <= 0.0 {
+                continue;
+            }
+            let (Some(&si), Some(&ti)) = (index.get(subj), index.get(obj)) else {
+                continue;
+            };
+            if let Some(w) = Self::adjust_edge(&adjust, subj, pred, obj, *w) {
+                in_sources[ti].insert(si);
+                edges.push((si, ti, pred.clone(), w));
             }
         }
         let in_degree: Vec<usize> = in_sources.iter().map(|s| s.len()).collect();

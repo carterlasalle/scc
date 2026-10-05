@@ -1067,3 +1067,62 @@ fn evidence_provider_plugin_commits_batch() {
     assert!(err.is_err(), "unknown plugin must fail: {err:?}");
     assert!(err.unwrap_err().to_string().contains("unknown import format"), "import vocabulary");
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.rank-edge verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn rank_edge_provider_adds_diffusion_without_canonical_facts() {
+    use std::io::Write;
+    // zeta calls alpha: a rank-edge zeta->alpha must move alpha's score
+    // without writing any canonical relationship.
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\ndef zeta():\n    return alpha()\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    let score_of = |v: &serde_json::Value, sub: &str| -> f64 {
+        v["items"].as_array().unwrap().iter()
+            .find(|i| i["id"].as_str().unwrap_or("").contains(sub))
+            .unwrap_or_else(|| panic!("{sub} missing: {v}"))["rank"].as_f64().unwrap()
+    };
+    let rel_count = scc_engine::invoke(&root, "graph.relationships", serde_json::json!({})).unwrap();
+    let n_rels = rel_count.as_array().unwrap().len();
+    let base = scc_engine::invoke(&root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    assert!(base.get("warnings").and_then(|v| v.as_array()).map(|w| w.is_empty()).unwrap_or(true), "no edge warnings yet: {base}");
+    // The plugin needs real universe node ids: read them from ranking.edges.
+    let edges = scc_engine::invoke(&root, "ranking.edges", serde_json::json!({})).unwrap();
+    let ids: Vec<String> = edges["edges"].as_array().unwrap().iter()
+        .flat_map(|e| [e["subject"].as_str().unwrap_or(""), e["object"].as_str().unwrap_or("")])
+        .map(str::to_string).collect();
+    let has = |sub: &str| ids.iter().find(|i| i.contains(sub)).cloned().unwrap();
+    let (zeta, alpha) = (has("zeta"), has("alpha"));
+    let plugdir = root.join(".scc").join("plugins").join("acme.redge");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.redge\"\nname = \"Redge\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.rank_edges\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"rank-edge:acme.redge\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    // One heavy rank-time edge + one dangling id (must degrade, not fail).
+    let body = format!(
+        "import json\nprint(json.dumps({{\"output\": {{\"edges\": [{{\"subject\": \"{zeta}\", \"predicate\": \"calls\", \"object\": \"{alpha}\", \"weight\": 50.0}}, {{\"subject\": \"repo://nowhere/x\", \"predicate\": \"calls\", \"object\": \"repo://nowhere/y\", \"weight\": 99.0}}]}}}}))\n"
+    );
+    f.write_all(body.as_bytes()).unwrap();
+    let out = scc_engine::invoke(&root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    assert!(
+        out["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap_or("").contains("rank-time edge")),
+        "rank-edge warning recorded: {out}"
+    );
+    assert!(
+        out["items"].as_array().unwrap().iter().all(|i| i["reasons"].as_array().unwrap().iter().any(|r| r.as_str().unwrap_or("").starts_with("rank-edges("))),
+        "rank-edge reasons recorded: {out}"
+    );
+    assert!(
+        (score_of(&out, "alpha") - score_of(&base, "alpha")).abs() > 1e-9,
+        "extra edge moved alpha's score"
+    );
+    // No canonical facts written: relationship count identical.
+    let after = scc_engine::invoke(&root, "graph.relationships", serde_json::json!({})).unwrap();
+    assert_eq!(after.as_array().unwrap().len(), n_rels, "rank edges never canonical");
+}

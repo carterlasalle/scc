@@ -307,7 +307,7 @@ Rules that bite (stated once, enforced always):
 - `evidence.contribute` is an alias for `graph.contribute` (evidence importers
   may request either name; both parse and both narrow identically).
 
-Plugins can also register rank features, candidate providers, and rerankers
+Plugins can also register rank features, candidate providers, rank-time edges, and rerankers
 via `[extensions] "rank-feature:<id>" = {priority=1}` — see the echo and
 rank-feature round-trips in `crates/scc-engine/tests/plugins.rs`, which are
 the executable contract for the manifest shape above.
