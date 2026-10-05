@@ -1003,6 +1003,17 @@ fn ranking_hooks_from_plugins(
                 }
             }));
         }
+        if wants("risk-provider", "ranking.risk") {
+            // §53: per-symbol change-risk override in [0,1]; None abstains.
+            let plug = Arc::clone(&plug);
+            hooks.risk.push(Box::new(move |sym: &str, goal: &str| {
+                let input = serde_json::json!({"symbol": sym, "goal": goal});
+                match scc_plugin_host::call(&plug, "ranking.risk", input, None) {
+                    Ok(v) => v.get("risk").and_then(|x| x.as_f64()),
+                    Err(_) => None,
+                }
+            }));
+        }
         if wants("edge-weight", "ranking.edge_weight") {
             let plug = Arc::clone(&plug);
             hooks.edge_weights.push(std::sync::Arc::new(move |subject, predicate, object, base| {

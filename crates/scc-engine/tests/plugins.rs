@@ -1177,3 +1177,47 @@ fn novelty_and_criticality_providers_override_blend() {
         "override sources recorded: {items}"
     );
 }
+
+#[test]
+// trace:v1 id=test.scc-engine-plugins.risk-provider verifies=REQ-SI-503JSBGP exercises=impl.scc-engine-plugins.call-operation
+fn risk_provider_overrides_change_risk() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.py"), "def alpha():\n    return 1\ndef zeta():\n    return alpha()\n").unwrap();
+    scc_engine::index::full(&root, &scc_indexer::Config::default()).unwrap();
+    // Fresh tree: default change_risk is 0.0 everywhere.
+    let base = scc_engine::invoke(&root, "ranking.features",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    assert!(
+        base["features"].as_array().unwrap().iter().all(|f| f["change_risk"].as_f64().unwrap() == 0.0),
+        "fresh tree has no risk: {base}"
+    );
+    // Risk provider answers 1.0 for symbols containing "alpha", abstains
+    // (missing key) otherwise.
+    let plugdir = root.join(".scc").join("plugins").join("acme.risk");
+    std::fs::create_dir_all(&plugdir).unwrap();
+    std::fs::write(
+        plugdir.join("scc-plugin.toml"),
+        "[plugin]\nid = \"acme.risk\"\nname = \"R\"\nversion = \"1.0.0\"\napi = \"1\"\noperations = [\"ranking.risk\"]\n\n[runtime]\ncommand = [\"python3\", \"plugin.py\"]\n\n[extensions]\n\"risk-provider:acme.r\" = {priority=1}\n\n[permissions]\nrepo_read = true\n",
+    ).unwrap();
+    let mut f = std::fs::File::create(plugdir.join("plugin.py")).unwrap();
+    f.write_all(b"import json, sys\nreq = json.load(sys.stdin)\nsym = req[\"input\"].get(\"symbol\", \"\")\nval = 1.0 if \"alpha\" in sym else None\nout = {\"risk\": val} if val is not None else {}\nprint(json.dumps({\"output\": out}))\n").unwrap();
+    let out = scc_engine::invoke(&root, "ranking.features",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    let alpha = out["features"].as_array().unwrap().iter()
+        .find(|f| f["id"].as_str().unwrap_or("").contains("alpha")).unwrap();
+    let zeta = out["features"].as_array().unwrap().iter()
+        .find(|f| f["id"].as_str().unwrap_or("").contains("zeta")).unwrap();
+    assert_eq!(alpha["change_risk"].as_f64().unwrap(), 1.0, "alpha risk overridden: {out}");
+    assert_eq!(zeta["change_risk"].as_f64().unwrap(), 0.0, "zeta abstains to default: {out}");
+    let items = scc_engine::invoke(&root, "ranking.symbols",
+        serde_json::json!({"goal": "", "limit": 10})).unwrap();
+    assert!(
+        items["items"].as_array().unwrap().iter()
+            .find(|i| i["id"].as_str().unwrap_or("").contains("alpha")).unwrap()["reasons"]
+            .as_array().unwrap().iter().any(|r| r.as_str().unwrap_or("").starts_with("risk:provider")),
+        "risk source recorded: {items}"
+    );
+}

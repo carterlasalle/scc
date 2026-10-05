@@ -338,7 +338,8 @@ impl<'a> Ranker<'a> {
             let default_criticality = if seed_ids.contains(e.symbol_id.as_str()) || required.contains(&e.id) { 1.0 } else { importance_file_score(&e.path) };
             let (criticality, criticality_src) = resolve_override(&hooks.criticality, &e.symbol_id, goal, default_criticality);
             let (novelty, novelty_src) = resolve_override(&hooks.novelty, &e.symbol_id, goal, 1.0);
-            let change_risk = if !e.path.is_empty() && ctx.stale_paths.iter().any(|p| p == &e.path) { 1.0 } else { 0.0 };
+            let default_risk = if !e.path.is_empty() && ctx.stale_paths.iter().any(|p| p == &e.path) { 1.0 } else { 0.0 };
+            let (change_risk, risk_src) = resolve_override(&hooks.risk, &e.symbol_id, goal, default_risk);
             let blend = match profile_w.as_ref() {
                 None => scc_context::pagerank::final_importance(task_ppr, global_ppr, lexical, 0.0, confidence, criticality, change_risk, 0.0, has_task),
                 Some(w) => {
@@ -363,6 +364,7 @@ impl<'a> Ranker<'a> {
             if seed_ids.contains(e.symbol_id.as_str()) { reasons.push("task-seed".into()); }
             if let Some(src) = criticality_src { reasons.push(format!("criticality:{src}")); }
             if let Some(src) = novelty_src { reasons.push(format!("novelty:{src}")); }
+            if let Some(src) = risk_src { reasons.push(format!("risk:{src}")); }
             if required_by > 0 && required.contains(&e.id) && !seed_ids.contains(e.symbol_id.as_str()) { reasons.push(format!("required-by:plugin({required_by})")); }
             let mut total = total;
             for feat in &hooks.features {
@@ -521,6 +523,13 @@ pub type CriticalityProvider =
 pub type NoveltyProvider =
     Box<dyn Fn(&str, &str) -> Option<f64> + Send + Sync>;
 
+/// Change-risk override (§53 RiskProvider): per-symbol change risk in
+/// [0,1], or `None` to keep the engine default (stale path => 1.0, else
+/// 0.0). Same first-Some-wins and range discipline as
+/// [`CriticalityProvider`] (shared [`ScalarOverrideProvider`] alias).
+// trace:exempt reason=internal-detail
+pub type RiskProvider = ScalarOverrideProvider;
+
 /// One scalar-override provider (criticality or novelty): `None` abstains.
 // trace:exempt reason=internal-detail
 pub type ScalarOverrideProvider =
@@ -554,6 +563,8 @@ pub struct RankHooks {
     pub criticality: Vec<CriticalityProvider>,
     /// Novelty overrides (§53): first `Some` in chain order wins.
     pub novelty: Vec<NoveltyProvider>,
+    /// Change-risk overrides (§53): first `Some` in chain order wins.
+    pub risk: Vec<RiskProvider>,
     /// Named blend profiles: profile name -> per-feature weight
     /// overrides for the linear blend (feature keys: task_ppr,
     /// global_ppr, lexical, semantic, confidence, criticality,
