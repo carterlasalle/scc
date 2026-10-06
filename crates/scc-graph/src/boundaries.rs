@@ -163,6 +163,60 @@ pub fn boundary_crossings(graph: &RealityGraph, store: &Store) -> Result<Vec<Str
     crossing_lines(graph, store, false)
 }
 
+/// [`boundary_crossings`] over an already-loaded relationship slice (C6):
+/// same predicate filter and render path as [`crossing_lines`], without the
+/// extra full-table `all_relationships()` + `components()` store reads.
+/// Callers that already hold the trusted edge set (e.g. `verify`) use this.
+// trace:v1 id=impl.scc-graph-boundary-crossings-from-rels work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn boundary_crossings_from_rels(
+    graph: &RealityGraph,
+    rels: &[&scc_core::Relationship],
+    prod_only: bool,
+) -> Vec<String> {
+    // Same arms as crossing_lines, over the caller's edge slice: no
+    // all_relationships() re-read, no components() re-read (graph holds
+    // the compiled components). Sort+dedup preserved.
+    let units = unit_dirs(graph);
+    let mut lines: Vec<String> = Vec::new();
+    for rel in rels {
+        if rel.predicate != scc_core::predicates::CROSSES_BOUNDARY {
+            continue;
+        }
+        if prod_only && !crossing_subject_production(graph, &rel.subject) {
+            continue;
+        }
+        let Some(subj) = graph.entity(&rel.subject) else {
+            continue;
+        };
+        let obj_name = graph
+            .entity(&rel.object)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| {
+                rel.object.rsplit('/').next().unwrap_or(&rel.object).to_string()
+            });
+        match subj.kind.as_str() {
+            kinds::COMPONENT => {
+                let ua = unit_for_component(subj, &units);
+                let ub = unit_for_component(
+                    graph.entity(&rel.object).unwrap_or(subj),
+                    &units,
+                );
+                lines.push(format!("{ua}/{} -> {ub}/{obj_name}", subj.name));
+            }
+            kinds::SYMBOL => {
+                let (unit, owner) = component_of_symbol(graph, &rel.subject, &graph.components)
+                    .map(|c| (unit_for_component(c, &units), c.name.clone()))
+                    .unwrap_or_else(|| ("local".to_string(), subj.name.clone()));
+                lines.push(format!("{unit}/{owner} -> external/{obj_name}"));
+            }
+            _ => {}
+        }
+    }
+    lines.sort();
+    lines.dedup();
+    lines
+}
+
 /// [`boundary_crossings`] restricted to production-side crossings: a
 /// crossing whose subject (component or calling symbol) lives under a
 /// test/fixture/benchmark/example tree is fixture chatter, not

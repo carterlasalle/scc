@@ -71,6 +71,22 @@ pub struct IndexReport {
     pub added: usize,
     pub removed: usize,
     pub failed: usize,
+    /// True when the store was mutated (files indexed, purged, or
+    /// deleted). False on a true no-op: the engine skips the derived
+    /// recompile + revision snapshot (C1a fast path). A deletion sets
+    /// this even when zero files were indexed.
+    #[serde(default)]
+    pub mutated: bool,
+    /// Source files whose facts changed (changed + added + deleted +
+    /// dependent cascade). Seeds the C1b affected closure; empty on no-op.
+    #[serde(default)]
+    pub affected_files: Vec<String>,
+    /// Component ids owning the affected files, captured pre-purge (the
+    /// refresh purge deletes the changed files' edges before the engine
+    /// derives the closure, so ownership must be snapshotted while the
+    /// previous generation's edges still exist). Empty when unknowable.
+    #[serde(default)]
+    pub affected_components: Vec<String>,
     pub duration_ms: u64,
     pub analysis_quality: scc_core::AnalysisQuality,
     /// Per-category scan skip counts (ignored/unsupported/oversized/…).
@@ -600,6 +616,7 @@ impl Indexer {
         if recompute_derived {
             persist_bm25_corpus(&self.store)?;
         }
+        report.mutated = report.changed > 0 || report.removed > 0;
         report.duration_ms = started.elapsed().as_millis() as u64;
         Ok(report)
     }
@@ -747,6 +764,36 @@ impl Indexer {
                 }
             }
         }
+        // C1b pre-purge ownership snapshot: map every file that is about
+        // to be purged (changed + deleted) to its current owning
+        // component(s) while the previous generation's CONTAINS edges still
+        // exist. Post-purge the edges are gone and ownership is unknowable.
+        let mut owners: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        {
+            let mut comp_files: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+            if let Ok(rels) = self.store.all_relationships() {
+                for r in &rels {
+                    if r.predicate == scc_core::predicates::CONTAINS {
+                        comp_files.entry(r.subject.clone()).or_default().push(r.object.clone());
+                    }
+                }
+            }
+            // component ids are the subjects that are components: match by
+            // checking the subject looks like a component id.
+            let mut probe: Vec<String> = changed_paths.to_vec();
+            probe.extend(deleted_paths.iter().cloned());
+            for f in &probe {
+                for (subj, objs) in &comp_files {
+                    if !subj.contains("/component/") {
+                        continue;
+                    }
+                    if objs.iter().any(|o| o == f || o.ends_with(&format!("/{f}"))) {
+                        owners.insert(subj.clone());
+                    }
+                }
+            }
+        }
         let deleted_cascade = self.with_dependents(&deleted_paths)?;
         let mut quality_map = load_quality_files(&self.store);
         for p in &deleted_paths {
@@ -760,10 +807,11 @@ impl Indexer {
                 changed_paths.push(d);
             }
         }
-        if changed_paths.is_empty() {
+        if changed_paths.is_empty() && deleted_paths.is_empty() {
             self.store.finish_snapshot(snapshot_id, 0)?;
             return Ok(IndexReport {
                 revision: git_info.revision,
+                mutated: false,
                 ..Default::default()
             });
         }
@@ -776,6 +824,15 @@ impl Indexer {
         // flows), which only exist post-recompile. Recording here would
         // leave history systematically one recompile behind.
         report.revision = git_info.revision;
+        report.mutated = true;
+        // C1b closure seed: every source file whose facts may have changed
+        // (changed + deleted + dependent cascade). Sorted for determinism.
+        let mut affected: std::collections::BTreeSet<String> = changed_paths.iter().cloned().collect();
+        for d in &deleted_paths {
+            affected.insert(d.clone());
+        }
+        report.affected_files = affected.into_iter().collect();
+        report.affected_components = owners.into_iter().collect();
         report.duration_ms = started.elapsed().as_millis() as u64;
         report.scan_stats = scan_stats;
         Ok(report)

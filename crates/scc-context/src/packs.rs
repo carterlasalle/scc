@@ -1895,10 +1895,15 @@ pub fn verify(ctx: &ContextCompiler, budget: usize, full: bool) -> ContextPack {
     sections.push(Section::new("STALE FACTS", stale_facts, 10));
 
     // graph invariants
+    // C6: one pass over a single collected relationship vector. The four
+    // checks below (dangling, resolved-evidence, inferred count, low-conf
+    // deps) each used to call all_rels() separately — 4× filter + sort of
+    // the full edge set per verify.
+    let verify_rels: Vec<&scc_core::Relationship> = ctx.view.all_rels();
     let mut inv = String::new();
     // 1. dangling references
     let mut dangling = 0usize;
-    for r in ctx.view.all_rels() {
+    for r in &verify_rels {
         // endpoints may be external_api, component, flow ids — check known
         // namespaces
         let known = |id: &str| -> bool {
@@ -1930,7 +1935,7 @@ pub fn verify(ctx: &ContextCompiler, budget: usize, full: bool) -> ContextPack {
     inv.push_str(&format!("Dangling references: {dangling}\n"));
     // 2. RESOLVED facts must have evidence
     let mut no_evidence = 0usize;
-    for r in ctx.view.all_rels() {
+    for r in &verify_rels {
         if r.provenance == Provenance::Resolved && r.evidence.is_empty() {
             no_evidence += 1;
         }
@@ -1947,9 +1952,7 @@ pub fn verify(ctx: &ContextCompiler, budget: usize, full: bool) -> ContextPack {
         "Critical invariants without enforcing tests: {unenforced}\n"
     ));
     // 4. inferred claims
-    let inferred = ctx
-        .view
-        .all_rels()
+    let inferred = verify_rels
         .iter()
         .filter(|r| r.provenance == Provenance::Inferred)
         .count();
@@ -1970,7 +1973,7 @@ pub fn verify(ctx: &ContextCompiler, budget: usize, full: bool) -> ContextPack {
     // conflicts: conflicting writers recorded as drift; also low-confidence deps
     let mut low_conf = String::new();
     let mut lc = 0usize;
-    for r in ctx.view.all_rels() {
+    for r in &verify_rels {
         if r.predicate == scc_core::predicates::DEPENDS_ON && r.confidence < 0.8 {
             lc += 1;
             if lc <= 8 {
@@ -1989,15 +1992,17 @@ pub fn verify(ctx: &ContextCompiler, budget: usize, full: bool) -> ContextPack {
     }
 
     // trust boundaries (docs/PRD.md §7, EPIC-148)
-    if let Ok(crossings) = scc_graph::boundaries::boundary_crossings(ctx.view.graph, ctx.store) {
-        if !crossings.is_empty() {
-            let mut b = String::new();
-            b.push_str(&format!("{} boundary crossing(s):\n", crossings.len()));
-            for c in crossings.iter().take(12) {
-                b.push_str(&format!("- {c}\n"));
-            }
-            sections.push(Section::new("BOUNDARIES", b, 8));
+    // C6: render from the already-collected trusted vector — no second
+    // full-table relationships read (crossing_lines re-read the table).
+    let crossings =
+        scc_graph::boundaries::boundary_crossings_from_rels(ctx.view.graph, &verify_rels, false);
+    if !crossings.is_empty() {
+        let mut b = String::new();
+        b.push_str(&format!("{} boundary crossing(s):\n", crossings.len()));
+        for c in crossings.iter().take(12) {
+            b.push_str(&format!("- {c}\n"));
         }
+        sections.push(Section::new("BOUNDARIES", b, 8));
     }
 
     // runtime observations (docs/FLOW_COMPILER.md §8)

@@ -136,6 +136,176 @@ impl RealityGraph {
 
 /// Map every symbol id to its component id via the component CONTAINS
 /// edges (shared by the flow graph compiler and flow projections).
+/// Affected closure for scoped recompilation (C1b): the set of
+/// derived entities that may have changed given source-file mutations.
+/// File -> owning component(s) via stored component CONTAINS file edges;
+/// component -> flows via flow participant edges. Conservative: unknown
+/// files map to the whole closure (None = full recompile required).
+// trace:v1 id=impl.scc-graph-affected-closure work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub struct AffectedClosure {
+    /// Component ids that may have changed (empty + `complete=true` means all).
+    pub components: Vec<String>,
+    /// Flow ids that may have changed.
+    pub flows: Vec<String>,
+    /// True when the closure cannot be bounded (unknown file, topology
+    /// change): the caller must run the full pipeline.
+    pub complete: bool,
+}
+
+// trace:v1 id=impl.scc-graph-affected-closure-fn work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn affected_closure_with_owners(
+    graph: &RealityGraph,
+    changed_files: &[String],
+    known_owners: &[String],
+) -> AffectedClosure {
+    use std::collections::HashSet;
+    // Pre-purge owners (captured by the indexer while previous-gen edges
+    // existed) are authoritative: seed the component set directly, then
+    // expand to flows below. Unknown files with no known owner stay
+    // unbounded.
+    let mut components: HashSet<String> = HashSet::new();
+    for o in known_owners {
+        components.insert(o.clone());
+    }
+    let inner = affected_closure(graph, changed_files);
+    if inner.complete && !components.is_empty() {
+        // Owners known despite unmappable files: bounded after all.
+        let mut flows: HashSet<String> = HashSet::new();
+        let sym_comp = symbol_component_map(graph);
+        let comp_set: HashSet<&str> = components.iter().map(|c| c.as_str()).collect();
+        for fl in &graph.flows {
+            for r in graph.out_pred(&fl.id, scc_core::predicates::CONTAINS) {
+                if comp_set.contains(r.object.as_str())
+                    || sym_comp.get(&r.object).map(|c| comp_set.contains(c.as_str())).unwrap_or(false)
+                {
+                    flows.insert(fl.id.clone());
+                    break;
+                }
+            }
+        }
+        let mut components: Vec<String> = components.into_iter().collect();
+        components.sort();
+        let mut flows: Vec<String> = flows.into_iter().collect();
+        flows.sort();
+        return AffectedClosure { components, flows, complete: false };
+    }
+    if !inner.complete {
+        for c in &inner.components {
+            components.insert(c.clone());
+        }
+    }
+    if components.is_empty() {
+        return inner;
+    }
+    // Recompute flows over the union.
+    let sym_comp = symbol_component_map(graph);
+    let comp_set: HashSet<&str> = components.iter().map(|c| c.as_str()).collect();
+    let mut flows: HashSet<String> = HashSet::new();
+    for fl in &graph.flows {
+        for r in graph.out_pred(&fl.id, scc_core::predicates::CONTAINS) {
+            if comp_set.contains(r.object.as_str())
+                || sym_comp.get(&r.object).map(|c| comp_set.contains(c.as_str())).unwrap_or(false)
+            {
+                flows.insert(fl.id.clone());
+                break;
+            }
+        }
+    }
+    let mut components: Vec<String> = components.into_iter().collect();
+    components.sort();
+    let mut flows: Vec<String> = flows.into_iter().collect();
+    flows.sort();
+    AffectedClosure { components, flows, complete: false }
+}
+
+// trace:v1 id=impl.scc-graph-affected-closure-base work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn affected_closure(graph: &RealityGraph, changed_files: &[String]) -> AffectedClosure {
+    use std::collections::HashSet;
+    // NOTE: the closure runs pre-recompile against the PREVIOUS generation's
+    // component edges. A file the previous clustering never placed (new
+    // files, unplaced files) cannot map to an owner — that is correct
+    // invalidation semantics (placement is unknowable until clustering
+    // runs), and correctly forces complete=true. Do not "fix" by falling
+    // back to neighbor heuristics: an unbounded closure is the honest
+    // answer when ownership is unknown.
+    let mut components: HashSet<String> = HashSet::new();
+    // file entity id prefix: files are entities `repo:{repo_id}/file/{path}`.
+    // Symbol -> component owner via the same CONTAINS edges (file CONTAINS
+    // symbol, component CONTAINS file): survives the refresh purge, which
+    // deletes the changed file's direct edges (source_path) before the
+    // closure runs. File ids end with `/{path}`.
+    let mut sym_owner: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for c in &graph.components {
+        for r in graph.out_pred(&c.id, scc_core::predicates::CONTAINS) {
+            for sr in graph.out_pred(&r.object, scc_core::predicates::CONTAINS) {
+                sym_owner.insert(sr.object.clone(), c.id.clone());
+            }
+        }
+    }
+    for f in changed_files {
+        let mut found = false;
+        for c in &graph.components {
+            for r in graph.out_pred(&c.id, scc_core::predicates::CONTAINS) {
+                // Component CONTAINS file-entity ids; file ids end with
+                // the path (`repo:{id}/file/{path}`) or equal it.
+                if r.object == *f || r.object.ends_with(&format!("/{f}")) {
+                    components.insert(c.id.clone());
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        if !found {
+            // Purge-safe fallback: any symbol still owned whose id embeds
+            // the file path (`.../symbol/{path}/{name}`) proves the file's
+            // previous owner. New files with no symbols stay unbounded.
+            for (sym, owner) in &sym_owner {
+                if sym.contains(&format!("/symbol/{f}/")) || sym.ends_with(&format!("/symbol/{f}")) {
+                    components.insert(owner.clone());
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
+            // Unknown file (new path, unmapped): cannot bound the closure.
+            return AffectedClosure { components: vec![], flows: vec![], complete: true };
+        }
+    }
+    // Component -> flows: flows whose participant set intersects the
+    // affected components (via flow CONTAINS component or symbol edges
+    // resolving through symbol_component_map).
+    let sym_comp = symbol_component_map(graph);
+    let comp_set: HashSet<&str> = components.iter().map(|c| c.as_str()).collect();
+    let mut flows: HashSet<String> = HashSet::new();
+    for fl in &graph.flows {
+        let mut hit = false;
+        for r in graph.out_pred(&fl.id, scc_core::predicates::CONTAINS) {
+            if comp_set.contains(r.object.as_str()) {
+                hit = true;
+                break;
+            }
+            if let Some(c) = sym_comp.get(&r.object) {
+                if comp_set.contains(c.as_str()) {
+                    hit = true;
+                    break;
+                }
+            }
+        }
+        if hit {
+            flows.insert(fl.id.clone());
+        }
+    }
+    let mut components: Vec<String> = components.into_iter().collect();
+    components.sort();
+    let mut flows: Vec<String> = flows.into_iter().collect();
+    flows.sort();
+    AffectedClosure { components, flows, complete: false }
+}
+
 pub fn symbol_component_map(graph: &RealityGraph) -> HashMap<String, String> {
     let mut symbol_comp: HashMap<String, String> = HashMap::new();
     for c in &graph.components {
@@ -282,6 +452,38 @@ impl<'a> CompilationPipeline<'a> {
             boundaries: stored_comps.len(),
         })
     }
+}
+
+/// Scoped recompile entry (C1b): derive the affected closure for the
+/// changed files and recompile. When the closure is bounded, only the
+/// affected components/flows are recorded in the report; the pipeline
+/// itself still runs whole-repo until per-stage merge writes land — the
+/// closure is the contract that merge work will consume. `complete=true`
+/// (unbounded) always runs the full pipeline.
+/// Returns the closure alongside the report so callers can observe how
+/// tight the bound was.
+// trace:v1 id=impl.scc-graph-recompile-scoped work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn recompile_scoped(
+    store: &Store,
+    changed_files: &[String],
+    component_signals: Vec<components::ComponentSignal>,
+) -> Result<(RecompileReport, AffectedClosure)> {
+    recompile_scoped_with_owners(store, changed_files, &[], component_signals)
+}
+
+// trace:v1 id=impl.scc-graph-recompile-scoped-owners work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn recompile_scoped_with_owners(
+    store: &Store,
+    changed_files: &[String],
+    known_owners: &[String],
+    component_signals: Vec<components::ComponentSignal>,
+) -> Result<(RecompileReport, AffectedClosure)> {
+    let graph = RealityGraph::load(store)?;
+    let closure = affected_closure_with_owners(&graph, changed_files, known_owners);
+    let report = CompilationPipeline::new(store)
+        .component_signals(component_signals)
+        .run()?;
+    Ok((report, closure))
 }
 
 /// Recompile the entire derived layer (components, flows, invariants, drift)

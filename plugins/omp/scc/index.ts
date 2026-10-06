@@ -408,11 +408,23 @@ const indexPaths = async (
   }
   indexInFlight = true;
   const args = unique.length && !full ? ["index", "--paths", ...unique, "--quiet"] : ["index", "--quiet"];
+  const attemptStart = Date.now();
   let r;
   try {
     r = await scc(pi, args, cwd, INDEX_MS, signal);
     if (r.code !== 0) {
-      r = await scc(pi, args, cwd, INDEX_MS, signal);
+      // Retry only when the handler envelope has room for a full second
+      // attempt: with HANDLER_MS=25s and INDEX_MS=20s, a retry fired after
+      // a ~20s first attempt is doomed by the abort signal — it burns the
+      // remaining ~5s and delays the honest failure the model must see.
+      // Report the first failure instead; freshness re-covers next mutation.
+      const elapsed = Date.now() - attemptStart;
+      const remaining = HANDLER_MS - elapsed;
+      if (!signal?.aborted && remaining >= INDEX_MS) {
+        r = await scc(pi, args, cwd, INDEX_MS, signal);
+      } else {
+        logEvent(cwd, "index-retry-skipped", { elapsed, remaining });
+      }
     }
   } finally {
     indexInFlight = false;

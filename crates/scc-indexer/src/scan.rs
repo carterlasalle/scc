@@ -545,6 +545,52 @@ pub fn matching_ignore_pattern<'a>(rel: &str, ignore: &'a [String]) -> Option<&'
     None
 }
 
+/// [`matching_ignore_pattern`] over a precompiled matcher set (C2): hoists
+/// glob compilation (regex build per pattern) out of `explain_scan`'s
+/// per-file loop. Same semantics, same rule naming — the caller owns
+/// compilation via [`compile_matchers_with_names`].
+// trace:v1 id=impl.crates-scc-indexer-src-scan.matching-ignore-pattern-precompiled work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn matching_ignore_pattern_with<'a>(
+    rel: &str,
+    matchers: &'a [(globset::GlobMatcher, String)],
+) -> Option<&'a str> {
+    if rel == ".scc/intent.yaml" {
+        return None;
+    }
+    if rel == ".scc" || rel.starts_with(".scc/") {
+        // Static string: same lifetime shape as pattern text for callers.
+        // Hoisted out of the branch to keep the return type uniform.
+        let builtin: &'static str = ".scc (built-in: only .scc/intent.yaml is indexed)";
+        // SAFETY of lifetime: coerces 'static to 'a (shorter is sound).
+        return Some(builtin);
+    }
+    for (m, pat) in matchers {
+        if m.is_match(rel) {
+            return Some(pat.as_str());
+        }
+        if rel.contains('/') {
+            if let Some(dir) = rel.rsplit_once('/') {
+                if m.is_match(dir.0) {
+                    return Some(pat.as_str());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Compile `(matcher, pattern-text)` pairs once for
+/// [`matching_ignore_pattern_with`]. Invalid globs are skipped (same as the
+/// compiling-per-file predecessor, which skipped them via `let Ok(g)`).
+// trace:v1 id=impl.crates-scc-indexer-src-scan.compile-matchers-with-names work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn compile_matchers_with_names(ignore: &[String]) -> Vec<(globset::GlobMatcher, String)> {
+    use globset::Glob;
+    ignore
+        .iter()
+        .filter_map(|pat| Glob::new(pat).ok().map(|g| (g.compile_matcher(), pat.clone())))
+        .collect()
+}
+
 /// Files larger than this are counted as oversized, never parsed.
 // trace:exempt reason=internal-detail
 pub const MAX_INDEXED_BYTES: u64 = 5 * 1024 * 1024;
@@ -601,7 +647,9 @@ fn git_ignore_rules(root: &Path, paths: &[String]) -> std::collections::HashMap<
             }
         }
     };
-    for chunk in paths.chunks(500) {
+    // C2: 4000-path batches (argv budget allows it; 500 spawned 12+
+    // git processes on large repos). Same command, same parse — fewer spawns.
+    for chunk in paths.chunks(4000) {
         let waited = match std::process::Command::new("git")
             .arg("-C")
             .arg(root)
@@ -627,6 +675,8 @@ fn git_ignore_rules(root: &Path, paths: &[String]) -> std::collections::HashMap<
 /// its reason and rule. Reads nothing except directory entries and sizes.
 // trace:v1 id=impl.crates-scc-indexer-src-scan.explain-scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 pub fn explain_scan(root: &Path, config: &IndexConfig) -> Result<ScanExplanation, ScanError> {
+    // C2: compile ignore globs once (regex build per pattern), not per file.
+    let matchers = compile_matchers_with_names(&config.ignore);
     let mut exp = ScanExplanation::default();
     let mut builder = WalkBuilder::new(root);
     builder
@@ -666,7 +716,7 @@ pub fn explain_scan(root: &Path, config: &IndexConfig) -> Result<ScanExplanation
             continue;
         }
         exp.stats.discovered += 1;
-        if let Some(rule) = matching_ignore_pattern(&rel_str, &config.ignore) {
+        if let Some(rule) = matching_ignore_pattern_with(&rel_str, &matchers) {
             exp.stats.ignored += 1;
             exp.skipped.push(SkippedPath {
                 path: rel_str,
@@ -752,6 +802,36 @@ pub fn relative_of(root: &Path, abs: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    // trace:v1 id=test.scc-scan-matcher-parity verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-indexer-src-scan.matching-ignore-pattern
+    fn precompiled_matcher_agrees_with_per_file() {
+        // C2: the hoisted matcher must agree with the compiling-per-file
+        // predecessor on every default ignore across representative paths.
+        let ignore = IndexConfig::default().ignore;
+        let matchers = compile_matchers_with_names(&ignore);
+        let paths = [
+            "node_modules/a/index.js",
+            "target/debug/scc",
+            ".git/objects/x",
+            ".omp/extensions/scc/index.ts",
+            ".claude/skills/foo/SKILL.md",
+            "src/main.rs",
+            "README.md",
+            ".scc/scc.db",
+            ".scc/intent.yaml",
+            "a/b/c.min.js",
+            "dist/bundle.js",
+            "__pycache__/x.pyc",
+        ];
+        for path in paths {
+            assert_eq!(
+                matching_ignore_pattern(path, &ignore),
+                matching_ignore_pattern_with(path, &matchers),
+                "divergence on {path}"
+            );
+        }
+    }
 
     #[test]
     // trace:v1 id=test.scc.scan.registry-covers-classified verifies=REQ-language-support-matrix exercises=impl.scc.core.language-registry

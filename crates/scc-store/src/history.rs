@@ -219,7 +219,35 @@ impl Store {
         tx.execute("DELETE FROM revision_members WHERE rev < ?1", [cutoff + 1])?;
         let r = tx.execute("DELETE FROM graph_revisions WHERE rev < ?1", [cutoff + 1])?;
         tx.commit()?;
+        // C3 freelist reclaim: pruned snapshots leave their pages on the
+        // freelist (the 88%-empty 9.8G db). A full VACUUM would block the
+        // hook path for seconds, so reclaim incrementally: when the
+        // freelist exceeds 25% of pages, release up to 10k pages back to
+        // the OS now; the rest follows on subsequent prunes. Best-effort:
+        // failures (read-only handle, old SQLite) never fail the index.
+        let _ = self.reclaim_freelist();
         Ok(r)
+    }
+
+    /// Release freelist pages back to the OS when fragmentation is
+    /// materially large (C3). Bounded work per call (10k pages ≈ 40MB at
+    /// 4K pages); returns pages freed.
+    // trace:v1 id=impl.history-freelist-reclaim work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    pub fn reclaim_freelist(&self) -> Result<usize, StoreError> {
+        let (pages, free): (i64, i64) = self
+            .conn
+            .query_row("SELECT COALESCE((SELECT page_count FROM pragma_page_count), 0), COALESCE((SELECT freelist_count FROM pragma_freelist_count), 0)", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap_or((0, 0));
+        if pages <= 0 || free * 4 < pages {
+            return Ok(0);
+        }
+        let freed: i64 = self
+            .conn
+            .query_row("PRAGMA incremental_vacuum(10000)", [], |r| r.get(0))
+            .unwrap_or(0);
+        Ok(freed.max(0) as usize)
     }
 
     /// Member id sets at a revision: the representative historical view.
@@ -568,5 +596,16 @@ mod tests {
         assert_eq!(revs[0].rev, 8);
         let (e, _) = s.revision_members(8).unwrap();
         assert!(!e.is_empty() || e.is_empty());
+    }
+
+    #[test]
+    // trace:v1 id=test.history-freelist-reclaim verifies=REQ-SI-503JSBGP exercises=impl.history-freelist-reclaim
+    fn reclaim_frees_nothing_when_db_is_compact() {
+        // C3: on a small test db the freelist is trivially below 25%, so
+        // reclaim is a no-op returning 0 — and must never error.
+        let (s, _d) = tmp_store();
+        s.upsert_file("a.py", "h1", "python", "source", 10).unwrap();
+        s.record_current_revision().unwrap();
+        assert_eq!(s.reclaim_freelist().unwrap(), 0);
     }
 }

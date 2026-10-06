@@ -73,6 +73,28 @@ fn incremental_refresh_reresolves_importers_to_match_cold() {
 }
 
 #[test]
+// trace:v1 id=test.scc-index-noop-fast-path verifies=REQ-SI-503JSBGP exercises=impl.scc.index.invalidation-cascade
+fn refresh_unchanged_paths_reports_unmutated() {
+    // C1a: refreshing paths whose hashes are identical (and no deletions)
+    // must report mutated=false so the engine skips the derived recompile
+    // + revision snapshot. A deletion must report mutated=true even when
+    // zero files are indexed.
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
+    let (idx, _db) = indexer_for(root);
+    idx.index().unwrap();
+    let noop = idx.refresh_paths(&["a.py".into()]).unwrap();
+    assert!(!noop.mutated, "identical hash must not report mutation: {noop:?}");
+    std::fs::write(root.join("a.py"), "def f():\n    return 2\n").unwrap();
+    let edit = idx.refresh_paths(&["a.py".into()]).unwrap();
+    assert!(edit.mutated, "changed hash must report mutation: {edit:?}");
+    std::fs::remove_file(root.join("a.py")).unwrap();
+    let del = idx.refresh_paths(&["a.py".into()]).unwrap();
+    assert!(del.mutated, "deletion must report mutation with zero indexed: {del:?}");
+}
+
+#[test]
 // trace:v1 id=test.scc.index.invalidation-cascade-add verifies=REQ-implement-phase-7-of-scc-x-ripwire-lessons-1-one-hop-type-narrowing exercises=impl.scc.index.invalidation-cascade
 fn incremental_refresh_creates_type_narrow_calls_when_callee_gains_method() {
     let dir = TempDir::new().unwrap();

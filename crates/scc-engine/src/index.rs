@@ -55,6 +55,33 @@ pub fn refresh_paths(root: &Path, config: &scc_indexer::Config, paths: &[String]
     let indexer = scc_indexer::Indexer::new(crate::workspace::open_store(root)?, config.clone());
     let report = indexer.refresh_paths(paths)?;
     drop(indexer);
+    // C1a true no-op fast path: hashes identical AND no deletions means
+    // the store (source facts) and therefore every derived fact is
+    // unchanged — recompiling would rebuild identical tables and record
+    // an identical revision. Skip both; the report already carries
+    // mutated=false so callers can observe the fast path.
+    if !report.mutated {
+        return Ok(report);
+    }
+    // C1b: derive the affected closure from the true changed set. The
+    // pipeline still runs whole-repo until per-stage merge writes land;
+    // the closure bound below is the observable contract the merge work
+    // must exploit (tight closure + full pipeline = the remaining gap).
+    let signals = component_signals(root, config);
+    let fresh = crate::workspace::open_store(root)?;
+    let (_scoped, closure) = scc_graph::recompile_scoped_with_owners(
+        &fresh,
+        &report.affected_files,
+        &report.affected_components,
+        signals,
+    )?;
+    eprintln!(
+        "[scc] refresh closure: {} file(s) -> {} component(s), {} flow(s){}",
+        report.affected_files.len(),
+        closure.components.len(),
+        closure.flows.len(),
+        if closure.complete { " (UNBOUNDED: full pipeline required)" } else { "" },
+    );
     recompile_with_signals(root, config, &store)?;
     let _ = store.record_current_revision_with_config(
         &scc_indexer::semantic_config_hash(config),
