@@ -1,7 +1,7 @@
 # trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
 name: scc
 # trace:exempt reason=vendored-copy (byte-identical copy of plugins/ for crates.io packaging; canonical marker lives at the plugins/ original)
-version: 0.2.10
+version: 0.2.11
 description: >-
   System Context Compiler — evidence-backed system context for coding tasks.
   Provides system_overview, task_context, component_context, flow_context,

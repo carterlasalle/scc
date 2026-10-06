@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.11] — 2026-10-06
+
+Hook-path latency fixes (the 53.8% post-edit timeout rate).
+
+- **C1a true no-op fast path.** `index --paths` with identical hashes and
+  no deletions skips the derived recompile + revision snapshot entirely
+  (5–11s → 0.12s). `IndexReport` gains `mutated`/`affected_files`.
+- **C1b affected closure.** Pre-purge component ownership snapshot +
+  `affected_closure`/`recompile_scoped` contract; 1-file refresh derives a
+  bounded 1-component closure (logged per refresh). Per-stage merge writes
+  remain follow-up.
+- **C2 scan 90s → 3–5s.** Hoisted per-file glob recompilation (parity
+  tested) + `git check-ignore` batches 500 → 4000.
+- **C3 freelist reclaim.** `prune_revisions` releases pages incrementally
+  when the freelist exceeds 25% (bounded 10k pages per prune).
+- **C6 verify single-pass.** One collected relationship vector feeds all
+  four checks; store-free boundary rendering.
+- **Hook retry envelope.** Retry skipped when the handler lacks a full
+  attempt's budget remaining; first failure reported immediately.
+
 ## [0.2.10] — 2026-10-05
 
 - **`scc update` self-update command.** Updates the binary through the same
