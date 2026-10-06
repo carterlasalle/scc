@@ -827,8 +827,12 @@ pub fn cluster_components(
                     || regions[m].boundary_kind == crate::components::BOUNDARY_PACKAGE
             });
             if protected || files.len() <= MAX_UNDECLARED_FILES {
-                split_comps.push(c.clone());
-                split_files.insert(c.name.clone(), files);
+                // An earlier split piece may already own this natural name
+                // (spring-boot `smoke-test` twice) — dedupe like pieces do.
+                let mut kept = c.clone();
+                kept.name = dedup_cluster_name(&split_files, &kept.name, &[]);
+                split_files.insert(kept.name.clone(), files);
+                split_comps.push(kept);
                 continue;
             }
             // Recursive deepening: group member regions by path segment at
@@ -886,8 +890,10 @@ pub fn cluster_components(
                 }
             }
             if !emitted_any {
-                split_comps.push(c.clone());
-                split_files.insert(c.name.clone(), files);
+                let mut kept = c.clone();
+                kept.name = dedup_cluster_name(&split_files, &kept.name, &[]);
+                split_files.insert(kept.name.clone(), files);
+                split_comps.push(kept);
             }
             continue;
         }
@@ -900,10 +906,11 @@ pub fn cluster_components(
             .iter()
             .flat_map(|c| c.member_regions.iter().map(|&m| (m, c.name.clone())))
             .collect();
+        // Region ownership is authoritative post-split: regions partition
+        // disjointly across pieces, so every symbol follows its region's
+        // owner unconditionally. (The old name-exists shortcut misrouted
+        // symbols when a rename left the old name owned by another cluster.)
         for (sym, comp) in symbol_component.iter_mut() {
-            if comps.iter().any(|c| &c.name == comp) {
-                continue;
-            }
             if let Some(&ri) = symbol_region.get(sym) {
                 if let Some(owner) = region_owner.get(&ri) {
                     *comp = owner.clone();
