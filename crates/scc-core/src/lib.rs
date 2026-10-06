@@ -1132,6 +1132,44 @@ pub fn encode_component(input: &str) -> String {
     out
 }
 
+/// Injective component identity: readable slug plus a 6-hex digest of the
+/// exact raw bytes. Plain `entity_id(repo, COMPONENT, name)` routes through
+/// `sanitize_key`, which merges `_`/`-`/case variants (`foo_bar` vs
+/// `foo-bar` → same id); `replace_components` then fails the whole cold
+/// index on `UNIQUE constraint failed: components.id` (#19). Display keeps
+/// using `entity.name`; every lookup constructs (never parses) the id, so
+/// the digest suffix composes.
+// trace:v1 id=impl.crates-scc-core-src-lib.component-id work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+pub fn component_id(repo: &str, raw_name: &str) -> String {
+    let slug = sanitize_key(raw_name);
+    let digest = &fnv1a64_hex(raw_name.as_bytes())[..6];
+    format!(
+        "repo://{}/component/{slug}~{digest}",
+        sanitize_key(repo)
+    )
+}
+
+    #[test]
+    // trace:v1 id=test.scc-core-component-id-injective verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-core-src-lib.component-id
+    fn component_id_is_injective_over_sanitize_collisions() {
+        // #19: `foo_bar` vs `foo-bar` collapse under `sanitize_key` and
+        // failed whole cold indexes (ruff/spring-boot/grpc) on
+        // `UNIQUE constraint failed: components.id`.
+        let a = component_id("r", "foo_bar");
+        let b = component_id("r", "foo-bar");
+        let legacy_a = entity_id("r", "component", "foo_bar");
+        let legacy_b = entity_id("r", "component", "foo-bar");
+        assert_eq!(
+            legacy_a, legacy_b,
+            "precondition: legacy ids really collide ({legacy_a})"
+        );
+        assert_ne!(a, b, "injective ids must differ: {a} vs {b}");
+        assert!(a.starts_with("repo://r/component/foo-bar~"));
+        assert!(b.starts_with("repo://r/component/foo-bar~"));
+        // determinism: same bytes, same id (stable across re-indexes)
+        assert_eq!(a, component_id("r", "foo_bar"));
+    }
+
 /// Inverse of `encode_component`: percent-decodes `%XX` sequences back to
 /// bytes. Used by benchmark/impact tooling to map entity ids back to names.
 // trace:v1 id=impl.crates-scc-core-src-lib.decode-component work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching

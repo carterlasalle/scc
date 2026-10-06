@@ -838,6 +838,48 @@ pub fn task_with_rankers(
         sections.push(Section::new("LOCUS", loc.body.clone(), 9));
     }
 
+    // PRIMARY TARGETS (#20): the top-ranked behavior-owning candidates,
+    // rendered immediately after TASK/LOCUS so the model knows where to look
+    // within ~100 tokens. This re-renders the ranker's existing order — no
+    // new ranking — because the benchmark showed good retrieval buried under
+    // architecture prose (pydantic/fields.py at output line 3,173). Three
+    // entries: the owner plus supporting paths fit in ~5 lines, leaving
+    // budget for enrichment at small caps (parity: hindsight survives 800).
+    {
+        let mut body = String::new();
+        for (i, c) in candidates.iter().take(3).enumerate() {
+            let file = if c.kind == kinds::SYMBOL {
+                ctx.view
+                    .entity(&c.id)
+                    .and_then(|e| e.attributes.get("file"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+            } else if c.kind == kinds::FILE {
+                c.name.as_str()
+            } else {
+                ""
+            };
+            if file.is_empty() && c.kind != kinds::COMPONENT {
+                continue;
+            }
+            let where_part = if file.is_empty() {
+                c.name.clone()
+            } else {
+                format!("{file} · {}", c.name)
+            };
+            body.push_str(&format!(
+                "{}. {} -- {} [{:.2}]\n",
+                i + 1,
+                where_part,
+                c.reason,
+                c.score
+            ));
+        }
+        if !body.is_empty() {
+            sections.push(Section::new("PRIMARY TARGETS", body, 10));
+        }
+    }
+
     // SYSTEM ROLE
     let purpose = ctx
         .store
@@ -2833,6 +2875,53 @@ mod tests {
             !thin.content.contains("EXACT SOURCE"),
             "dropped exact source must not remain in content: {}",
             thin.content
+        );
+    }
+
+    // #20: the behavior-owning file must appear within the first 10 output
+    // lines (benchmark: pydantic/fields.py at line 3,173 — good retrieval
+    // buried under architecture prose).
+    #[test]
+    // trace:v1 id=test.scc.context.primary-targets verifies=REQ-SI-503JSBGP exercises=impl.scc.context.fetch-handles
+    fn task_pack_puts_primary_targets_first() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let src = "def computed_field():\n    return 1\n";
+        std::fs::write(root.join("src/fields.py"), src).unwrap();
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let mut se = Entity::new(
+            scc_core::symbol_id(store.repo_id.as_str(), "src/fields.py", "computed_field"),
+            kinds::SYMBOL,
+            "computed_field",
+        );
+        se.attr("file", serde_json::json!("src/fields.py"));
+        store.insert_entity(&se, &["src/fields.py".into()]).unwrap();
+        let graph = scc_graph::RealityGraph::load(&store).unwrap();
+        let ctx = crate::ContextCompiler::new(
+            &store,
+            &graph,
+            crate::ContextSettings::default(),
+            Vec::new(),
+        );
+        let pack = task(&ctx, "computed field derived from model fields", &[], &[], 50_000);
+        let lines: Vec<&str> = pack.content.lines().collect();
+        let header = lines
+            .iter()
+            .position(|l| l.contains("PRIMARY TARGETS"))
+            .expect("PRIMARY TARGETS section must exist");
+        assert!(header < 10, "PRIMARY TARGETS must lead: header at line {header}");
+        let first_hit = lines
+            .iter()
+            .position(|l| l.contains("src/fields.py"))
+            .expect("behavior owner must be named");
+        assert!(
+            first_hit < 10,
+            "src/fields.py first appears at line {first_hit}, want < 10"
+        );
+        assert!(
+            first_hit >= header,
+            "owner must be inside PRIMARY TARGETS, not earlier prose"
         );
     }
 

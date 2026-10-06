@@ -1314,6 +1314,7 @@ fn hier_rel(parts: &[&str]) -> String {
 /// component list is untouched — services are extra entities of kind
 /// SERVICE with CONTAINS edges to their member component ids. Idempotent:
 /// stale SERVICE/SUBSYSTEM entities and hierarchy rels are cleared first.
+// trace:v1 id=impl.scc.graph.compile-services work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn compile_services(
     store: &Store,
     comps: &[scc_core::Entity],
@@ -1359,7 +1360,9 @@ pub fn compile_services(
         e.attr("members", json!(member_names));
         store.insert_entity(&e, &[])?;
         for m in members {
-            let target = scc_core::entity_id(repo, kinds::COMPONENT, &comps[*m].name);
+            // #19: same injective constructor as component entities —
+            // a legacy entity_id here would point at an id no component has.
+            let target = scc_core::component_id(repo, &comps[*m].name);
             let r = scc_core::Relationship::new(
                 hier_rel(&["hier_contains", &id, &target]),
                 id.clone(),

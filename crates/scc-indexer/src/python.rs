@@ -1220,6 +1220,7 @@ impl PythonExtractor {
         }
     }
 
+    // trace:v1 id=impl.scc.extract.python.process-decorator work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     fn process_decorator(
         &self,
         dec: Node,
@@ -1383,6 +1384,22 @@ impl PythonExtractor {
             return;
         };
         if !ROUTE_VERBS.contains(&verb) {
+            return;
+        }
+        // `@mock.patch(...)` / `@patch(...)` test doubles share the `patch`
+        // verb with HTTP PATCH. Two layers (either suffices alone, both are
+        // cheap): route emission requires a web-framework import — the same
+        // gate `annotation_allowed` applies — and a `patch` verb whose
+        // receiver is a known mock library (or a bare `patch`, which real
+        // Flask/FastAPI code never uses as a decorator) is never a route,
+        // even in a file that imports a web framework (#17).
+        if verb == "patch" {
+            let root = fname.split('.').next().unwrap_or("");
+            if matches!(root, "patch" | "mock" | "mocker" | "unittest") {
+                return;
+            }
+        }
+        if !ctx.has_framework("fastapi") && !ctx.has_framework("flask") {
             return;
         }
         let Some(path) = first_string_arg(expr, src) else {
@@ -2899,6 +2916,40 @@ mod tests {
         assert_eq!(routes[5].method, "PUT");
         assert_eq!(routes[5].path, "/y");
         assert_eq!(routes[5].handler.as_deref(), Some("y"));
+    }
+
+    // #17: `@mock.patch(...)` / `@patch(...)` test doubles share the `patch`
+    // verb with HTTP PATCH. They must not emit routes even when the file
+    // also imports a web framework (their test-method handlers became
+    // dangling `handles` subjects in mac_messages_mcp).
+    #[test]
+    // trace:v1 id=test.scc.extract.python.mock-patch-no-route verifies=REQ-SI-503JSBGP exercises=impl.scc.extract.python
+    fn mock_patch_decorators_emit_no_routes() {
+        let ef = extract(
+            "from unittest import mock\nfrom unittest.mock import patch\n\nclass TestMessages:\n    @mock.patch(\"subprocess.Popen\")\n    def test_run_ok(self):\n        pass\n\n    @patch(\"mac_messages_mcp.messages.query_messages_db\")\n    def test_query(self):\n        pass\n",
+        );
+        assert!(
+            ef.routes.is_empty(),
+            "mock.patch must not become a route: {:?}",
+            ef.routes
+        );
+        // same doubles, but the file also imports flask: the receiver check
+        // still refuses them (a bare/framework-gated test is not enough).
+        let efw = extract(
+            "from flask import Flask\nfrom unittest import mock\napp = Flask(__name__)\n\nclass TestMessages:\n    @mock.patch(\"subprocess.Popen\")\n    def test_run_ok(self):\n        pass\n",
+        );
+        assert!(
+            efw.routes.is_empty(),
+            "mock.patch beside flask import must not route: {:?}",
+            efw.routes
+        );
+        // and a real flask route in the same file shape still emits
+        let ef2 = extract(
+            "from flask import Flask\napp = Flask(__name__)\n\n@app.patch(\"/items\")\ndef update():\n    pass\n",
+        );
+        assert_eq!(ef2.routes.len(), 1);
+        assert_eq!(ef2.routes[0].method, "PATCH");
+        assert_eq!(ef2.routes[0].handler.as_deref(), Some("update"));
     }
 
     #[test]

@@ -1018,8 +1018,19 @@ pub fn compile_components_with_signals(
         .collect();
 
     let mut out: Vec<scc_core::Entity> = Vec::new();
+    // #19: component ids must be injective in the raw name. The constructor
+    // below makes a collision structurally impossible, but a loud assertion
+    // stays: if it ever fires, it names both raw names instead of surfacing
+    // as a bare SQLite UNIQUE failure three minutes into a cold index.
+    let mut seen_ids: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for name in comp_names {
-        let id = entity_id(repo_id, kinds::COMPONENT, &name);
+        let id = scc_core::component_id(repo_id, &name);
+        if let Some(prev) = seen_ids.insert(id.clone(), name.clone()) {
+            panic!(
+                "component id collision:\n  id: {id}\n  source name A: {prev}\n  source name B: {name}\n  origins: cluster names must differ in raw bytes"
+            );
+        }
         let mut e = scc_core::Entity::new(id.clone(), kinds::COMPONENT, name.clone());
 
         let mut resp: Vec<serde_json::Value> = Vec::new();
@@ -1305,7 +1316,7 @@ pub fn compile_components_with_signals(
         if let Some(deps) = e.attributes.get("depends_on").and_then(|v| v.as_array()) {
             for d in deps {
                 if let Some(t) = d.get("target").and_then(|v| v.as_str()) {
-                    let target_id = entity_id(repo_id, kinds::COMPONENT, t);
+                    let target_id = scc_core::component_id(repo_id, t);
                     let prov = parse_prov(
                         d.get("provenance")
                             .and_then(|v| v.as_str())

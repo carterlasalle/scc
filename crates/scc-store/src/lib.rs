@@ -3374,6 +3374,24 @@ mod tests {
     }
 
     #[test]
+    // trace:v1 id=test.scc-store-replace-components-colliding-names verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-core-src-lib.component-id
+    fn replace_components_accepts_sanitize_colliding_names() {
+        // #19 end-to-end: the two raw names that collapsed to one legacy id
+        // must coexist in the components table under injective ids.
+        let (s, _d) = tmp_store();
+        let mk = |raw: &str| {
+            let id = scc_core::component_id("r", raw);
+            scc_core::Entity::new(id, scc_core::kinds::COMPONENT, raw)
+        };
+        let comps = vec![mk("foo_bar"), mk("foo-bar")];
+        s.replace_components(&comps).unwrap();
+        let stored = s.components().unwrap();
+        assert_eq!(stored.len(), 2, "both components survive: {stored:?}");
+        let names: Vec<&str> = stored.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"foo_bar") && names.contains(&"foo-bar"));
+    }
+
+    #[test]
     // trace:exempt reason=internal-detail
     fn sweep_orphan_evidence_keeps_flow_and_component_references() {
         let (s, _d) = tmp_store();
