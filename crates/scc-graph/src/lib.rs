@@ -443,6 +443,11 @@ impl<'a> CompilationPipeline<'a> {
         // garbage-collect evidence that lost its last reference during the
         // rebuild (docs/DATA_STRATEGY.md §6)
         self.store.sweep_orphan_evidence()?;
+        // dangling-edge sweep: an edge whose endpoint has no entity (e.g. an
+        // import resolved to a path whose own write was skipped) would fail
+        // `scc check-invariants` forever. Same predicate as the checker, in
+        // the same pass that rebuilds the derived layer.
+        let _ = self.store.sweep_dangling_edges()?;
 
         Ok(RecompileReport {
             components: comps.len(),

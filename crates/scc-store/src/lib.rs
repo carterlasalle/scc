@@ -2305,6 +2305,65 @@ impl Store {
     /// because derived edges may briefly hold references during
     /// recompilation.
     // trace:exempt reason=internal-detail
+    /// Delete relationships whose subject or object is a dangling id
+    /// (mockingbird receipt: an import edge resolved to a file whose own
+    /// write was skipped leaves a `file/...` endpoint with no entity, and
+    /// `scc check-invariants` fails the whole run on it).
+    ///
+    /// The predicate is EXACTLY the complement of the invariant checker's
+    /// `known`: an endpoint is known when the entity exists or the id lives
+    /// in a namespace that is legitimate without one (external_api,
+    /// component, flow, invariant, route). Keeping the two in the same
+    /// shape means a swept graph can never report dangling and a reported
+    /// dangling can never be swept.
+    // trace:v1 id=impl.scc-store-sweep-dangling-edges work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+    pub fn sweep_dangling_edges(&self) -> Result<u64> {
+        let mut live: HashSet<String> = HashSet::new();
+        {
+            let mut stmt = self.conn.prepare("SELECT id FROM entities")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            for r in rows {
+                live.insert(r?);
+            }
+        }
+        let known = |id: &str| -> bool {
+            live.contains(id)
+                || id.contains("/external_api/")
+                || id.contains("/component/")
+                || id.contains("/flow/")
+                || id.contains("/invariant/")
+                || id.contains("/route/")
+        };
+        let mut doomed: Vec<String> = Vec::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id, subject, object FROM relationships")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?;
+            for r in rows {
+                let (id, subject, object) = r?;
+                if !known(&subject) || !known(&object) {
+                    doomed.push(id);
+                }
+            }
+        }
+        if doomed.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        for id in &doomed {
+            tx.execute("DELETE FROM relationships WHERE id = ?1", [id])?;
+        }
+        tx.commit()?;
+        Ok(doomed.len() as u64)
+    }
+
     pub fn sweep_orphan_evidence(&self) -> Result<u64> {
         // Set-based pass: collect every referenced evidence id ONCE (exact
         // id membership in the JSON arrays, no per-row LIKE scans), then
@@ -3250,6 +3309,68 @@ mod tests {
         assert_eq!(s.sweep_orphan_evidence().unwrap(), 1);
         assert!(s.get_evidence("evidence:ent").unwrap().is_none());
         assert!(s.get_evidence("evidence:rel").unwrap().is_some());
+    }
+
+    #[test]
+    // trace:v1 id=test.scc-store-sweep-dangling-edges verifies=REQ-SI-503JSBGP exercises=impl.scc-store-sweep-dangling-edges
+    fn sweep_dangling_edges_removes_only_endpointless_edges() {
+        // mockingbird receipt: an import resolved to a file whose write was
+        // skipped leaves a `file/...` object with no entity, failing
+        // check-invariants forever. The sweep drops exactly those edges and
+        // keeps edges into namespaces that are legitimate without entities.
+        let (s, _d) = tmp_store();
+        // Realistic fixture: the indexer writes the file entity with the
+        // symbol (absent here, the sweep would also (correctly) drop the
+        // file→symbol CONTAINS edge and prove nothing about imports).
+        let file_id = scc_core::entity_id("r", scc_core::kinds::FILE, "a.py");
+        s.insert_entity(
+            &Entity::new(file_id.clone(), scc_core::kinds::FILE, "a.py"),
+            &["a.py".into()],
+        )
+        .unwrap();
+        s.insert_symbol("a.py", "caller", "function", None, 1, 3, true, None)
+            .unwrap();
+        let caller = scc_core::symbol_id("r", "a.py", "caller");
+        // insert_symbol writes the table + FTS only; the entity is the
+        // indexer's job. Create it so only the import target is dangling.
+        s.insert_entity(
+            &Entity::new(caller.clone(), scc_core::kinds::SYMBOL, "caller"),
+            &["a.py".into()],
+        )
+        .unwrap();
+        let phantom = "repo://r/file/mockingbird/acquisition/ingest-dsp.py";
+        let external = "repo://r/external_api/argparse";
+        let dangling = Relationship::new(
+            "rel:dangling",
+            caller.clone(),
+            scc_core::predicates::IMPORTS,
+            phantom,
+            Provenance::Extracted,
+        );
+        s.insert_relationship(&dangling, "a.py").unwrap();
+        let kept = Relationship::new(
+            "rel:external",
+            caller,
+            scc_core::predicates::IMPORTS,
+            external,
+            Provenance::Extracted,
+        );
+        s.insert_relationship(&kept, "a.py").unwrap();
+        assert_eq!(s.sweep_dangling_edges().unwrap(), 1);
+        let ids: Vec<String> = s
+            .all_relationships()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert!(
+            !ids.contains(&"rel:dangling".to_string()),
+            "endpointless edge must be swept"
+        );
+        assert!(
+            ids.contains(&"rel:external".to_string()),
+            "external_api edges have no entity by design and must survive"
+        );
     }
 
     #[test]
