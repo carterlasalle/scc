@@ -768,10 +768,16 @@ pub fn cluster_components(
     for i in 0..n {
         clusters.entry(dsu.find(i)).or_default().push(i);
     }
+    // Cluster names must be unique: two DSU groups can share a natural
+    // name (spring-boot indexed `module` twice). Without this,
+    // `compile_components_with_signals` fails the cold index on the
+    // component-id uniqueness assertion (#19). The split pass below reuses
+    // the same helper.
     let mut comps: Vec<ClusterComponent> = clusters
         .values()
         .map(|members| build_cluster(&regions, members))
         .collect();
+    assign_unique_cluster_names(&mut comps);
     comps.sort_by(|a, b| a.name.cmp(&b.name));
 
     // ---- file/symbol maps over the clusters ----
@@ -1028,6 +1034,18 @@ fn dedup_cluster_name(
         n += 1;
     }
     format!("{base}~{n}")
+}
+
+/// Assign unique names across freshly built clusters, preserving order:
+/// the natural name wins when free, else `dedup_cluster_name` appends a
+/// counter (`module~2`). Deterministic: callers iterate a stable order.
+// trace:exempt reason=internal-detail
+fn assign_unique_cluster_names(comps: &mut [ClusterComponent]) {
+    let mut taken: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for c in comps.iter_mut() {
+        c.name = dedup_cluster_name(&taken, &c.name, &[]);
+        taken.insert(c.name.clone(), Vec::new());
+    }
 }
 
 /// Deterministic cluster name: the longest common directory prefix of the
@@ -1453,6 +1471,33 @@ mod tests {
     fn compile(store: &Store) -> Vec<Entity> {
         let graph = RealityGraph::load(store).unwrap();
         crate::components::compile_components(&graph, store, &[], &[]).unwrap()
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.graph.same-name-clusters-dedupe verifies=REQ-SI-503JSBGP exercises=impl.scc.graph.compile-services
+    fn same_name_clusters_in_different_trees_stay_distinct() {
+        // #19 (spring-boot cold index): two DSU groups naturally named
+        // `module` collapsed to one component id and panicked the
+        // uniqueness assertion (`module` vs `module`). The build loop now
+        // disambiguates: natural name wins, later duplicates take `~2`.
+        let mk = |name: &str| ClusterComponent {
+            name: name.to_string(),
+            dirs: Vec::new(),
+            boundary_kind: crate::components::BOUNDARY_CODE_REGION.to_string(),
+            layer: LAYER_COMPONENT.to_string(),
+            files: Vec::new(),
+            member_regions: Vec::new(),
+        };
+        let mut comps = vec![mk("module"), mk("module"), mk("other")];
+        assign_unique_cluster_names(&mut comps);
+        let names: Vec<&str> = comps.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["module", "module~2", "other"]);
+        // and the disambiguated names yield distinct injective ids
+        let ids: Vec<String> = names
+            .iter()
+            .map(|n| scc_core::component_id("r", n))
+            .collect();
+        assert_ne!(ids[0], ids[1]);
     }
 
     #[test]
