@@ -125,7 +125,7 @@ jobs:
         run: node npm/test-launcher.js
       - name: npm package manifests
         run: |
-          for pkg in cli cli-linux-x64 cli-darwin-arm64; do
+          for pkg in cli cli-linux-x64 cli-linux-arm64 cli-darwin-arm64; do
             (cd "npm/$pkg" && npm pack --dry-run > /dev/null && echo "npm/$pkg packs")
           done
           (cd plugins/omp/scc && npm pack --dry-run > /dev/null && echo "plugins/omp/scc packs")

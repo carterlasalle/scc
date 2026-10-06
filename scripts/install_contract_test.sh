@@ -29,7 +29,7 @@ SUMS="sha256-${TAG}-${PLATFORM}.txt"
 REAL_CURL=$(command -v curl || true)
 
 case "$PLATFORM" in
-    Linux-x86_64 | Darwin-arm64) ;;
+    Linux-x86_64 | Linux-arm64 | Darwin-arm64) ;;
     *)
         printf 'skip: no prebuilt asset for %s (the installer exits 3 there by design)\n' "$PLATFORM"
         exit 0

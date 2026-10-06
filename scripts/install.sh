@@ -5,7 +5,7 @@
 # Recommended: pin the release and verify the installer before running it.
 #
 #   V=0.2.6
-#   P=Linux-x86_64            # or Darwin-arm64
+#   P=Linux-x86_64            # or Linux-arm64 or Darwin-arm64
 #   B="https://github.com/carterlasalle/scc/releases/download/v${V}"
 #   curl -fsSLO "${B}/install.sh" -O "${B}/sha256-${V}-${P}.txt"
 #   shasum -a 256 -c "sha256-${V}-${P}.txt" --ignore-missing   # install.sh: OK
@@ -64,7 +64,7 @@ SCC (System Context Compiler) installer.
 Recommended — pin the release, verify the installer, then run it:
 
   V=0.2.6
-  P=Linux-x86_64            # or Darwin-arm64
+  P=Linux-x86_64            # or Linux-arm64 or Darwin-arm64
   B="https://github.com/carterlasalle/scc/releases/download/v${V}"
   curl -fsSLO "${B}/install.sh" -O "${B}/sha256-${V}-${P}.txt"
   shasum -a 256 -c "sha256-${V}-${P}.txt" --ignore-missing
@@ -83,7 +83,7 @@ Environment:
   SCC_GITHUB_TOKEN    optional token for the release lookup (never in argv)
   SCC_SKIP_CHECKSUM=1 install when no checksum entry exists (not recommended)
 
-Published platforms: Linux-x86_64, Darwin-arm64. Other platforms build from
+Published platforms: Linux-x86_64, Linux-arm64, Darwin-arm64. Other platforms build from
 source (see docs/INSTALL.md).
 EOF
     exit 0
@@ -199,10 +199,10 @@ detect_platform() {
     esac
     PLATFORM="${OS}-${ARCH}"
     case "$PLATFORM" in
-        Linux-x86_64 | Darwin-arm64) ;;
+        Linux-x86_64 | Linux-arm64 | Darwin-arm64) ;;
         *)
             printf 'scc installer: no prebuilt binary is published for %s.\n\n' "$PLATFORM" >&2
-            printf 'Published platforms: Linux-x86_64, Darwin-arm64.\n' >&2
+            printf 'Published platforms: Linux-x86_64, Linux-arm64, Darwin-arm64.\n' >&2
             printf 'Build from source instead:\n\n' >&2
             printf '  git clone %s.git\n  cd scc\n  cargo build --release -p scc-cli\n  install -m 755 target/release/scc ~/.local/bin/scc\n\n' "$GITHUB" >&2
             exit 3

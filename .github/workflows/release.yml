@@ -51,7 +51,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # ubuntu-24.04-arm (ARM64, GitHub-hosted) produces the Linux-arm64
+        # binary for Jetson Orin / Ampere / Raspberry Pi hosts. ubuntu-latest
+        # stays x86_64; macos-latest (arm64) covers Darwin-arm64.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -139,8 +142,9 @@ jobs:
         run: |
           tag="${VERSION#v}"
           install -D -m 755 "dist/scc-${tag}-Linux-x86_64" npm/cli-linux-x64/bin/scc
+          install -D -m 755 "dist/scc-${tag}-Linux-aarch64" npm/cli-linux-arm64/bin/scc
           install -D -m 755 "dist/scc-${tag}-Darwin-arm64" npm/cli-darwin-arm64/bin/scc
-          ls -l npm/cli-linux-x64/bin/scc npm/cli-darwin-arm64/bin/scc
+          ls -l npm/cli-linux-x64/bin/scc npm/cli-linux-arm64/bin/scc npm/cli-darwin-arm64/bin/scc
       - name: Smoke the staged binary and the launcher
         run: |
           ./npm/cli-linux-x64/bin/scc --version
@@ -149,7 +153,7 @@ jobs:
         run: ./npm/stamp-version.sh "${VERSION#v}"
       - name: Publish the platform packages
         run: |
-          for pkg in cli-linux-x64 cli-darwin-arm64; do
+          for pkg in cli-linux-x64 cli-linux-arm64 cli-darwin-arm64; do
             echo "==> publishing @carterlasalle/scc-${pkg#cli-}"
             (cd "npm/$pkg" && npm publish --access public --provenance)
           done

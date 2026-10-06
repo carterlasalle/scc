@@ -17,6 +17,7 @@ const { spawn } = require("node:child_process");
 // trace:exempt reason=const-data
 const PLATFORM_PACKAGES = {
   "linux-x64": "@carterlasalle/scc-linux-x64",
+  "linux-arm64": "@carterlasalle/scc-linux-arm64",
   "darwin-arm64": "@carterlasalle/scc-darwin-arm64",
 };
 

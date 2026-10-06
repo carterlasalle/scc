@@ -23,7 +23,9 @@ const { spawnSync } = require("node:child_process");
 const repo = path.resolve(__dirname, "..");
 const launcherSource = path.join(repo, "npm", "cli", "bin", "scc.js");
 // trace:exempt reason=const-data
-const platformName = `@carterlasalle/scc-${process.platform === "darwin" ? "darwin-arm64" : "linux-x64"}`;
+const platformName = process.platform === "darwin"
+  ? `@carterlasalle/scc-darwin-arm64`
+  : `@carterlasalle/scc-linux-${process.arch === "arm64" ? "arm64" : "x64"}`;
 
 // trace:exempt reason=const-data
 let failures = 0;
