@@ -528,13 +528,19 @@ fn ident_after_keyword(line: &str, keyword: &str) -> Option<String> {
     }
 }
 
-/// First non-heading paragraph of the README as repository purpose.
+/// First meaningful prose paragraph of the README as repository purpose.
+///
+/// README furniture — headings, images, HTML, badge/link-only rows, tables,
+/// rule lines, bare URLs, and install commands — is dropped rather than
+/// concatenated into the purpose (a PyPI badge URL must never consume agent
+/// context). Collection stops at the first paragraph break, so install/usage
+/// prose below the intro never lands in the startup pack. Capped at 500 chars.
 pub fn readme_purpose(content: &str) -> Option<String> {
     let mut in_code = false;
-    let mut paragraphs: Vec<String> = Vec::new();
+    let mut paragraph: Vec<&str> = Vec::new();
     for line in content.lines() {
         let t = line.trim();
-        if t.starts_with("```") {
+        if t.starts_with("```") || t.starts_with("~~~") {
             in_code = !in_code;
             continue;
         }
@@ -542,30 +548,127 @@ pub fn readme_purpose(content: &str) -> Option<String> {
             continue;
         }
         if t.is_empty() {
-            if let Some(last) = paragraphs.last() {
-                if !last.is_empty() {
-                    paragraphs.push(String::new());
-                }
+            if !paragraph.is_empty() {
+                break; // first meaningful paragraph only
             }
             continue;
         }
-        if t.starts_with('#') || t.starts_with("![]") || t.starts_with("<img") {
+        if is_readme_furniture(t) {
             continue;
         }
-        if paragraphs.is_empty() || paragraphs.last().map(|p| p.is_empty()).unwrap_or(false) {
-            paragraphs.push(t.to_string());
-        } else {
-            let last = paragraphs.last_mut().unwrap();
-            last.push(' ');
-            last.push_str(t);
-        }
+        paragraph.push(t);
     }
-    let joined = paragraphs.join("\n");
+    let joined = paragraph.join(" ");
     let joined = joined.trim();
     if joined.is_empty() {
         return None;
     }
-    Some(joined.chars().take(600).collect())
+    Some(joined.chars().take(500).collect())
+}
+
+/// A README line that is presentation, not purpose.
+fn is_readme_furniture(t: &str) -> bool {
+    if t.starts_with('#')
+        || t.starts_with('<')
+        || t.starts_with('|')
+        || t.starts_with("---")
+        || t.starts_with("===")
+        || t.starts_with("http://")
+        || t.starts_with("https://")
+    {
+        return true;
+    }
+    if is_link_only(t) || is_link_only(t.strip_prefix("- ").unwrap_or(t)) {
+        return true;
+    }
+    let lower = t.to_ascii_lowercase();
+    const COMMANDS: [&str; 9] = [
+        "npm install",
+        "npm i ",
+        "yarn add",
+        "pnpm add",
+        "pip install",
+        "cargo install",
+        "brew install",
+        "docker run",
+        "$ ",
+    ];
+    COMMANDS.iter().any(|c| lower.starts_with(c))
+}
+
+/// True when the whole line is one or more markdown images/links (with an
+/// optional leading `!`) separated by whitespace — badge rows and link-only
+/// lines.
+fn is_link_only(t: &str) -> bool {
+    let mut rest = t;
+    let mut any = false;
+    loop {
+        let r = rest.trim_start();
+        if r.is_empty() {
+            return any;
+        }
+        match markdown_link_span(r) {
+            Some(n) => {
+                rest = &r[n..];
+                any = true;
+            }
+            None => return false,
+        }
+    }
+}
+
+/// Byte length of a leading markdown image/link span (`[..](..)` or
+/// `![..](..)`), handling nested brackets (`[![alt](img)](url)`). `None` when
+/// the text does not start with one.
+fn markdown_link_span(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() && b[i] == b'!' {
+        i += 1;
+    }
+    if i >= b.len() || b[i] != b'[' {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut j = i;
+    while j < b.len() {
+        match b[j] {
+            b'[' => depth += 1,
+            b']' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    if depth != 0 || j + 1 >= b.len() || b[j + 1] != b'(' {
+        return None;
+    }
+    let mut k = j + 2;
+    let mut parens = 0usize;
+    while k < b.len() {
+        match b[k] {
+            b'(' => parens += 1,
+            b')' => {
+                if parens == 0 {
+                    break;
+                }
+                parens -= 1;
+            }
+            _ => {}
+        }
+        k += 1;
+    }
+    if k >= b.len() || b[k] != b')' {
+        return None;
+    }
+    Some(k + 1)
 }
 
 /// Materialize intent.yaml into DECLARED entities/claims consumed by the
@@ -775,6 +878,14 @@ flows:
         let purpose = readme_purpose(content).unwrap();
         assert!(purpose.contains("processes radio audio"));
         assert!(!purpose.contains("## Install"));
+    }
+
+    #[test]
+    // trace:exempt reason:unit-test
+    fn readme_purpose_strips_furniture() {
+        let content = "# Project\n\n[![PyPI](https://img.shields.io/pypi/v/x.svg)](https://pypi.org/project/x/)\n[![CI](https://github.com/a/b/actions/workflows/ci.yml/badge.svg)](https://github.com/a/b/actions)\n\nUse Claude, Codex and other agents.\n\n## Install\n\nnpm install thing\n";
+        let purpose = readme_purpose(content).unwrap();
+        assert_eq!(purpose, "Use Claude, Codex and other agents.");
     }
 
     #[test]

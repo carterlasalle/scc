@@ -676,7 +676,7 @@ fn git_ignore_rules(root: &Path, paths: &[String]) -> std::collections::HashMap<
 // trace:v1 id=impl.crates-scc-indexer-src-scan.explain-scan work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 pub fn explain_scan(root: &Path, config: &IndexConfig) -> Result<ScanExplanation, ScanError> {
     // C2: compile ignore globs once (regex build per pattern), not per file.
-    let matchers = compile_matchers_with_names(&config.ignore);
+    let matchers = compile_matchers_with_names(&config.effective_ignore());
     let mut exp = ScanExplanation::default();
     let mut builder = WalkBuilder::new(root);
     builder
@@ -808,7 +808,7 @@ mod tests {
     fn precompiled_matcher_agrees_with_per_file() {
         // C2: the hoisted matcher must agree with the compiling-per-file
         // predecessor on every default ignore across representative paths.
-        let ignore = IndexConfig::default().ignore;
+        let ignore = IndexConfig::default().effective_ignore();
         let matchers = compile_matchers_with_names(&ignore);
         let paths = [
             "node_modules/a/index.js",
@@ -942,6 +942,7 @@ mod tests {
             ignore: vec!["vendor/**".into(), "generated/**".into()],
             watch: true,
             auto_resolve: false,
+            ..Default::default()
         };
         assert!(is_ignored("vendor/foo/bar.py", &cfg));
         assert!(is_ignored("generated/x.ts", &cfg));
@@ -993,6 +994,7 @@ mod tests {
             ignore: vec!["**/.*".into()],
             watch: true,
             auto_resolve: false,
+            ..Default::default()
         };
         let files = scan_repo(root, &cfg).unwrap();
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
@@ -1003,11 +1005,15 @@ mod tests {
             ignore: vec!["docs/**".into()],
             watch: true,
             auto_resolve: false,
+            ..Default::default()
         };
         let files2 = scan_repo(root, &cfg2).unwrap();
         let paths2: Vec<&str> = files2.iter().map(|f| f.path.as_str()).collect();
         assert!(paths2.contains(&"src/main.py"), "got {paths2:?}");
-        assert!(!paths2.iter().any(|p| p.starts_with("docs/")), "got {paths2:?}");
+        assert!(
+            !paths2.iter().any(|p| p.starts_with("docs/")),
+            "got {paths2:?}"
+        );
     }
 
     #[test]
@@ -1024,15 +1030,27 @@ mod tests {
             ignore: vec!["vendor/**".into()],
             watch: true,
             auto_resolve: false,
+            ..Default::default()
         };
-        assert_eq!(matching_ignore_pattern("vendor/dep.py", &cfg.ignore), Some("vendor/**"));
+        assert_eq!(
+            matching_ignore_pattern("vendor/dep.py", &cfg.ignore),
+            Some("vendor/**")
+        );
         assert_eq!(matching_ignore_pattern("src/main.py", &cfg.ignore), None);
         let exp = explain_scan(root, &cfg).unwrap();
         assert!(exp.indexed.iter().any(|f| f.path == "src/main.py"));
-        let v = exp.skipped.iter().find(|s| s.path == "vendor/dep.py").expect("vendor skipped");
+        let v = exp
+            .skipped
+            .iter()
+            .find(|s| s.path == "vendor/dep.py")
+            .expect("vendor skipped");
         assert_eq!(v.reason, "ignored");
         assert_eq!(v.rule.as_deref(), Some("vendor/**"));
-        let u = exp.skipped.iter().find(|s| s.path == "notes.xyz").expect("xyz skipped");
+        let u = exp
+            .skipped
+            .iter()
+            .find(|s| s.path == "notes.xyz")
+            .expect("xyz skipped");
         assert_eq!(u.reason, "unsupported");
     }
 

@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+Benchmark-recovery items from #21. Availability, retrieval placement, and
+noise-model fixes — no new features.
+
+- **Component clustering scaling.** The greedy merge (`scc-graph`) no longer
+  recomputes each cluster pair's linkage from the full `n x n` region matrix
+  on every iteration (O(n^5)); each cluster pair keeps its `(max, sum, count)`
+  aggregate, a merge folds the children's aggregates in O(n), and viable
+  candidates live in a deterministic max-heap. Selection, cohesion
+  acceptance, and tie-break are unchanged — proven by an equivalence test
+  against the predecessor on randomized matrices, plus an n=1200 scaling
+  guard.
+- **Config ignores inherit builtins.** `index.ignore` now ADDS to the builtin
+  ignore set instead of replacing it, so a `.scc/config.yaml` written before
+  new builtins existed (`.omp/**`, `.claude/**`, …) no longer freezes the old
+  policy. `index.ignore_remove` opts a single builtin back in;
+  `index.ignore_builtin: false` restores the legacy exact-list behavior. The
+  generated config no longer serializes the builtin list.
+- **Atlas export scope.** An `EXPORT` entity carries no `file`, so its
+  production role now comes from the exporting symbol: test-owned exports no
+  longer leak into production-scoped `CONTRACTS`.
+- **README purpose hygiene.** Startup purpose strips badges, images, HTML,
+  tables, link-only rows, bare URLs, and install commands, takes the first
+  meaningful paragraph only, and caps at 500 chars.
+- **Python public API.** Module-level `test_*` functions are no longer
+  emitted as `PublicExport` (they are already `TEST` entities).
+
 ## [0.2.11] — 2026-10-06
 
 Hook-path latency fixes (the 53.8% post-edit timeout rate).

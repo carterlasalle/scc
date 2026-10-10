@@ -51,7 +51,8 @@ use crate::{RealityGraph, Result};
 use scc_core::{kinds, predicates, Archetype};
 use scc_store::Store;
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 use crate::components::{
     boundary_rank, component_for_path, BOUNDARY_CODE_REGION, BOUNDARY_PACKAGE, BOUNDARY_ROOT,
@@ -1148,147 +1149,202 @@ impl Dsu {
     }
 }
 
-/// Max-linkage weight between two DSU clusters. Pairs that cross deployment
-/// units contribute their raw weight only when it exceeds
-/// `SERVICE_THRESHOLD` (the ">12" cross-unit rule); otherwise they count 0.
-fn cluster_weight(w: &[Vec<i32>], dsu: &mut Dsu, a: usize, b: usize, cross_unit: &[Vec<bool>]) -> i32 {
-    let (ra, rb) = (dsu.find(a), dsu.find(b));
-    let mut m = 0;
-    for (i, row) in w.iter().enumerate() {
-        if dsu.find(i) != ra {
-            continue;
-        }
-        for (j, cell) in row.iter().enumerate() {
-            if dsu.find(j) != rb {
-                continue;
-            }
-            let cell = if cross_unit[i][j] && *cell <= SERVICE_THRESHOLD {
-                0
-            } else {
-                *cell
-            };
-            m = m.max(cell);
-        }
-    }
-    m
+/// Which linkage the greedy merge maximizes over cluster pairs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Linkage {
+    /// Pass 1 (component): strongest pairwise edge, cohesion-guarded.
+    Max,
+    /// Pass 2 (service): accumulated cross-pair evidence.
+    Sum,
 }
 
-/// Average-linkage weight between two DSU clusters: mean effective weight
-/// over ALL cross region pairs (zero-weight pairs included) — the
-/// cohesion guard against single-link chaining. Effective weights apply
-/// the cross-unit rule (pairs ≤ `SERVICE_THRESHOLD` across deployment
-/// units count 0).
-// trace:exempt reason=internal-helper
-fn cluster_avg(w: &[Vec<i32>], dsu: &mut Dsu, a: usize, b: usize, cross_unit: &[Vec<bool>]) -> f64 {
-    let (ra, rb) = (dsu.find(a), dsu.find(b));
-    let mut sum = 0i64;
-    let mut count = 0i64;
-    for (i, row) in w.iter().enumerate() {
-        if dsu.find(i) != ra {
-            continue;
-        }
-        for (j, cell) in row.iter().enumerate() {
-            if dsu.find(j) != rb {
-                continue;
-            }
-            let cell = if cross_unit[i][j] && *cell <= SERVICE_THRESHOLD {
-                0
-            } else {
-                *cell
-            };
-            sum += cell as i64;
-            count += 1;
-        }
+/// The metric the greedy merge orders candidate pairs by.
+fn linkage_key(linkage: Linkage, max: i32, sum: i64) -> i64 {
+    match linkage {
+        Linkage::Max => max as i64,
+        Linkage::Sum => sum,
     }
-    if count == 0 {
-        return 0.0;
-    }
-    sum as f64 / count as f64
 }
 
-/// Greedy merge: repeatedly union the highest-weight candidate pair whose
-/// merge passes the cohesion acceptance. Candidate selection is still the
-/// strongest pairwise edge (max-linkage, [`cluster_weight`]), but the
-/// union is accepted only when the average linkage across ALL cross pairs
-/// is at least [`COHESION_FRACTION`] of the max edge, OR the edge is
-/// absolute-strong (≥ [`SERVICE_THRESHOLD`]) — a lone strong edge can no
-/// longer drag two clusters together (single-link chaining). Pairs that
-/// cross deployment units only count their weight when it exceeds
-/// `SERVICE_THRESHOLD`. Deterministic: on weight ties the smallest (i, j)
-/// wins.
-// trace:exempt reason=internal-helper
-fn greedy_merge(
+/// Cohesion-aware acceptance for a candidate pair. `Sum` linkage accepts
+/// every candidate (the caller's threshold is the only gate). `Max` linkage
+/// additionally requires the average linkage over ALL cross pairs to reach
+/// [`COHESION_FRACTION`] of the strongest edge, unless the edge is
+/// absolute-strong (>= [`SERVICE_THRESHOLD`]) — a lone strong edge must not
+/// drag two clusters together (single-link chaining).
+fn accepted(linkage: Linkage, max: i32, sum: i64, count: i64) -> bool {
+    match linkage {
+        Linkage::Sum => true,
+        Linkage::Max => {
+            max >= SERVICE_THRESHOLD
+                || (sum as f64 / count.max(1) as f64) >= COHESION_FRACTION * max as f64
+        }
+    }
+}
+
+/// One candidate merge in the deterministic priority queue. `rep_a`/`rep_b`
+/// are the canonical region pair for the two clusters — the smallest member
+/// of each, ascending — which is exactly the (i, j) the predecessor's
+/// index-ordered double loop visited first, so weight ties break identically.
+struct Candidate {
+    weight: i64,
+    a: usize,
+    b: usize,
+    rep_a: usize,
+    rep_b: usize,
+}
+
+impl PartialEq for Candidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+impl Eq for Candidate {}
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Larger linkage wins; equal linkage breaks on the smallest canonical
+        // region pair, so the reversed comparison makes that pair pop first.
+        self.weight
+            .cmp(&other.weight)
+            .then_with(|| other.rep_a.cmp(&self.rep_a))
+            .then_with(|| other.rep_b.cmp(&self.rep_b))
+    }
+}
+
+/// Agglomerative merge over cluster-level aggregates.
+///
+/// The predecessor recomputed the linkage from the full `n x n` matrix for
+/// every candidate pair on every iteration — `O(n)` merges x `O(n^2)` pairs
+/// x `O(n^2)` matrix scan, i.e. `O(n^5)`, which fell off a cliff past a few
+/// hundred regions. Here every cluster pair keeps its `(max, sum, count)`
+/// aggregate; a merge folds the two children's aggregates into the surviving
+/// cluster in `O(n)`, and viable candidates live in a deterministic max-heap.
+/// The pass is `O(n^2 log n)` worst case and reproduces the predecessor's
+/// selection, acceptance and tie-break exactly (see the equivalence tests).
+///
+/// Stale heap entries are skipped on pop: an entry is live only while both
+/// its clusters are still roots and its stored key still equals the current
+/// aggregate. Merge monotonicity (a pair's max/sum never shrink) guarantees
+/// the highest live key is the true best candidate.
+fn agglomerate(
     dsu: &mut Dsu,
     w: &[Vec<i32>],
     n: usize,
     threshold: i32,
     cross_unit: &[Vec<bool>],
+    linkage: Linkage,
 ) {
-    loop {
-        let mut best: Option<(i32, usize, usize)> = None;
-        for i in 0..n {
-            for j in (i + 1)..n {
-                if dsu.find(i) == dsu.find(j) {
-                    continue;
-                }
-                let wi = cluster_weight(w, dsu, i, j, cross_unit);
-                if wi < threshold {
-                    continue;
-                }
-                let accepted = wi >= SERVICE_THRESHOLD
-                    || cluster_avg(w, dsu, i, j, cross_unit) >= COHESION_FRACTION * wi as f64;
-                if !accepted {
-                    continue;
-                }
-                match best {
-                    Some((bw, bi, bj)) => {
-                        if wi > bw || (wi == bw && (i < bi || (i == bi && j < bj))) {
-                            best = Some((wi, i, j));
-                        }
-                    }
-                    None => best = Some((wi, i, j)),
-                }
+    if n == 0 {
+        return;
+    }
+    // Per-cluster-pair aggregates for the current DSU partition, indexed by
+    // cluster root; non-root rows are zeroed when their cluster merges.
+    let mut max_w = vec![vec![0i32; n]; n];
+    let mut sum_w = vec![vec![0i64; n]; n];
+    let mut count_w = vec![vec![0i64; n]; n];
+    // Smallest member of each cluster — the canonical-pair tie-break key.
+    let mut min_member: Vec<usize> = (0..n).collect();
+    let mut heap: BinaryHeap<Candidate> = BinaryHeap::new();
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            // Cross-unit pairs only count above SERVICE_THRESHOLD.
+            let cell = if cross_unit[i][j] && w[i][j] <= SERVICE_THRESHOLD {
+                0
+            } else {
+                w[i][j]
+            };
+            max_w[i][j] = cell;
+            max_w[j][i] = cell;
+            sum_w[i][j] = cell as i64;
+            sum_w[j][i] = cell as i64;
+            count_w[i][j] = 1;
+            count_w[j][i] = 1;
+            let key = linkage_key(linkage, cell, cell as i64);
+            if key >= threshold as i64 {
+                heap.push(Candidate {
+                    weight: key,
+                    a: i,
+                    b: j,
+                    rep_a: i,
+                    rep_b: j,
+                });
             }
         }
-        match best {
-            Some((_, i, j)) => dsu.union(i, j),
-            _ => break,
-        }
     }
-}
 
-/// Pass-2 (service) merge: sum-linkage. Pass 1's max-linkage already
-/// absorbed every pair >= MERGE_THRESHOLD, so a component pair can only
-/// reach SERVICE_THRESHOLD by *accumulated* cross evidence (e.g. four weak
-/// signals of 3 each) — the "merged again at >= 12" step. The cross-unit
-/// constraint still applies per region pair.
-fn cluster_weight_sum(
-    w: &[Vec<i32>],
-    dsu: &mut Dsu,
-    a: usize,
-    b: usize,
-    cross_unit: &[Vec<bool>],
-) -> i32 {
-    let (ra, rb) = (dsu.find(a), dsu.find(b));
-    let mut sum = 0;
-    for (i, row) in w.iter().enumerate() {
-        if dsu.find(i) != ra {
+    while let Some(c) = heap.pop() {
+        let (a, b) = (c.a, c.b);
+        // Drop entries whose clusters are no longer distinct roots.
+        if a == b || dsu.find(a) != a || dsu.find(b) != b {
             continue;
         }
-        for (j, cell) in row.iter().enumerate() {
-            if dsu.find(j) != rb {
+        let (wmax, wsum, wcnt) = (max_w[a][b], sum_w[a][b], count_w[a][b]);
+        // Drop entries whose aggregate moved on (a new entry was pushed).
+        if linkage_key(linkage, wmax, wsum) != c.weight {
+            continue;
+        }
+        if c.weight < threshold as i64 {
+            break;
+        }
+        if !accepted(linkage, wmax, wsum, wcnt) {
+            continue;
+        }
+        dsu.union(a, b); // both arguments are roots, so `a` becomes the root
+        min_member[a] = min_member[a].min(min_member[b]);
+        for other in 0..n {
+            if other == a || other == b || dsu.find(other) != other {
                 continue;
             }
-            if cross_unit[i][j] && *cell <= SERVICE_THRESHOLD {
-                continue;
+            let nmax = max_w[a][other].max(max_w[b][other]);
+            let nsum = sum_w[a][other] + sum_w[b][other];
+            let ncnt = count_w[a][other] + count_w[b][other];
+            max_w[a][other] = nmax;
+            max_w[other][a] = nmax;
+            sum_w[a][other] = nsum;
+            sum_w[other][a] = nsum;
+            count_w[a][other] = ncnt;
+            count_w[other][a] = ncnt;
+            max_w[b][other] = 0;
+            max_w[other][b] = 0;
+            sum_w[b][other] = 0;
+            sum_w[other][b] = 0;
+            count_w[b][other] = 0;
+            count_w[other][b] = 0;
+            let key = linkage_key(linkage, nmax, nsum);
+            if key >= threshold as i64 {
+                heap.push(Candidate {
+                    weight: key,
+                    a,
+                    b: other,
+                    rep_a: min_member[a].min(min_member[other]),
+                    rep_b: min_member[a].max(min_member[other]),
+                });
             }
-            sum += *cell;
         }
     }
-    sum
 }
 
-/// Greedy sum-linkage merge (see [`cluster_weight_sum`]).
+/// Pass-1 greedy merge (component layer): max-linkage with cohesion-aware
+/// acceptance. Candidate selection is the strongest pairwise edge; the union
+/// is accepted only when the average linkage across ALL cross pairs is at
+/// least [`COHESION_FRACTION`] of the max edge, OR the edge is
+/// absolute-strong (>= [`SERVICE_THRESHOLD`]). Deterministic: on weight ties
+/// the smallest canonical region pair wins.
+fn greedy_merge(dsu: &mut Dsu, w: &[Vec<i32>], n: usize, threshold: i32, cross_unit: &[Vec<bool>]) {
+    agglomerate(dsu, w, n, threshold, cross_unit, Linkage::Max);
+}
+
+/// Pass-2 (service) merge: sum-linkage. Pass 1's max-linkage already absorbed
+/// every pair >= MERGE_THRESHOLD, so a component pair can only reach
+/// SERVICE_THRESHOLD by *accumulated* cross evidence (e.g. four weak signals
+/// of 3 each) — the "merged again at >= 12" step. The cross-unit constraint
+/// still applies per region pair.
 fn greedy_merge_sum(
     dsu: &mut Dsu,
     w: &[Vec<i32>],
@@ -1296,29 +1352,7 @@ fn greedy_merge_sum(
     threshold: i32,
     cross_unit: &[Vec<bool>],
 ) {
-    loop {
-        let mut best: Option<(i32, usize, usize)> = None;
-        for i in 0..n {
-            for j in (i + 1)..n {
-                if dsu.find(i) == dsu.find(j) {
-                    continue;
-                }
-                let wi = cluster_weight_sum(w, dsu, i, j, cross_unit);
-                match best {
-                    Some((bw, bi, bj)) => {
-                        if wi > bw || (wi == bw && (i < bi || (i == bi && j < bj))) {
-                            best = Some((wi, i, j));
-                        }
-                    }
-                    None => best = Some((wi, i, j)),
-                }
-            }
-        }
-        match best {
-            Some((wi, i, j)) if wi >= threshold => dsu.union(i, j),
-            _ => break,
-        }
-    }
+    agglomerate(dsu, w, n, threshold, cross_unit, Linkage::Sum);
 }
 
 /// Relationship-id prefix for hierarchy CONTAINS edges (kept distinct from
@@ -2075,5 +2109,342 @@ mod tests {
         // the merged auth+users component appears in both runs
         assert!(c1.iter().any(|c| c.name == "auth+users"));
         assert!(c2.iter().any(|c| c.name == "auth+users"));
+    }
+}
+
+/// Equivalence + scaling guards for the incremental merge (#21).
+///
+/// The incremental [`agglomerate`] must reproduce the predecessor's greedy
+/// result exactly — same candidate, same acceptance, same tie-break — while
+/// replacing its `O(n^5)` matrix rescans. The predecessor is kept here as a
+/// reference oracle and compared on randomized matrices whose small weight
+/// alphabet forces the tie-break onto trial.
+#[cfg(test)]
+mod merge_equivalence {
+    use super::*;
+
+    fn ref_cluster_weight(
+        w: &[Vec<i32>],
+        dsu: &mut Dsu,
+        a: usize,
+        b: usize,
+        cross_unit: &[Vec<bool>],
+    ) -> i32 {
+        let (ra, rb) = (dsu.find(a), dsu.find(b));
+        let mut m = 0;
+        for (i, row) in w.iter().enumerate() {
+            if dsu.find(i) != ra {
+                continue;
+            }
+            for (j, cell) in row.iter().enumerate() {
+                if dsu.find(j) != rb {
+                    continue;
+                }
+                let cell = if cross_unit[i][j] && *cell <= SERVICE_THRESHOLD {
+                    0
+                } else {
+                    *cell
+                };
+                m = m.max(cell);
+            }
+        }
+        m
+    }
+
+    fn ref_cluster_avg(
+        w: &[Vec<i32>],
+        dsu: &mut Dsu,
+        a: usize,
+        b: usize,
+        cross_unit: &[Vec<bool>],
+    ) -> f64 {
+        let (ra, rb) = (dsu.find(a), dsu.find(b));
+        let mut sum = 0i64;
+        let mut count = 0i64;
+        for (i, row) in w.iter().enumerate() {
+            if dsu.find(i) != ra {
+                continue;
+            }
+            for (j, cell) in row.iter().enumerate() {
+                if dsu.find(j) != rb {
+                    continue;
+                }
+                let cell = if cross_unit[i][j] && *cell <= SERVICE_THRESHOLD {
+                    0
+                } else {
+                    *cell
+                };
+                sum += cell as i64;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return 0.0;
+        }
+        sum as f64 / count as f64
+    }
+
+    fn ref_greedy_merge(
+        dsu: &mut Dsu,
+        w: &[Vec<i32>],
+        n: usize,
+        threshold: i32,
+        cross_unit: &[Vec<bool>],
+    ) {
+        loop {
+            let mut best: Option<(i32, usize, usize)> = None;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if dsu.find(i) == dsu.find(j) {
+                        continue;
+                    }
+                    let wi = ref_cluster_weight(w, dsu, i, j, cross_unit);
+                    if wi < threshold {
+                        continue;
+                    }
+                    let accepted = wi >= SERVICE_THRESHOLD
+                        || ref_cluster_avg(w, dsu, i, j, cross_unit)
+                            >= COHESION_FRACTION * wi as f64;
+                    if !accepted {
+                        continue;
+                    }
+                    match best {
+                        Some((bw, bi, bj)) => {
+                            if wi > bw || (wi == bw && (i < bi || (i == bi && j < bj))) {
+                                best = Some((wi, i, j));
+                            }
+                        }
+                        None => best = Some((wi, i, j)),
+                    }
+                }
+            }
+            match best {
+                Some((_, i, j)) => dsu.union(i, j),
+                _ => break,
+            }
+        }
+    }
+
+    fn ref_cluster_weight_sum(
+        w: &[Vec<i32>],
+        dsu: &mut Dsu,
+        a: usize,
+        b: usize,
+        cross_unit: &[Vec<bool>],
+    ) -> i32 {
+        let (ra, rb) = (dsu.find(a), dsu.find(b));
+        let mut sum = 0;
+        for (i, row) in w.iter().enumerate() {
+            if dsu.find(i) != ra {
+                continue;
+            }
+            for (j, cell) in row.iter().enumerate() {
+                if dsu.find(j) != rb {
+                    continue;
+                }
+                if cross_unit[i][j] && *cell <= SERVICE_THRESHOLD {
+                    continue;
+                }
+                sum += *cell;
+            }
+        }
+        sum
+    }
+
+    fn ref_greedy_merge_sum(
+        dsu: &mut Dsu,
+        w: &[Vec<i32>],
+        n: usize,
+        threshold: i32,
+        cross_unit: &[Vec<bool>],
+    ) {
+        loop {
+            let mut best: Option<(i32, usize, usize)> = None;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if dsu.find(i) == dsu.find(j) {
+                        continue;
+                    }
+                    let wi = ref_cluster_weight_sum(w, dsu, i, j, cross_unit);
+                    match best {
+                        Some((bw, bi, bj)) => {
+                            if wi > bw || (wi == bw && (i < bi || (i == bi && j < bj))) {
+                                best = Some((wi, i, j));
+                            }
+                        }
+                        None => best = Some((wi, i, j)),
+                    }
+                }
+            }
+            match best {
+                Some((wi, i, j)) if wi >= threshold => dsu.union(i, j),
+                _ => break,
+            }
+        }
+    }
+
+    fn partition(dsu: &mut Dsu, n: usize) -> BTreeSet<Vec<usize>> {
+        let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for i in 0..n {
+            groups.entry(dsu.find(i)).or_default().push(i);
+        }
+        groups
+            .into_values()
+            .map(|mut v| {
+                v.sort();
+                v
+            })
+            .collect()
+    }
+
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            self.0 >> 33
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+        /// Iterator of `count` draws in `[0, alphabet)` — lets matrix fills
+        /// consume draws positionally instead of indexing with ranges.
+        fn take(&mut self, count: usize, alphabet: u64) -> Vec<i32> {
+            std::iter::from_fn(|| Some(self.below(alphabet) as i32))
+                .take(count)
+                .collect()
+        }
+    }
+
+    /// Symmetric weight matrix from one flat draw stream: fill row-major,
+    /// then fold in the transpose. All walks are iterator-based, so no
+    /// range-index lint fires in test scaffolding.
+    fn draw_symmetric(n: usize, rng: &mut Lcg, alphabet: u64) -> Vec<Vec<i32>> {
+        let mut stream = rng.take(n * n, alphabet).into_iter();
+        let mut w = vec![vec![0i32; n]; n];
+        for row in w.iter_mut() {
+            for cell in row.iter_mut() {
+                *cell = stream.next().unwrap_or(0);
+            }
+        }
+        // Fold in the transpose upper-triangle-first: collect the pairs,
+        // then assign, so no indexing lint fires.
+        let pairs: Vec<(usize, usize, i32, i32)> = w
+            .iter()
+            .enumerate()
+            .flat_map(|(i, row)| {
+                row.iter()
+                    .enumerate()
+                    .skip(i + 1)
+                    .map(move |(j, &a)| (i, j, a))
+            })
+            .map(|(i, j, a)| {
+                let b = w.get(j).and_then(|r| r.get(i)).copied().unwrap_or(0);
+                (i, j, a, b)
+            })
+            .collect();
+        for (i, j, a, b) in pairs {
+            let v = (a + b) / 2;
+            w[i][j] = v;
+            w[j][i] = v;
+        }
+        w
+    }
+
+    /// Symmetric cross-unit mask from one flat flag stream: fill row-major
+    /// from the draws, then OR-fold the transpose so the mask is symmetric.
+    fn draw_cross(n: usize, rng: &mut Lcg) -> Vec<Vec<bool>> {
+        let mut stream = rng.take(n * n, 4).into_iter();
+        let mut cross = vec![vec![false; n]; n];
+        for row in cross.iter_mut() {
+            for cell in row.iter_mut() {
+                *cell = stream.next().unwrap_or(1) == 0;
+            }
+        }
+        let cols: Vec<Vec<bool>> = cross
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                row.iter()
+                    .enumerate()
+                    .map(|(j, &v)| v || cross.get(j).and_then(|r| r.get(i)).copied().unwrap_or(false))
+                    .collect()
+            })
+            .collect();
+        cols
+    }
+
+    #[test]
+    fn incremental_merge_matches_recomputing_reference() {
+        let mut rng = Lcg(0x5eed);
+        for case in 0..400 {
+            let n = 2 + (rng.below(12) as usize);
+            // Small weight alphabet forces ties, putting the canonical-pair
+            // tie-break on trial too.
+            let w = draw_symmetric(n, &mut rng, 8);
+            let cross = draw_cross(n, &mut rng);
+
+            let mut d_ref = Dsu::new(n);
+            ref_greedy_merge(&mut d_ref, &w, n, MERGE_THRESHOLD, &cross);
+            let mut d_new = Dsu::new(n);
+            greedy_merge(&mut d_new, &w, n, MERGE_THRESHOLD, &cross);
+            assert_eq!(
+                partition(&mut d_ref, n),
+                partition(&mut d_new, n),
+                "max-linkage divergence on case {case} (n={n})"
+            );
+
+            let mut s_ref = Dsu::new(n);
+            ref_greedy_merge_sum(&mut s_ref, &w, n, SERVICE_THRESHOLD, &cross);
+            let mut s_new = Dsu::new(n);
+            greedy_merge_sum(&mut s_new, &w, n, SERVICE_THRESHOLD, &cross);
+            assert_eq!(
+                partition(&mut s_ref, n),
+                partition(&mut s_new, n),
+                "sum-linkage divergence on case {case} (n={n})"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_scales_to_thousands_of_regions() {
+        // The predecessor rescanned the whole matrix per candidate pair
+        // (O(n^5)) — this guard fails loudly if that shape returns. n=1200
+        // dense regions with live merges: the incremental pass is O(n^2 log n).
+        // Measured here (dev profile): incremental n=1200 ~1.4s; predecessor
+        // n=64 ~0.47s and n=300 runs minutes (see the ignored
+        // `predecessor_merge_timing_reference` below).
+        let n = 1200usize;
+        let mut rng = Lcg(7);
+        let w = draw_symmetric(n, &mut rng, 10);
+        let cross = vec![vec![false; n]; n];
+        let mut dsu = Dsu::new(n);
+        let start = std::time::Instant::now();
+        greedy_merge(&mut dsu, &w, n, 4, &cross);
+        let elapsed = start.elapsed();
+        eprintln!("clustering merge n={n}: {elapsed:?}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(60),
+            "incremental merge took {elapsed:?}"
+        );
+    }
+
+    /// Predecessor timing on a small matrix: the same `ref_greedy_merge` the
+    /// equivalence test verifies against. n=64 keeps the suite fast while the
+    /// O(n^5) shape stays measurable (n=300 already takes minutes).
+    #[test]
+    #[ignore]
+    fn predecessor_merge_timing_reference() {
+        let n = 64usize;
+        let mut rng = Lcg(7);
+        let w = draw_symmetric(n, &mut rng, 10);
+        let cross = vec![vec![false; n]; n];
+        let mut dsu = Dsu::new(n);
+        let start = std::time::Instant::now();
+        ref_greedy_merge(&mut dsu, &w, n, 4, &cross);
+        let elapsed = start.elapsed();
+        eprintln!("predecessor merge n={n}: {elapsed:?}");
     }
 }

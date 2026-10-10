@@ -37,7 +37,15 @@ pub struct RepositoryConfig {
 #[serde(default)]
 // trace:exempt reason=internal-detail
 pub struct IndexConfig {
+    /// Additional ignore patterns, layered on top of the builtin set (see
+    /// [`builtin_ignore`]) unless `ignore_builtin` is false.
     pub ignore: Vec<String>,
+    /// Patterns dropped from the builtin set — the opt-back-in knob for
+    /// harness/build dirs the builtin policy ignores (e.g. `.omp/**`).
+    pub ignore_remove: Vec<String>,
+    /// Apply the builtin ignore set. Default true; false restores the legacy
+    /// exact-list behavior where `ignore` is the whole set.
+    pub ignore_builtin: bool,
     pub watch: bool,
     /// Run the language-aware semantic backends (pyright, tsserver) after
     /// every index, before the derived layer compiles (Wave 4 §24).
@@ -212,95 +220,106 @@ impl Default for IndexConfig {
     // trace:exempt reason=internal-detail
     fn default() -> Self {
         IndexConfig {
-            ignore: vec![
-                ".git/**".into(),
-                ".bughunt/**".into(),
-                ".bugcorpus/**".into(),
-                // Agent-harness dirs: per-invocation config, not product
-                // code. Explicit list, NOT blanket `.*` — `.github/`
-                // (CI), `.vscode/` (debug), `.env*`, `.gitignore` stay
-                // indexed. Opt back in per-repo via `index.ignore` removal
-                // in .scc/config.yaml.
-                ".omp/**".into(),
-                ".claude/**".into(),
-                ".agents/**".into(),
-                ".codex/**".into(),
-                ".cursor/**".into(),
-                ".windsurf/**".into(),
-                ".opencode/**".into(),
-                ".hermes/**".into(),
-                ".pi/**".into(),
-                "vendor/**".into(),
-                "generated/**".into(),
-                // JS/TS (github/gitignore Node): deps, caches, builds.
-                "node_modules/**".into(),
-                "bower_components/**".into(),
-                ".npm/**".into(),
-                ".yarn/**".into(),
-                ".pnpm-store/**".into(),
-                ".next/**".into(),
-                ".nuxt/**".into(),
-                ".parcel-cache/**".into(),
-                ".turbo/**".into(),
-                ".svelte-kit/**".into(),
-                ".astro/**".into(),
-                ".docusaurus/**".into(),
-                "*.tsbuildinfo".into(),
-                "*.tgz".into(),
-                // Python (github/gitignore Python): bytecode, venvs,
-                // packaging, test caches. NOTE: `uv.lock`/`*.lock` stay
-                // indexed elsewhere; lockfiles are dependency facts.
-                "__pycache__/**".into(),
-                "*.py[codz]".into(),
-                ".venv/**".into(),
-                "venv/**".into(),
-                "env/**".into(),
-                ".tox/**".into(),
-                ".nox/**".into(),
-                ".pytest_cache/**".into(),
-                ".hypothesis/**".into(),
-                ".mypy_cache/**".into(),
-                ".ruff_cache/**".into(),
-                "*.egg-info/**".into(),
-                ".eggs/**".into(),
-                ".ipynb_checkpoints/**".into(),
-                // Rust (github/gitignore Rust): build output, backups.
-                "target/**".into(),
-                "debug/**".into(),
-                "**/*.rs.bk".into(),
-                "*.pdb".into(),
-                // Go (github/gitignore Go): binaries, test artifacts.
-                "*.exe".into(),
-                "*.test".into(),
-                "*.out".into(),
-                "coverage.*".into(),
-                // Java (github/gitignore Java): compiled + packages.
-                "*.class".into(),
-                "*.jar".into(),
-                "*.war".into(),
-                "*.ear".into(),
-                // OS (github/gitignore Global/macOS): Finder/Spotlight.
-                "**/.DS_Store".into(),
-                "**/._*".into(),
-                "**/.Spotlight-V100".into(),
-                "**/.Trashes".into(),
-                "Thumbs.db".into(),
-                "**/Thumbs.db".into(),
-                // Builds, bundles, maps, coverage, caches.
-                "dist/**".into(),
-                "build/**".into(),
-                "out/**".into(),
-                "coverage/**".into(),
-                "*.lcov".into(),
-                ".cache/**".into(),
-                "*.min.js".into(),
-                "*.map".into(),
-                "*.log".into(),
-            ],
+            ignore: Vec::new(),
+            ignore_remove: Vec::new(),
+            ignore_builtin: true,
             watch: true,
             auto_resolve: false,
         }
     }
+}
+
+/// Builtin ignore patterns: VCS internals, agent-harness dirs, dependency and
+/// build trees, caches, and OS metadata. Applied on top of (not instead of)
+/// `index.ignore` unless `index.ignore_builtin: false`; `index.ignore_remove`
+/// opts an individual builtin back in. Kept out of the serialized default so a
+/// stored config never freezes the builtin policy of the day (#21).
+pub fn builtin_ignore() -> Vec<String> {
+    vec![
+        ".git/**".into(),
+        ".bughunt/**".into(),
+        ".bugcorpus/**".into(),
+        // Agent-harness dirs: per-invocation config, not product
+        // code. Explicit list, NOT blanket `.*` — `.github/`
+        // (CI), `.vscode/` (debug), `.env*`, `.gitignore` stay
+        // indexed. Opt back in per-repo via `index.ignore_remove`
+        // in .scc/config.yaml.
+        ".omp/**".into(),
+        ".claude/**".into(),
+        ".agents/**".into(),
+        ".codex/**".into(),
+        ".cursor/**".into(),
+        ".windsurf/**".into(),
+        ".opencode/**".into(),
+        ".hermes/**".into(),
+        ".pi/**".into(),
+        "vendor/**".into(),
+        "generated/**".into(),
+        // JS/TS (github/gitignore Node): deps, caches, builds.
+        "node_modules/**".into(),
+        "bower_components/**".into(),
+        ".npm/**".into(),
+        ".yarn/**".into(),
+        ".pnpm-store/**".into(),
+        ".next/**".into(),
+        ".nuxt/**".into(),
+        ".parcel-cache/**".into(),
+        ".turbo/**".into(),
+        ".svelte-kit/**".into(),
+        ".astro/**".into(),
+        ".docusaurus/**".into(),
+        "*.tsbuildinfo".into(),
+        "*.tgz".into(),
+        // Python (github/gitignore Python): bytecode, venvs,
+        // packaging, test caches. NOTE: `uv.lock`/`*.lock` stay
+        // indexed elsewhere; lockfiles are dependency facts.
+        "__pycache__/**".into(),
+        "*.py[codz]".into(),
+        ".venv/**".into(),
+        "venv/**".into(),
+        "env/**".into(),
+        ".tox/**".into(),
+        ".nox/**".into(),
+        ".pytest_cache/**".into(),
+        ".hypothesis/**".into(),
+        ".mypy_cache/**".into(),
+        ".ruff_cache/**".into(),
+        "*.egg-info/**".into(),
+        ".eggs/**".into(),
+        ".ipynb_checkpoints/**".into(),
+        // Rust (github/gitignore Rust): build output, backups.
+        "target/**".into(),
+        "debug/**".into(),
+        "**/*.rs.bk".into(),
+        "*.pdb".into(),
+        // Go (github/gitignore Go): binaries, test artifacts.
+        "*.exe".into(),
+        "*.test".into(),
+        "*.out".into(),
+        "coverage.*".into(),
+        // Java (github/gitignore Java): compiled + packages.
+        "*.class".into(),
+        "*.jar".into(),
+        "*.war".into(),
+        "*.ear".into(),
+        // OS (github/gitignore Global/macOS): Finder/Spotlight.
+        "**/.DS_Store".into(),
+        "**/._*".into(),
+        "**/.Spotlight-V100".into(),
+        "**/.Trashes".into(),
+        "Thumbs.db".into(),
+        "**/Thumbs.db".into(),
+        // Builds, bundles, maps, coverage, caches.
+        "dist/**".into(),
+        "build/**".into(),
+        "out/**".into(),
+        "coverage/**".into(),
+        "*.lcov".into(),
+        ".cache/**".into(),
+        "*.min.js".into(),
+        "*.map".into(),
+        "*.log".into(),
+    ]
 }
 
 // trace:exempt reason=internal-detail
@@ -417,9 +436,28 @@ impl Config {
 
 // trace:exempt reason=internal-detail
 impl IndexConfig {
+    /// Effective ignore patterns: builtins (unless `ignore_builtin` is
+    /// false), minus `ignore_remove`, plus `ignore` — order-preserving and
+    /// deduped. A stored config's `ignore` is an addition, never a snapshot of
+    /// the builtin policy at the time it was written (#21).
+    pub fn effective_ignore(&self) -> Vec<String> {
+        let mut out: Vec<String> = if self.ignore_builtin {
+            builtin_ignore()
+        } else {
+            Vec::new()
+        };
+        let removed: std::collections::HashSet<&str> =
+            self.ignore_remove.iter().map(String::as_str).collect();
+        out.retain(|p| !removed.contains(p.as_str()));
+        out.extend(self.ignore.iter().cloned());
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        out.retain(|p| seen.insert(p.clone()));
+        out
+    }
+
     // trace:exempt reason=internal-detail
     pub fn compile_ignore(&self) -> Vec<GlobMatcher> {
-        self.ignore
+        self.effective_ignore()
             .iter()
             .filter_map(|p| Glob::new(p).ok().map(|g| g.compile_matcher()))
             .collect()
@@ -438,7 +476,7 @@ mod tests {
         let back: Config = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(back.context.task_tokens, 10000);
         assert_eq!(back.security.listen, "127.0.0.1:7777");
-        assert!(back.index.ignore.len() >= 5);
+        assert!(back.index.effective_ignore().len() >= 5);
         assert!(!back.context.snap_enabled, "snap bitmap stays default-off");
     }
 
@@ -463,5 +501,33 @@ security:
         let cfg: Config = serde_yaml::from_str(text).unwrap();
         assert_eq!(cfg.index.ignore, vec!["vendor/**"]);
         assert_eq!(cfg.context.startup_tokens, 6000);
+    }
+
+    #[test]
+    fn stored_ignore_inherits_builtins_and_opts_out() {
+        // #21: a config written before new builtins existed must not freeze
+        // the old policy — `ignore` is additive on the builtin set.
+        let cfg: Config =
+            serde_yaml::from_str("schema: 1\nindex:\n  ignore:\n    - vendor/**\n").unwrap();
+        let eff = cfg.index.effective_ignore();
+        assert!(
+            eff.iter().any(|p| p == ".omp/**"),
+            "new builtins apply: {eff:?}"
+        );
+        // `ignore_remove` opts a single builtin back in.
+        let removed: Config = serde_yaml::from_str("index:\n  ignore_remove: [.omp/**]\n").unwrap();
+        assert!(!removed
+            .index
+            .effective_ignore()
+            .iter()
+            .any(|p| p == ".omp/**"));
+        // `ignore_builtin: false` restores the legacy exact-list behavior.
+        let legacy: Config =
+            serde_yaml::from_str("index:\n  ignore_builtin: false\n  ignore: [vendor/**]\n")
+                .unwrap();
+        assert_eq!(
+            legacy.index.effective_ignore(),
+            vec!["vendor/**".to_string()]
+        );
     }
 }

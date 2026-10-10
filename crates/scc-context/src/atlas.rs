@@ -37,10 +37,9 @@ pub enum AtlasScope {
 
 /// Repository role of one entity: its `file` attribute (routes, symbols,
 /// contracts carry it), else its handler symbol's file, else a manifest
-/// pointer (`dockerfile`). Entities without any placement evidence are
-/// production — never drop facts we cannot place.
-// trace:exempt reason=internal-detail
-fn entity_role(view: &TrustedGraphView, e: &scc_core::Entity) -> &'static str {
+/// pointer (`dockerfile`). `None` when the entity carries no placement
+/// evidence at all; a placed production path yields `Some("production")`.
+fn placed_role(view: &TrustedGraphView, e: &scc_core::Entity) -> Option<&'static str> {
     let file: Option<String> = e
         .attributes
         .get("file")
@@ -65,8 +64,14 @@ fn entity_role(view: &TrustedGraphView, e: &scc_core::Entity) -> &'static str {
                 .map(String::from)
         });
     file.as_deref()
-        .and_then(scc_graph::components::path_role)
-        .unwrap_or("production")
+        .map(|f| scc_graph::components::path_role(f).unwrap_or("production"))
+}
+
+/// Entities without any placement evidence are production — never drop facts
+/// we cannot place.
+// trace:exempt reason=internal-detail
+fn entity_role(view: &TrustedGraphView, e: &scc_core::Entity) -> &'static str {
+    placed_role(view, e).unwrap_or("production")
 }
 
 /// Role of an entity id (`production` when unknown — see [`entity_role`]).
@@ -728,14 +733,23 @@ pub fn build_atlas_scoped(ctx: &ContextCompiler, scope: AtlasScope) -> SystemAtl
     // The EXPORT entity's symbol is the EXPORTS edge subject; consumers are
     // the symbols that call it.
     for e in view.entities_of_kind(scc_core::kinds::EXPORT) {
-        if scope == AtlasScope::Production && entity_role(view, e) != "production" {
-            let sym_prod = view
+        // #21: an EXPORT entity carries only `kind`, so `entity_role` used to
+        // default it to production and the producer's path was consulted only
+        // when the export itself was already non-production — leaking
+        // test-owned exports into CONTRACTS. The exporting symbol is the
+        // placement authority; the export's own placement (when present) still
+        // wins, then production when neither is placeable.
+        if scope == AtlasScope::Production {
+            let producer_role = view
                 .in_pred(&e.id, scc_core::predicates::EXPORTS)
                 .into_iter()
                 .next()
-                .map(|r| entity_id_role(view, &r.subject) == "production")
-                .unwrap_or(true);
-            if !sym_prod {
+                .and_then(|r| view.entity(&r.subject))
+                .and_then(|s| placed_role(view, s));
+            let role = placed_role(view, e)
+                .or(producer_role)
+                .unwrap_or("production");
+            if role != "production" {
                 *scoped_out.entry("contracts".into()).or_default() += 1;
                 continue;
             }
@@ -3575,6 +3589,70 @@ mod tests {
         assert!(
             pipeline.iter().any(|l| l == "[parse]"),
             "stage header: {pipeline:?}"
+        );
+    }
+
+    #[test]
+    // trace:exempt reason:internal-detail
+    fn export_role_follows_producer_symbol() {
+        // #21: an EXPORT entity carries no `file`, so its Atlas role must come
+        // from the exporting symbol — a test-file export must not leak into the
+        // production-scoped public-api contracts.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let repo = store.repo_id.clone();
+
+        let mk_export = |path: &str, sym: &str| {
+            let sid = symbol_id(&repo, path, sym);
+            let mut s = Entity::new(sid.clone(), kinds::SYMBOL, sym);
+            s.attr("kind", serde_json::json!("function"));
+            // The write path sets `file` on every symbol entity; the test
+            // producer must carry its real placement for the role check.
+            s.attr("file", serde_json::json!(path));
+            store.insert_entity(&s, &[path.to_string()]).unwrap();
+            // EXPORT entity deliberately carries no `file` attribute — the
+            // write path only sets `kind`.
+            let eid = entity_id(&repo, kinds::EXPORT, sym);
+            let mut ex = Entity::new(eid.clone(), kinds::EXPORT, sym);
+            ex.attr("kind", serde_json::json!("function"));
+            store.insert_entity(&ex, &[path.to_string()]).unwrap();
+            store
+                .insert_relationship(
+                    &Relationship::new(
+                        format!("rel:exports:{path}:{sym}"),
+                        sid,
+                        predicates::EXPORTS,
+                        eid,
+                        Provenance::Extracted,
+                    ),
+                    path,
+                )
+                .unwrap();
+        };
+        mk_export("api/app.py", "serve");
+        mk_export("tests/test_app.py", "test_serve");
+
+        let graph = scc_graph::RealityGraph::load(&store).unwrap();
+        let ctx = ContextCompiler::new(
+            &store,
+            &graph,
+            crate::ContextSettings::default(),
+            Vec::new(),
+        );
+        let atlas = build_atlas(&ctx);
+
+        let ops: Vec<&str> = atlas
+            .contracts
+            .iter()
+            .filter(|c| c.kind == "public-api")
+            .flat_map(|c| c.operations.iter().map(String::as_str))
+            .collect();
+        assert!(ops.contains(&"serve"), "production export kept: {ops:?}");
+        assert!(
+            !ops.contains(&"test_serve"),
+            "test export filtered: {ops:?}"
         );
     }
 }

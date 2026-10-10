@@ -1,11 +1,16 @@
 # trace:v1 id=doc.scc-config-example work=WORK-SI-MMMJA4G6 documents=REQ-SI-503JSBGP
 schema: 1
 index:
+  # Builtin ignores (VCS internals, agent-harness dirs, dependency/build
+  # trees, caches, OS metadata) always apply. `ignore` ADDS to them.
   ignore:
     - vendor/**
     - generated/**
-    - node_modules/**
-    - .git/**
+  # Drop a builtin so it is indexed again:
+  # ignore_remove:
+  #   - .omp/**
+  # Replace the builtin set entirely (legacy behavior):
+  # ignore_builtin: false
   watch: true
 languages:
   typescript: true
