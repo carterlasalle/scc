@@ -1092,8 +1092,9 @@ impl PythonExtractor {
             docstring: doc,
             parent,
         });
-        // public API surface: module-level defs not starting with `_`
-        if exported && !name.starts_with('_') {
+        // public API surface: module-level defs not starting with `_`.
+        // Pytest-style tests are `ctx.tests`, not API surface (#21).
+        if exported && !name.starts_with('_') && !name.starts_with("test_") {
             ctx.facts.push(SemanticFact::PublicExport {
                 symbol: sym_name.clone(),
                 kind: "function".to_string(),
