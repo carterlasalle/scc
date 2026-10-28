@@ -67,7 +67,7 @@ enum QueryOutcome {
 }
 
 /// JSON-RPC/LSP client driving one typescript-language-server process.
-// trace:v1 id=impl.crates-scc-indexer-src-lsp-ts.ts-lsp-resolver work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:v1 id=impl.crates-scc-indexer-src-lsp-ts.ts-lsp-resolver
 pub struct TsLspResolver {
     child: Option<Child>,
     writer: Box<dyn Write + Send>,
@@ -77,6 +77,8 @@ pub struct TsLspResolver {
     /// Absolute workspace root (cwd of the server, `file://` prefix base).
     workspace: PathBuf,
     ts_version: String,
+    /// Absolute `tsserver.js` to pass as `initializationOptions.tsserver.path`.
+    tsserver_path: Option<PathBuf>,
     opened: HashSet<String>,
     stderr_join: Option<JoinHandle<()>>,
     /// Cold-start budget: retries left while the configured TS project may
@@ -99,15 +101,201 @@ impl Drop for TsLspResolver {
 // server lifecycle
 // ---------------------------------------------------------------------------
 
+/// Directory components the server searches (relative to the workspace root,
+/// walking up through parents) for a workspace TypeScript. Mirrors
+/// `MODULE_FOLDERS` in `typescript-language-server` (`lib/cli.mjs`).
+const WORKSPACE_TS_LIB_FOLDERS: &[&str] = &[
+    "node_modules/typescript/lib",
+    ".vscode/pnpify/typescript/lib",
+    ".yarn/sdks/typescript/lib",
+    ".pnpm/sdks/typescript/lib",
+];
+
 /// Version of the installed `typescript-language-server` (`X.Y.Z`), or `None`
 /// when the binary is absent.
 pub fn tsserver_version() -> Option<String> {
-    if let Ok(out) = Command::new("typescript-language-server").arg("--version").output() {
+    if let Ok(out) = Command::new("typescript-language-server")
+        .arg("--version")
+        .output()
+    {
         if out.status.success() {
             return parse_version(&String::from_utf8_lossy(&out.stdout));
         }
     }
     None
+}
+
+/// Read the `version` field of the `package.json` one directory above a
+/// `typescript/lib` folder, or `None` when unreadable. Used for status text.
+fn workspace_typescript_version(lib_dir: &Path) -> Option<String> {
+    let pkg = lib_dir.parent()?.join("package.json");
+    let text = std::fs::read_to_string(pkg).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v.get("version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+/// Locate a usable TypeScript `tsserver.js` for `workspace_root`, mirroring
+/// the server's own lookup order (`LspServer::findTypescriptVersion`):
+///
+/// 1. `SCC_TSSERVER_PATH` (a `tsserver.js` file, or a dir resolved to
+///    `<dir>/tsserver.js` / `<dir>/lib/tsserver.js`),
+/// 2. a workspace TypeScript (each `WORKSPACE_TS_LIB_FOLDERS` candidate,
+///    walking up through parents, whose `tsserver.js` exists),
+/// 3. a TypeScript next to the server binary (the server's
+///    `bundledVersion()`: `require("typescript")` relative to `cli.mjs`).
+///
+/// Returns the absolute `tsserver.js` path plus a source label
+/// (`"SCC_TSSERVER_PATH"`, `"workspace"`, or `"bundled"`). `None` means the
+/// server would fail `initialize` with "Could not find a valid TypeScript
+/// installation".
+pub fn find_typescript_server(workspace_root: &Path) -> Option<(PathBuf, &'static str)> {
+    if let Some(p) = typescript_server_from_env() {
+        return Some((p, "SCC_TSSERVER_PATH"));
+    }
+    if let Some(p) = workspace_typescript_server(workspace_root) {
+        return Some((p, "workspace"));
+    }
+    if let Some(p) = bundled_typescript_server() {
+        return Some((p, "bundled"));
+    }
+    None
+}
+
+/// The `SCC_TSSERVER_PATH` override: a `tsserver.js` file directly, or a
+/// directory resolved to `<dir>/tsserver.js` / `<dir>/lib/tsserver.js`.
+fn typescript_server_from_env() -> Option<PathBuf> {
+    let raw = std::env::var_os("SCC_TSSERVER_PATH")?;
+    if raw.is_empty() {
+        return None;
+    }
+    let p = PathBuf::from(raw);
+    [
+        p.clone(),
+        p.join("tsserver.js"),
+        p.join("lib").join("tsserver.js"),
+    ]
+    .into_iter()
+    .find(|cand| cand.is_file())
+}
+
+/// The server's workspace lookup: for each ancestor dir (innermost first),
+/// the first `WORKSPACE_TS_LIB_FOLDERS` candidate whose `tsserver.js` exists
+/// wins. A `lib/` without `tsserver.js` (e.g. TypeScript 7) does not poison
+/// siblings; only a `lib/` that itself holds `tsserver.js` is selected.
+fn workspace_typescript_server(workspace_root: &Path) -> Option<PathBuf> {
+    let mut dir: Option<&Path> = Some(workspace_root);
+    while let Some(d) = dir {
+        for folder in WORKSPACE_TS_LIB_FOLDERS {
+            let tsserver = d.join(folder).join("tsserver.js");
+            if tsserver.is_file() {
+                return Some(tsserver);
+            }
+        }
+        dir = d.parent();
+    }
+    None
+}
+
+/// The server's `bundledVersion()`: nearest `node_modules/typescript` walking
+/// up from the real `cli.mjs` behind the `typescript-language-server`
+/// binary, then `<pkg>/lib/tsserver.js`.
+fn bundled_typescript_server() -> Option<PathBuf> {
+    let cli = bundled_server_cli()?;
+    let dir = cli.parent()?;
+    let mut cur: Option<&Path> = Some(dir);
+    while let Some(d) = cur {
+        let tsserver = d
+            .join("node_modules")
+            .join("typescript")
+            .join("lib")
+            .join("tsserver.js");
+        if tsserver.is_file() {
+            return Some(tsserver);
+        }
+        cur = d.parent();
+    }
+    None
+}
+
+/// Locate the real `cli.mjs` behind the `typescript-language-server` binary
+/// on PATH (resolving symlinks, e.g. `.../.bin/typescript-language-server`
+/// -> `../typescript-language-server/lib/cli.mjs`).
+fn bundled_server_cli() -> Option<PathBuf> {
+    let bin = std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|d| d.join("typescript-language-server"))
+        .find(|p| p.is_file())?;
+    let resolved = std::fs::canonicalize(&bin).unwrap_or(bin);
+    if resolved
+        .extension()
+        .is_some_and(|e| e == "mjs" || e == "js")
+    {
+        return Some(resolved);
+    }
+    let dir = resolved.parent()?;
+    [
+        dir.join("..")
+            .join("typescript-language-server")
+            .join("lib")
+            .join("cli.mjs"),
+        dir.join("cli.mjs"),
+    ]
+    .into_iter()
+    .find(|cand| cand.is_file())
+}
+
+/// Human-readable TypeScript status for one workspace: the version the
+/// server would use (with its source), or why none is usable. Used by
+/// `scc doctor` so the `lsp-tsserver` row reports what `--resolve` needs,
+/// not only whether the binary exists.
+pub fn typescript_status(workspace_root: &Path) -> String {
+    match find_typescript_server(workspace_root) {
+        Some((path, source)) => {
+            let version = path
+                .parent()
+                .and_then(workspace_typescript_version)
+                .map(|v| format!("TypeScript {v}"))
+                .unwrap_or_else(|| "TypeScript".to_string());
+            format!("{version} ({source}) at \"{}\"", path.display())
+        }
+        None => match unusable_workspace_typescript(workspace_root) {
+            Some(desc) => format!(
+                "{desc} provides no tsserver.js; install a TypeScript with tsserver.js \
+                 (npm i -D typescript@5) or set SCC_TSSERVER_PATH"
+            ),
+            None => "no TypeScript found (workspace, SCC_TSSERVER_PATH, or server-bundled) — \
+                     install with: npm install -g typescript-language-server typescript"
+                .to_string(),
+        },
+    }
+}
+
+/// Describe workspace TypeScript installs that exist but provide no
+/// `tsserver.js` (e.g. TypeScript 7). The server's
+/// `describeUnusableWorkspaceVersions` equivalent.
+fn unusable_workspace_typescript(workspace_root: &Path) -> Option<String> {
+    let mut descs: Vec<String> = Vec::new();
+    let mut dir: Option<&Path> = Some(workspace_root);
+    while let Some(d) = dir {
+        for folder in WORKSPACE_TS_LIB_FOLDERS {
+            let lib = d.join(folder);
+            if lib.is_dir() && !lib.join("tsserver.js").is_file() {
+                match workspace_typescript_version(&lib) {
+                    Some(v) => descs.push(format!("TypeScript {v} at \"{}\"", lib.display())),
+                    None => descs.push(format!("TypeScript at \"{}\"", lib.display())),
+                }
+            }
+        }
+        dir = d.parent();
+    }
+    if descs.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "The TypeScript of the workspace ({})",
+        descs.join(", ")
+    ))
 }
 
 fn parse_version(text: &str) -> Option<String> {
@@ -128,8 +316,20 @@ pub fn start_tsserver(workspace_root: &Path) -> Result<TsLspResolver, String> {
         "tsserver not found — install with: npm install -g typescript-language-server typescript"
             .to_string()
     })?;
-    let workspace = std::fs::canonicalize(workspace_root)
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let workspace =
+        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+    let (tsserver_path, _source) = find_typescript_server(&workspace).ok_or_else(|| {
+        match unusable_workspace_typescript(&workspace) {
+            Some(desc) => format!(
+                "{desc} provides no tsserver.js; no other valid TypeScript installation was found \
+                 — install a TypeScript with tsserver.js (npm i -D typescript@5) or set \
+                 SCC_TSSERVER_PATH to a tsserver.js"
+            ),
+            None => "Could not find a valid TypeScript installation — install with: npm install -g \
+                     typescript-language-server typescript, or set SCC_TSSERVER_PATH to a tsserver.js"
+                .to_string(),
+        }
+    })?;
 
     let mut cmd = Command::new("typescript-language-server");
     cmd.arg("--stdio")
@@ -156,6 +356,7 @@ pub fn start_tsserver(workspace_root: &Path) -> Result<TsLspResolver, String> {
         Box::new(stdout),
         Box::new(stdin),
         Some(child),
+        Some(tsserver_path),
     )?;
     resolver.stderr_join = Some(stderr_join);
     Ok(resolver)
@@ -165,12 +366,15 @@ pub fn start_tsserver(workspace_root: &Path) -> Result<TsLspResolver, String> {
 impl TsLspResolver {
     /// Build a resolver over arbitrary reader/writer transports and run the
     /// initialize handshake. `child` is optional (killed on drop).
+    /// `tsserver_path` becomes `initializationOptions.tsserver.path`; `None`
+    /// (unit tests over a mock server) sends no `initializationOptions`.
     fn with_io(
         workspace: &Path,
         version: String,
         reader: Box<dyn Read + Send>,
         writer: Box<dyn Write + Send>,
         child: Option<Child>,
+        tsserver_path: Option<PathBuf>,
     ) -> Result<Self, String> {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
@@ -203,6 +407,7 @@ impl TsLspResolver {
             next_id: 1,
             workspace: workspace.to_path_buf(),
             ts_version: version,
+            tsserver_path,
             opened: HashSet::new(),
             stderr_join: None,
             cold_retries: 5,
@@ -284,16 +489,17 @@ impl TsLspResolver {
 
     fn initialize(&mut self) -> Result<(), String> {
         let root_uri = format!("file://{}", self.workspace.display());
-        let resp = self.request(
-            "initialize",
-            json!({
-                "processId": null,
-                "rootUri": root_uri,
-                "rootPath": self.workspace.to_string_lossy(),
-                "workspaceFolders": [{"uri": root_uri, "name": "scc"}],
-                "capabilities": {"workspace": {"workspaceFolders": true}},
-            }),
-        )?;
+        let mut params = json!({
+            "processId": null,
+            "rootUri": root_uri,
+            "rootPath": self.workspace.to_string_lossy(),
+            "workspaceFolders": [{"uri": root_uri, "name": "scc"}],
+            "capabilities": {"workspace": {"workspaceFolders": true}},
+        });
+        if let Some(path) = self.tsserver_path.as_ref() {
+            params["initializationOptions"] = json!({"tsserver": {"path": path.to_string_lossy()}});
+        }
+        let resp = self.request("initialize", params)?;
         if let Some(err) = resp.get("error") {
             return Err(format!("LSP initialize error: {err}"));
         }
@@ -661,8 +867,105 @@ mod tests {
     use scc_core::kinds;
 
     // ---------------------------------------------------------------
-    // mock-server upgrade test (no tsserver required)
+    // TypeScript discovery tests (no tsserver required)
     // ---------------------------------------------------------------
+
+    /// Guard for tests that mutate process-global env: holds an exclusive
+    /// lock AND scrubs `SCC_TSSERVER_PATH`/`PATH` influence, restoring both
+    /// afterwards. Discovery reads ambient state (env override, server
+    /// binary on PATH), so without this a neighbouring test or the
+    /// developer's PATH can flip the outcome.
+    struct EnvGuard {
+        prev_ts: Option<std::ffi::OsString>,
+        prev_path: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn hold() -> (std::sync::MutexGuard<'static, ()>, Self) {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            // Poison-resistant: a panicking sibling must not wedge the suite.
+            let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let prev_ts = std::env::var_os("SCC_TSSERVER_PATH");
+            let prev_path = std::env::var_os("PATH");
+            std::env::remove_var("SCC_TSSERVER_PATH");
+            // Empty PATH: no server binary resolves, so the bundled-TS leg
+            // cannot fire either.
+            std::env::set_var("PATH", "/nonexistent-scc-test");
+            (guard, Self { prev_ts, prev_path })
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.prev_ts.take() {
+                Some(v) => std::env::set_var("SCC_TSSERVER_PATH", v),
+                None => std::env::remove_var("SCC_TSSERVER_PATH"),
+            }
+            match self.prev_path.take() {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
+    fn finds_workspace_typescript_server() {
+        let (_lock, _env) = EnvGuard::hold();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let lib = root.join("node_modules").join("typescript").join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join("tsserver.js"), "// stub\n").unwrap();
+        std::fs::write(
+            lib.parent().unwrap().join("package.json"),
+            r#"{"name":"typescript","version":"5.9.3"}"#,
+        )
+        .unwrap();
+        let found = find_typescript_server(root).expect("workspace TS must be found");
+        assert_eq!(found.0, lib.join("tsserver.js"));
+        assert_eq!(found.1, "workspace");
+        assert!(typescript_status(root).contains("TypeScript 5.9.3 (workspace)"));
+    }
+
+    #[test]
+    fn skips_ts7_lib_without_tsserver_js() {
+        let (_lock, _env) = EnvGuard::hold();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // TS 7 layout: package.json says 7.x but there is no tsserver.js.
+        let lib = root.join("node_modules").join("typescript").join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(
+            lib.parent().unwrap().join("package.json"),
+            r#"{"name":"typescript","version":"7.0.2"}"#,
+        )
+        .unwrap();
+        assert!(find_typescript_server(root).is_none());
+        let status = typescript_status(root);
+        assert!(status.contains("TypeScript 7.0.2"), "status names the version: {status}");
+        assert!(status.contains("provides no tsserver.js"), "status names the cause: {status}");
+    }
+
+    #[test]
+    fn env_override_wins() {
+        let (_lock, _env) = EnvGuard::hold();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // A bare directory holding tsserver.js is accepted as SCC_TSSERVER_PATH.
+        let custom = root.join("custom-ts").join("lib");
+        std::fs::create_dir_all(&custom).unwrap();
+        std::fs::write(custom.join("tsserver.js"), "// stub\n").unwrap();
+        std::fs::write(
+            custom.parent().unwrap().join("package.json"),
+            r#"{"name":"typescript","version":"5.9.3"}"#,
+        )
+        .unwrap();
+        std::env::set_var("SCC_TSSERVER_PATH", custom.parent().unwrap());
+        let found = find_typescript_server(root).expect("env override must win");
+        let status = typescript_status(root);
+        assert_eq!(found.1, "SCC_TSSERVER_PATH");
+        assert!(status.contains("SCC_TSSERVER_PATH"));
+    }
 
     #[cfg(unix)]
     #[test]
@@ -736,6 +1039,7 @@ mod tests {
             "9.9.9".to_string(),
             Box::new(client_reader),
             Box::new(client_writer),
+            None,
             None,
         )
         .unwrap();
