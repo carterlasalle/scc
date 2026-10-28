@@ -171,16 +171,13 @@ fn typescript_server_from_env() -> Option<PathBuf> {
         return None;
     }
     let p = PathBuf::from(raw);
-    for cand in [
+    [
         p.clone(),
         p.join("tsserver.js"),
         p.join("lib").join("tsserver.js"),
-    ] {
-        if cand.is_file() {
-            return Some(cand);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|cand| cand.is_file())
 }
 
 /// The server's workspace lookup: for each ancestor dir (innermost first),
@@ -237,18 +234,15 @@ fn bundled_server_cli() -> Option<PathBuf> {
         return Some(resolved);
     }
     let dir = resolved.parent()?;
-    for cand in [
+    [
         dir.join("..")
             .join("typescript-language-server")
             .join("lib")
             .join("cli.mjs"),
         dir.join("cli.mjs"),
-    ] {
-        if cand.is_file() {
-            return Some(cand);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|cand| cand.is_file())
 }
 
 /// Human-readable TypeScript status for one workspace: the version the
