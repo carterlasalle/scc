@@ -62,6 +62,16 @@ pub enum IndexError {
     Empty,
 }
 
+/// One indexed file that extracted no facts: path plus why (unreadable
+/// UTF-8, vanished mid-index, ...). Surfaced by `scc index`/`status`/`scan`
+/// so a nonzero `failed` count is always actionable.
+// trace:v1 id=impl.scc.index.failed-files work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FailedFile {
+    pub path: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct IndexReport {
     pub revision: String,
@@ -71,6 +81,12 @@ pub struct IndexReport {
     pub added: usize,
     pub removed: usize,
     pub failed: usize,
+    /// Every file counted in `failed`, with the reason extraction skipped
+    /// it (same order as the extract loop met them: scan order). Empty
+    /// when `failed == 0`. Persisted to `index_failures` store meta so
+    /// `scc status` can name them without a live re-read.
+    #[serde(default)]
+    pub failed_files: Vec<FailedFile>,
     /// True when the store was mutated (files indexed, purged, or
     /// deleted). False on a true no-op: the engine skips the derived
     /// recompile + revision snapshot (C1a fast path). A deletion sets
@@ -393,7 +409,15 @@ impl Indexer {
 
         // changed + added keep scan order (shared-entity last-write is
         // order-sensitive). Hash-unchanged importers/callers append after.
+        // Stored-bad rows (inventoried as unreadable, facts never
+        // extracted) re-enter the extract loop every index: without this
+        // seed a file that becomes valid UTF-8 again would never be
+        // re-extracted (hash-unchanged means neither `changed` nor
+        // `added`). Reading it now also heals a stale failed entry when
+        // the bytes decode again — the loop simply succeeds.
         let removed_set: HashSet<&str> = removed.iter().map(|s| s.as_str()).collect();
+        let failed_known: std::collections::HashSet<String> =
+            load_index_failures(&self.store).into_iter().map(|f| f.path).collect();
         let mut to_process: Vec<ScannedFile> = changed;
         to_process.append(&mut added);
         let mut seen: HashSet<String> = to_process.iter().map(|f| f.path.clone()).collect();
@@ -403,6 +427,14 @@ impl Indexer {
             }
             if let Some(f) = scanned_by_path.get(p) {
                 seen.insert(p.clone());
+                to_process.push(f.clone());
+            }
+        }
+        for f in &scanned {
+            if failed_known.contains(&f.path)
+                && !removed_set.contains(f.path.as_str())
+                && seen.insert(f.path.clone())
+            {
                 to_process.push(f.clone());
             }
         }
@@ -430,20 +462,45 @@ impl Indexer {
         for f in &to_process {
             let path = &f.path;
             let full = self.store.root.join(path);
-            let Ok(content) = std::fs::read_to_string(&full) else {
-                // Unreadable as UTF-8 (or vanished mid-index): record the
-                // inventory row with the scan hash so freshness scan-diff
-                // stays closed (scan set == inventory set). No facts are
-                // extracted; the skip is counted, never silent.
-                report.failed += 1;
-                self.store.upsert_file(
-                    path,
-                    &f.hash,
-                    f.language.as_str(),
-                    f.kind.as_str(),
-                    f.size,
-                )?;
-                continue;
+            let content = match std::fs::read(&full) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        report.failed += 1;
+                        report.failed_files.push(FailedFile {
+                            path: path.clone(),
+                            reason: "unreadable as UTF-8".into(),
+                        });
+                        self.store.upsert_file(
+                            path,
+                            &f.hash,
+                            f.language.as_str(),
+                            f.kind.as_str(),
+                            f.size,
+                        )?;
+                        continue;
+                    }
+                },
+                Err(_) => {
+                    // Vanished mid-index (or a transient read error):
+                    // record the inventory row with the scan hash so
+                    // freshness scan-diff stays closed (scan set ==
+                    // inventory set). No facts are extracted; the skip is
+                    // counted and named, never silent.
+                    report.failed += 1;
+                    report.failed_files.push(FailedFile {
+                        path: path.clone(),
+                        reason: "vanished mid-index (read error)".into(),
+                    });
+                    self.store.upsert_file(
+                        path,
+                        &f.hash,
+                        f.language.as_str(),
+                        f.kind.as_str(),
+                        f.size,
+                    )?;
+                    continue;
+                }
             };
             let mut ef = self.extract(f, &content);
             merge_plugin_extraction(&self.store.root, f, &content, &mut ef);
@@ -618,6 +675,9 @@ impl Indexer {
         }
         report.mutated = report.changed > 0 || report.removed > 0;
         report.duration_ms = started.elapsed().as_millis() as u64;
+        debug_assert_eq!(report.failed, report.failed_files.len());
+        persist_index_failures(&self.store, &report.failed_files)?;
+        reconcile_scan_stats(&self.store, &mut report.scan_stats, report.failed)?;
         Ok(report)
     }
 
@@ -809,11 +869,25 @@ impl Indexer {
         }
         if changed_paths.is_empty() && deleted_paths.is_empty() {
             self.store.finish_snapshot(snapshot_id, 0)?;
-            return Ok(IndexReport {
+            // No-op watch tick: carry the snapshot forward so `failed`
+            // stays stable between real refreshes, pruning entries that
+            // vanished from the scan (deleted/ignored/unsupported) so a
+            // deleted bad.py stops being reported after a re-index.
+            let carried: Vec<FailedFile> = load_index_failures(&self.store)
+                .into_iter()
+                .filter(|f| scanned.contains_key(&f.path))
+                .collect();
+            persist_index_failures(&self.store, &carried)?;
+            let mut report = IndexReport {
                 revision: git_info.revision,
                 mutated: false,
+                scan_stats,
                 ..Default::default()
-            });
+            };
+            report.failed = carried.len();
+            report.failed_files = carried;
+            reconcile_scan_stats(&self.store, &mut report.scan_stats, report.failed)?;
+            return Ok(report);
         }
 
         let mut report = self.index_paths(&changed_paths, &scanned, &git_info.revision)?;
@@ -835,6 +909,10 @@ impl Indexer {
         report.affected_components = owners.into_iter().collect();
         report.duration_ms = started.elapsed().as_millis() as u64;
         report.scan_stats = scan_stats;
+        // A merged-in older failure still extracts nothing: keep it out of
+        // the scan `indexed` bucket exactly like the cold path does, so
+        // `scan_stats` agrees with `index_failures` after a refresh.
+        reconcile_scan_stats(&self.store, &mut report.scan_stats, report.failed)?;
         Ok(report)
     }
 
@@ -874,16 +952,40 @@ impl Indexer {
         for p in &paths {
             let Some(f) = scanned.get(p) else { continue };
             let full = self.store.root.join(p);
-            let Ok(content) = std::fs::read_to_string(&full) else {
-                report.failed += 1;
-                self.store.upsert_file(
-                    p,
-                    &f.hash,
-                    f.language.as_str(),
-                    f.kind.as_str(),
-                    f.size,
-                )?;
-                continue;
+            let content = match std::fs::read(&full) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        report.failed += 1;
+                        report.failed_files.push(FailedFile {
+                            path: p.clone(),
+                            reason: "unreadable as UTF-8".into(),
+                        });
+                        self.store.upsert_file(
+                            p,
+                            &f.hash,
+                            f.language.as_str(),
+                            f.kind.as_str(),
+                            f.size,
+                        )?;
+                        continue;
+                    }
+                },
+                Err(_) => {
+                    report.failed += 1;
+                    report.failed_files.push(FailedFile {
+                        path: p.clone(),
+                        reason: "vanished mid-index (read error)".into(),
+                    });
+                    self.store.upsert_file(
+                        p,
+                        &f.hash,
+                        f.language.as_str(),
+                        f.kind.as_str(),
+                        f.size,
+                    )?;
+                    continue;
+                }
             };
             self.store.purge_path(p)?;
             let mut ef = self.extract(f, &content);
@@ -986,6 +1088,15 @@ impl Indexer {
         bridges::link_rpc_bridges(&self.store)?;
         report.analysis_quality = persist_analysis_quality(&self.store)?;
         persist_bm25_corpus(&self.store)?;
+        // Refresh sees only its changed paths: merge into the persisted
+        // snapshot (drop healed + vanished entries, keep older ones) so a
+        // watch-triggered refresh never wipes failures it didn't re-read.
+        // `failed` is the snapshot size, matching `failed_files.len()`.
+        let healed: std::collections::BTreeSet<String> = extracted.keys().cloned().collect();
+        let merged = merge_index_failures(&self.store, scanned, &healed, &report.failed_files)?;
+        report.failed = merged.len();
+        report.failed_files = merged;
+        debug_assert_eq!(report.failed, report.failed_files.len());
         Ok(report)
     }
 
@@ -1152,6 +1263,74 @@ fn record_file_quality(
 // trace:v1 id=impl.crates-scc-indexer-src-lib.drop-file-quality work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 fn drop_file_quality(map: &mut BTreeMap<String, scc_core::AnalysisQuality>, path: &str) {
     map.remove(path);
+}
+
+/// Store-meta key carrying the failed-file list for `scc status` (paths +
+/// reasons, index-time snapshot). Cleared on every index, even when empty.
+const META_INDEX_FAILURES: &str = "index_failures";
+
+// trace:v1 id=impl.scc.index.persist-failures work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+fn persist_index_failures(store: &Store, failed: &[FailedFile]) -> Result<(), IndexError> {
+    let json = serde_json::to_string(failed).unwrap_or_else(|_| "[]".to_string());
+    store.meta_set(META_INDEX_FAILURES, &json)?;
+    Ok(())
+}
+
+/// Read back the persisted failed-file list (index-time snapshot; the
+/// working tree may have changed since).
+pub fn load_index_failures(store: &Store) -> Vec<FailedFile> {
+    store
+        .meta_get(META_INDEX_FAILURES)
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Failed files extracted no facts, but the scan counted them as `indexed`
+/// (scan reads bytes; extraction needs UTF-8 text). Move them into their
+/// own `failed` bucket so `discovered == indexed + failed + ignored +
+/// unsupported + oversized + unreadable` holds on the printed line.
+fn reconcile_scan_stats(
+    store: &Store,
+    stats: &mut scan::ScanStats,
+    failed: usize,
+) -> Result<(), IndexError> {
+    let failed = failed as u64;
+    let moved = failed.min(stats.indexed);
+    stats.indexed -= moved;
+    // The store itself is the reader of last resort: this keeps the
+    // meta row and the report's struct in agreement whichever outlives
+    // which process crash window.
+    store.meta_set(
+        "scan_stats",
+        &serde_json::to_string(&*stats).unwrap_or_else(|_| "{}".into()),
+    )?;
+    Ok(())
+}
+
+/// Merge this refresh's failures into the persisted snapshot: drop entries
+/// that healed (successfully re-extracted now) or vanished from the scan
+/// (deleted/ignored/unsupported), keep older untouched entries (this
+/// refresh never re-read them). Deterministic order: kept entries in prior
+/// order, new failures appended in this refresh's order.
+fn merge_index_failures(
+    store: &Store,
+    scanned: &std::collections::HashMap<String, ScannedFile>,
+    healed: &std::collections::BTreeSet<String>,
+    fresh: &[FailedFile],
+) -> Result<Vec<FailedFile>, IndexError> {
+    let fresh_paths: std::collections::BTreeSet<&str> =
+        fresh.iter().map(|f| f.path.as_str()).collect();
+    let mut merged: Vec<FailedFile> = load_index_failures(store)
+        .into_iter()
+        .filter(|f| {
+            !healed.contains(&f.path) && !fresh_paths.contains(f.path.as_str()) && scanned.contains_key(&f.path)
+        })
+        .collect();
+    merged.extend(fresh.iter().cloned());
+    persist_index_failures(store, &merged)?;
+    Ok(merged)
 }
 
 fn apply_doc_mentions(store: &Store) -> Result<(), IndexError> {

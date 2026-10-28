@@ -60,9 +60,15 @@ pub fn cmd_index(root: &Path, quiet: bool) -> crate::Result<()> {
         println!("analysis_quality: {}", report.analysis_quality.compact_line());
         let s = &report.scan_stats;
         println!(
-            "files: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={}",
-            s.discovered, s.indexed, s.ignored, s.unsupported, s.oversized, s.unreadable
+            "files: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={} failed={}",
+            s.discovered, s.indexed, s.ignored, s.unsupported, s.oversized, s.unreadable, report.failed
         );
+        if !report.failed_files.is_empty() {
+            println!("\nfailed files (counted in failed=, not indexed=):");
+            for f in &report.failed_files {
+                println!("  {}: {}", f.path, f.reason);
+            }
+        }
     }
     Ok(())
 }
@@ -73,6 +79,12 @@ pub fn cmd_index_paths(root: &Path, paths: &[String], quiet: bool) -> crate::Res
     let report = scc_engine::index::refresh_paths(root, &config, paths).map_err(engine_err)?;
     if !quiet && report.indexed > 0 {
         println!("refreshed {} file(s)", report.indexed);
+    }
+    if !quiet && !report.failed_files.is_empty() {
+        println!("failed files:");
+        for f in &report.failed_files {
+            println!("  {}: {}", f.path, f.reason);
+        }
     }
     Ok(())
 }
@@ -118,14 +130,21 @@ pub fn cmd_status(root: &Path) -> crate::Result<()> {
             // reported above from the working-tree scan.
             let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
             println!(
-                "files: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={}",
+                "files: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={} failed={}",
                 n("discovered"),
                 n("indexed"),
                 n("ignored"),
                 n("unsupported"),
                 n("oversized"),
-                n("unreadable")
+                n("unreadable"),
+                s.index_failures.len() as u64
             );
+        }
+        if !s.index_failures.is_empty() {
+            println!("failed files (extracted no facts):");
+            for f in &s.index_failures {
+                println!("  {}: {}", f.path, f.reason);
+            }
         }
     } else {
         println!("not indexed yet — run `scc index`");
@@ -139,17 +158,33 @@ pub fn cmd_scan(root: &Path, path: Option<&str>, json: bool) -> crate::Result<()
     let v = scc_engine::status::scan(root, &config, path).map_err(engine_err)?;
     let indexed = v["indexed"].as_array().cloned().unwrap_or_default();
     let skipped = v["skipped"].as_array().cloned().unwrap_or_default();
+    let failed = v["failed"].as_array().cloned().unwrap_or_default();
     let strf = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     if json {
         println!("{v}");
         return Ok(());
     }
-    // Single path: one verdict line (exit 0 indexed, 1 skipped, 2 missing).
+    // Single path: one verdict line (exit 0 indexed, 1 skipped/failed, 2 missing).
+    // A failed file still appears in the live `indexed` list (scan reads
+    // bytes; only extraction needs UTF-8), so the snapshot check wins.
     if let Some(q) = path {
         let q = q.trim_start_matches("./");
         if let Some(f) = indexed.iter().find(|f| f.get("path").and_then(|p| p.as_str()) == Some(q)) {
+            if failed.iter().any(|f| f.get("path").and_then(|p| p.as_str()) == Some(q)) {
+                let reason = failed
+                    .iter()
+                    .find(|f| f.get("path").and_then(|p| p.as_str()) == Some(q))
+                    .map(|f| strf(f, "reason"))
+                    .unwrap_or_default();
+                println!("{q}: failed ({reason})");
+                std::process::exit(1);
+            }
             println!("{}: indexed ({} {})", strf(f, "path"), strf(f, "language"), strf(f, "kind"));
             return Ok(());
+        }
+        if let Some(f) = failed.iter().find(|f| f.get("path").and_then(|p| p.as_str()) == Some(q)) {
+            println!("{q}: failed ({})", strf(f, "reason"));
+            std::process::exit(1);
         }
         if let Some(sk) = skipped.iter().find(|f| f.get("path").and_then(|p| p.as_str()) == Some(q)) {
             match sk.get("rule").and_then(|r| r.as_str()) {
@@ -164,9 +199,15 @@ pub fn cmd_scan(root: &Path, path: Option<&str>, json: bool) -> crate::Result<()
     let st = &v["stats"];
     let n = |k: &str| st.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
     println!(
-        "scan: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={} (live walk, not index-time counts)",
-        n("discovered"), n("indexed"), n("ignored"), n("unsupported"), n("oversized"), n("unreadable")
+        "scan: discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={} failed={} (live walk, not index-time counts)",
+        n("discovered"), n("indexed"), n("ignored"), n("unsupported"), n("oversized"), n("unreadable"), failed.len()
     );
+    if !failed.is_empty() {
+        println!("\nfailed (scanned, extracted no facts):");
+        for f in &failed {
+            println!("  {}: {}", strf(f, "path"), strf(f, "reason"));
+        }
+    }
     if !skipped.is_empty() {
         use std::collections::BTreeMap;
         let mut by_rule: BTreeMap<String, usize> = BTreeMap::new();
