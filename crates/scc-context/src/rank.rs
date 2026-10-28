@@ -517,7 +517,7 @@ mod tests {
 
     #[test]
     fn similarity_weights_names() {
-        let mut e = scc_core::Entity::new("repo://r/component/x", "component", "transcript-normalizer");
+        let mut e = scc_core::Entity::new(scc_core::component_id("r", "x"), "component", "transcript-normalizer");
         e.attr("responsibility", serde_json::json!("normalizes radio transcripts"));
         let t = terms("normalize transcripts");
         let s = entity_similarity(&e, &t);

@@ -8,15 +8,22 @@ System IR is the durable machine model consumed by the Context Compiler. It cont
 ## 2. Stable identifiers
 
 ```text
-repo://{repo-id}/{kind}/{stable-key}
+repo://{repo-id}/{kind}/{slug}~{digest}
 ```
+
+The key is a readable slug plus a 6-hex digest of the exact raw key bytes
+(FNV-1a64): distinct source names that normalize alike (`data_utils.py` vs
+`data-utils.py`, `ParseUrl` vs `parseurl`, distinct non-ASCII names) get
+distinct ids. Symbol ids instead use percent-encoded
+`{encoded-file}/{encoded-name}` segments; the human-readable `name`
+attribute always keeps the exact raw bytes.
 
 Examples:
 ```text
-repo://phoenix/service/asr
-repo://phoenix/component/transcript-normalizer
-repo://phoenix/data/transcript
-repo://phoenix/flow/live-radio
+repo://phoenix/service/asr~9f2c1a
+repo://phoenix/component/transcript-normalizer~44b81d
+repo://phoenix/data/transcript~0e77aa
+repo://phoenix/flow/live-radio~c31d08
 ```
 
 ## 3. Core entities

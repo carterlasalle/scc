@@ -1091,9 +1091,27 @@ pub fn sanitize_key(input: &str) -> String {
 }
 
 /// `repo://{repo}/{kind}/{key}` stable identifier.
+///
+/// Injective in the raw key bytes: readable slug plus a 6-hex digest of the
+/// exact raw key (the `component_id` approach from 8f13177, #19) — so source
+/// names that collapse under [`sanitize_key`] (`data_utils.py` vs
+/// `data-utils.py`, `foo_bar` vs `FOO_BAR`, `ParseUrl` vs `parseurl`,
+/// distinct non-ASCII names) never share an id. `#26`: this previously
+/// merged distinct FILE entities (second file's symbols attached to the
+/// first file's id, imports pointing at the wrong file) and distinct
+/// FIELD/EXPORT entities (`INSERT OR REPLACE` silently dropped one).
+/// The `name` attribute keeps the exact raw bytes, so display is unchanged;
+/// `symbol_id`/`occurrence_id`/`component_id` already encoded losslessly and
+/// are untouched. Deterministic: same bytes, same id (stable re-indexes).
 // trace:v1 id=impl.crates-scc-core-src-lib.entity-id work=WORK-wave-15-2-heterogeneous-hierarchy-edges-semantic-scoring-explain-rank-caching
 pub fn entity_id(repo: &str, kind: &str, key: &str) -> String {
-    format!("repo://{}/{}/{}", sanitize_key(repo), kind, sanitize_key(key))
+    let slug = sanitize_key(key);
+    let digest = &fnv1a64_hex(key.as_bytes())[..6];
+    format!(
+        "repo://{}/{}/{slug}~{digest}",
+        sanitize_key(repo),
+        kind
+    )
 }
 
 /// Occurrence entity id: collision-free per (concept key, path, owner,
@@ -1157,17 +1175,42 @@ pub fn component_id(repo: &str, raw_name: &str) -> String {
         // `UNIQUE constraint failed: components.id`.
         let a = component_id("r", "foo_bar");
         let b = component_id("r", "foo-bar");
-        let legacy_a = entity_id("r", "component", "foo_bar");
-        let legacy_b = entity_id("r", "component", "foo-bar");
-        assert_eq!(
-            legacy_a, legacy_b,
-            "precondition: legacy ids really collide ({legacy_a})"
-        );
         assert_ne!(a, b, "injective ids must differ: {a} vs {b}");
         assert!(a.starts_with("repo://r/component/foo-bar~"));
         assert!(b.starts_with("repo://r/component/foo-bar~"));
         // determinism: same bytes, same id (stable across re-indexes)
         assert_eq!(a, component_id("r", "foo_bar"));
+    }
+
+    #[test]
+    // trace:v1 id=test.scc-core-entity-id-injective verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-core-src-lib.entity-id
+    fn entity_id_is_injective_over_sanitize_collisions() {
+        // #26: `entity_id` must not merge distinct raw keys — FILE,
+        // FIELD and EXPORT ids previously collapsed the same pairs
+        // `sanitize_key` merges (second file's symbols attached to the
+        // first file's id, `INSERT OR REPLACE` dropping a field/export).
+        for (kind, a, b) in [
+            ("file", "a/data_utils.py", "a/data-utils.py"),
+            ("field", "Order.foo_bar", "Order.FOO_BAR"),
+            ("field", "Person.caf\u{e9}", "Person.cafe"),
+            ("export", "$store", "_store"),
+            ("export", "ParseUrl", "parseurl"),
+        ] {
+            let ia = entity_id("r", kind, a);
+            let ib = entity_id("r", kind, b);
+            assert_ne!(ia, ib, "{kind} ids must differ: {a:?} vs {b:?}");
+            assert!(ia.contains('~') && ib.contains('~'), "ids carry the digest: {ia} vs {ib}");
+        }
+        // non-ASCII-only names must not truncate to empty or equal keys
+        assert_ne!(
+            entity_id("r", "field", "Person.\u{540d}\u{524d}"),
+            entity_id("r", "field", "Person.\u{5e74}\u{9f62}")
+        );
+        // determinism: same bytes, same id (stable across re-indexes)
+        assert_eq!(
+            entity_id("r", "file", "a/data_utils.py"),
+            entity_id("r", "file", "a/data_utils.py")
+        );
     }
 
 /// Inverse of `encode_component`: percent-decodes `%XX` sequences back to

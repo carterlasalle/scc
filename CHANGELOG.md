@@ -45,6 +45,13 @@ noise-model fixes — no new features.
   `git diff` failures (bad ref, shallow checkout with no `HEAD~N`, missing
   `origin/main`) now exit non-zero with `unknown revision '<ref>'` on
   stderr, in both text and `--json` modes.
+- **Injective entity ids (#26).** `entity_id` appends a 6-hex digest of the
+  raw key to the readable slug (the #19 `component_id` approach), so
+  `data_utils.py` vs `data-utils.py`, `foo_bar` vs `FOO_BAR`, `ParseUrl`
+  vs `parseurl`, and distinct non-ASCII names get distinct FILE/FIELD/EXPORT
+  ids instead of colliding (second file's symbols attached to the first
+  file's id, `INSERT OR REPLACE` dropping a field/export). Benchmark
+  recall scoring strips the digest back to the slug.
 
 ## [0.2.11] — 2026-10-06
 

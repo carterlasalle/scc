@@ -44,8 +44,11 @@ const LIFECYCLE_ANNOTATIONS: [&str; 8] = [
 
 /// Last path segment of an entity id — the display-name fallback when the
 /// referenced entity does not exist in the graph (matches `name_of`).
+/// Strips the injective `~digest` suffix (#26) so the fallback shows the
+/// readable slug, never the digest.
 fn last_segment(id: &str) -> String {
-    id.rsplit('/').next().unwrap_or(id).to_string()
+    let seg = id.rsplit('/').next().unwrap_or(id);
+    seg.rsplit_once('~').map(|(s, _)| s).unwrap_or(seg).to_string()
 }
 
 /// Seed invocation surfaces from the Wave 9 semantic-fact layer

@@ -467,25 +467,28 @@ mod tests {
         std::fs::create_dir_all(db.parent().unwrap()).unwrap();
         let store = Store::open(&db, &root).unwrap();
         for r in routes {
+            let rid = scc_core::entity_id(&store.repo_id, scc_core::kinds::ROUTE, r);
             store
                 .insert_entity(
-                    &Entity::new(format!("repo://{}/route/{}", store.repo_id, r.replace(' ', "-")), "route", r.to_string()),
+                    &Entity::new(rid, "route", r.to_string()),
                     &[format!("{name}/app.py")],
                 )
                 .unwrap();
         }
         for t in topics {
+            let tid = scc_core::entity_id(&store.repo_id, scc_core::kinds::TOPIC, t);
             store
                 .insert_entity(
-                    &Entity::new(format!("repo://{}/topic/{t}", store.repo_id), "topic", t.to_string()),
+                    &Entity::new(tid, "topic", t.to_string()),
                     &[format!("{name}/bus.py")],
                 )
                 .unwrap();
         }
         for e in exports {
+            let eid = scc_core::entity_id(&store.repo_id, scc_core::kinds::EXPORT, e);
             store
                 .insert_entity(
-                    &Entity::new(format!("repo://{}/export/{e}", store.repo_id), "export", e.to_string()),
+                    &Entity::new(eid, "export", e.to_string()),
                     &[format!("{name}/lib.py")],
                 )
                 .unwrap();
@@ -496,7 +499,7 @@ mod tests {
                 .unwrap();
             // unresolved modules surface as external_api, like the extractor
             let ext = Entity::new(
-                format!("repo://{}/external_api/{}", store.repo_id, module),
+                scc_core::entity_id(&store.repo_id, scc_core::kinds::EXTERNAL_API, module),
                 "external_api",
                 module.clone(),
             );
@@ -508,7 +511,7 @@ mod tests {
     // trace:exempt reason=internal-detail
     fn add_topic_side(root: &std::path::Path, topic: &str, publishes: bool, subscribes: bool) {
         let store = Store::open(&root.join(".scc").join("scc.db"), root).unwrap();
-        let tid = format!("repo://{}/topic/{topic}", store.repo_id);
+        let tid = scc_core::entity_id(&store.repo_id, scc_core::kinds::TOPIC, topic);
         let sym = Entity::new(
             format!("repo://{}/symbol/side.py/fn", store.repo_id),
             "symbol",

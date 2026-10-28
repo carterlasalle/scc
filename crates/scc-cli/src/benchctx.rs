@@ -137,19 +137,28 @@ fn normalize_id(id: &str) -> Option<(String, String)> {
     let name_rest = parts.next()?;
     match kind.as_str() {
         "symbol" | "test" => {
-            // file/name — the LAST segment is the encoded name
+            // file/name — the LAST segment is the encoded name.
+            // `test` ids are injective `slug~digest` (#26): strip the
+            // digest before the sanitized recall comparison. `symbol`
+            // ids stay raw — decoded symbol names may legitimately
+            // contain `~` (e.g. destructors), which is not a digest.
             let idx = name_rest.rfind('/')?;
-            let name = scc_core::decode_component(&name_rest[idx + 1..]);
+            let raw = scc_core::decode_component(&name_rest[idx + 1..]);
             if kind == "symbol" {
-                Some((kind, name))
+                Some((kind, raw))
             } else {
-                Some((kind, scc_core::sanitize_key(&name)))
+                let base = raw.rsplit_once('~').map(|(s, _)| s).unwrap_or(&raw);
+                Some((kind, scc_core::sanitize_key(base)))
             }
         }
         "file" | "component" | "data" | "route" | "store" | "topic" | "external_api" => {
-            // these kinds use sanitize_key ids (lowercase, _ -> -)
-            let name = scc_core::sanitize_key(&scc_core::decode_component(name_rest));
-            Some((kind, name))
+            // these kinds use injective `slug~digest` ids (#19, #26):
+            // the recall key is the sanitized slug with any trailing
+            // `~digest` suffix stripped (never the digest itself; slugs
+            // never contain `~` — `sanitize_key` maps it to `-`).
+            let decoded = scc_core::decode_component(name_rest);
+            let slug = decoded.rsplit_once('~').map(|(s, _)| s).unwrap_or(&decoded);
+            Some((kind, scc_core::sanitize_key(slug)))
         }
         _ => None,
     }
@@ -435,10 +444,15 @@ mod tests {
         assert_eq!(name, "transcribe");
         let id2 = "repo://repo/symbol/api/routes.ts/renderTranscript";
         let (_, name2) = normalize_id(id2).unwrap();
-        assert_eq!(name2, "renderTranscript");
-        let (k3, n3) = normalize_id("repo://repo/component/services").unwrap();
-        assert_eq!(k3, "component");
-        assert_eq!(n3, "services");
+        assert_eq!(name2, "renderTranscript", "symbol names stay raw");
+        // #26: new injective ids carry a digest; legacy ids without one
+        // still normalize (old packs / old components in flight).
+        let digested = scc_core::component_id("repo", "services");
+        for id in ["repo://repo/component/services", digested.as_str()] {
+            let (k3, n3) = normalize_id(id).unwrap();
+            assert_eq!(k3, "component");
+            assert_eq!(n3, "services", "recall key strips the digest: {id}");
+        }
     }
 
     #[test]
@@ -484,19 +498,26 @@ mod match_tests {
     }
 
     #[test]
-// trace:v1 id=impl.crates-scc-cli-src-benchctx.file-ids-sanitize-underscores
+    // trace:v1 id=impl.crates-scc-cli-src-benchctx.file-ids-sanitize-underscores
     fn file_ids_sanitize_underscores() {
-        let id = "repo://repo/file/tests/test-transcripts.py";
-        let (kind, name) = normalize_id(id).unwrap();
-        assert_eq!(kind, "file");
-        assert_eq!(name, scc_core::sanitize_key("tests/test_transcripts.py"));
+        // #26: injective ids carry a `~digest` suffix; the recall key is
+        // the slug, with and without the suffix.
+        let key = scc_core::sanitize_key("tests/test_transcripts.py");
+        for id in [
+            "repo://repo/file/tests/test-transcripts.py".to_string(),
+            scc_core::entity_id("repo", "file", "tests/test_transcripts.py"),
+        ] {
+            let (kind, name) = normalize_id(&id).unwrap();
+            assert_eq!(kind, "file");
+            assert_eq!(name, key, "recall key strips the digest: {id}");
+        }
     }
 
     #[test]
-// trace:v1 id=impl.crates-scc-cli-src-benchctx.route-ids-match
+    // trace:v1 id=impl.crates-scc-cli-src-benchctx.route-ids-match
     fn route_ids_match() {
-        let id = "repo://repo/route/get-/api/transcripts/-id";
-        let (kind, name) = normalize_id(id).unwrap();
+        let id = scc_core::entity_id("repo", "route", "GET /api/transcripts/:id");
+        let (kind, name) = normalize_id(&id).unwrap();
         assert_eq!(kind, "route");
         assert_eq!(name, scc_core::sanitize_key("GET /api/transcripts/:id"));
     }
