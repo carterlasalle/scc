@@ -158,13 +158,17 @@ impl<'a> TrustedGraphView<'a> {
 
     /// Display name of an entity id; falls back to the id's last segment.
     /// Entity staleness does not hide the name — callers decide whether the
-    /// entity may appear in trusted sections.
+    /// entity may appear in trusted sections. The fallback strips the
+    /// injective `~digest` suffix (#26) so it shows the readable slug.
     pub fn name_of(&self, id: &str) -> String {
         self.graph
             .entities
             .get(id)
             .map(|e| e.name.clone())
-            .unwrap_or_else(|| id.rsplit('/').next().unwrap_or(id).to_string())
+            .unwrap_or_else(|| {
+                let seg = id.rsplit('/').next().unwrap_or(id);
+                seg.rsplit_once('~').map(|(s, _)| s).unwrap_or(seg).to_string()
+            })
     }
 
     /// All entities, staleness-filtered (unfiltered raw map for display
@@ -387,7 +391,9 @@ mod tests {
     fn entity(id: &str, kind: &str, evidence: Vec<&str>) -> scc_core::Entity {
         let evidence: Vec<String> = evidence.into_iter().map(|s| s.to_string()).collect();
         let _ = kind;
-        let mut e = scc_core::Entity::new(id, "component", id.rsplit('/').next().unwrap_or(id));
+        let seg = id.rsplit('/').next().unwrap_or(id);
+        let name = seg.rsplit_once('~').map(|(s, _)| s).unwrap_or(seg);
+        let mut e = scc_core::Entity::new(id, "component", name);
         e.evidence = evidence;
         e
     }
@@ -437,7 +443,7 @@ mod tests {
             invariants: vec![],
         };
         graph.components = vec![entity(
-            "repo://r/component/c",
+            &scc_core::component_id("r", "c"),
             "component",
             vec!["evidence:1"],
         )];
@@ -467,8 +473,9 @@ mod tests {
         // low-confidence INFERRED claims from derived flows/components —
         // not only from raw relationships.
         let (store, _d) = setup();
+        let svc = scc_core::component_id("r", "svc");
         let mut flow = Flow {
-            id: "repo://r/flow/f1".into(),
+            id: scc_core::entity_id("r", "flow", "f1"),
             kind: scc_core::FlowKind::Lifecycle,
             name: "svc-lifecycle".into(),
             trigger: None,
@@ -476,7 +483,7 @@ mod tests {
                 scc_core::FlowStep {
                     id: "step:1".into(),
                     order: 1,
-                    actor: "repo://r/component/svc".into(),
+                    actor: svc.clone(),
                     operation: "svc".into(),
                     condition: None,
                     r#async: None,
@@ -489,7 +496,7 @@ mod tests {
                 scc_core::FlowStep {
                     id: "step:2".into(),
                     order: 2,
-                    actor: "repo://r/component/svc".into(),
+                    actor: svc.clone(),
                     operation: "advance".into(),
                     condition: None,
                     r#async: None,
@@ -505,7 +512,7 @@ mod tests {
         let _ = &mut flow;
 
         // a component carrying a low-confidence inferred responsibility
-        let mut comp = entity("repo://r/component/svc", "component", vec![]);
+        let mut comp = entity(&svc, "component", vec![]);
         comp.attributes.insert(
             "responsibility".into(),
             serde_json::json!([

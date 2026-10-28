@@ -1187,6 +1187,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sanitize_colliding_fields_and_exports_coexist() {
+        // #26: distinct raw names that collapse under `sanitize_key`
+        // must coexist as separate FIELD/EXPORT entities (`INSERT OR
+        // REPLACE` previously dropped one of each pair).
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let store = scc_store::Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let mut ef = ExtractedFile::default();
+        for sym in ["Order", "order"] {
+            ef.symbols.push(Symbol {
+                name: (*sym).into(),
+                kind: SymbolKind::Class,
+                signature: None,
+                decl_header: None,
+                start_line: 1,
+                end_line: 3,
+                exported: true,
+                docstring: None,
+                parent: None,
+            });
+        }
+        ef.facts = vec![
+            SemanticFact::Field { owner: "Order".into(), name: "foo_bar".into(), mutable: false },
+            SemanticFact::Field { owner: "order".into(), name: "FOO_BAR".into(), mutable: false },
+            SemanticFact::PublicExport { symbol: "Order".into(), kind: "class".into() },
+            SemanticFact::PublicExport { symbol: "order".into(), kind: "class".into() },
+        ];
+        let writer = Writer::new(&store, "r", "rev");
+        writer
+            .write_source("a.py", "h", &ef, &[], &[], &SymbolIndex::new("r"))
+            .unwrap();
+        let fields = store.entities_by_kind(scc_core::kinds::FIELD).unwrap();
+        assert_eq!(fields.len(), 2, "colliding field names coexist: {fields:?}");
+        let exports = store.entities_by_kind(scc_core::kinds::EXPORT).unwrap();
+        assert_eq!(exports.len(), 2, "colliding export names coexist: {exports:?}");
+        // #26 consequence 1: `data_utils.py` vs `data-utils.py` must be
+        // two FILE entities, not one merged id.
+        for path in ["a/data_utils.py", "a/data-utils.py"] {
+            writer
+                .write_source(path, "h", &ExtractedFile::default(), &[], &[], &SymbolIndex::new("r"))
+                .unwrap();
+        }
+        let files = store.entities_by_kind(scc_core::kinds::FILE).unwrap();
+        assert_eq!(files.len(), 3, "colliding file paths coexist: {files:?}");
+    }
 // trace:exempt reason=internal-detail
     fn schema_ef(_path: &str, owner: &str, expr: &str) -> ExtractedFile {
         let mut ef = ExtractedFile::default();

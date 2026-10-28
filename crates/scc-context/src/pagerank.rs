@@ -1321,12 +1321,12 @@ mod tests {
             scc_core::symbol_id("r", "src/a.ts", "A"),
             scc_core::symbol_id("r", "src/b.ts", "B"),
             scc_core::symbol_id("r", "src/i.ts", "I"),
-            "repo://r/contract/c",
-            "repo://r/state/s",
-            "repo://r/topic/t",
-            "repo://r/module/m",
-            "repo://r/export/x",
-            "repo://r/annotation/d",
+            scc_core::entity_id("r", kinds::CONTRACT, "c"),
+            scc_core::entity_id("r", kinds::STATE, "s"),
+            scc_core::entity_id("r", kinds::TOPIC, "t"),
+            scc_core::entity_id("r", kinds::MODULE, "m"),
+            scc_core::entity_id("r", kinds::EXPORT, "x"),
+            scc_core::entity_id("r", kinds::ANNOTATION, "d"),
         );
         let mut a_ent = sym("r", "src/a.ts", "A");
         a_ent.attr("file", serde_json::json!("src/a.ts"));
@@ -1334,12 +1334,12 @@ mod tests {
         a_ent.attr("end_line", serde_json::json!(20));
         let b_ent = sym("r", "src/b.ts", "B");
         let i_ent = sym("r", "src/i.ts", "I");
-        let c_ent = entity(c, kinds::CONTRACT, "c");
-        let s_ent = entity(s, kinds::STATE, "s");
-        let t_ent = entity(t, kinds::TOPIC, "t");
-        let m_ent = entity(m, kinds::MODULE, "m");
-        let x_ent = entity(x, kinds::EXPORT, "x");
-        let d_ent = entity(d, kinds::ANNOTATION, "d");
+        let c_ent = entity(&c, kinds::CONTRACT, "c");
+        let s_ent = entity(&s, kinds::STATE, "s");
+        let t_ent = entity(&t, kinds::TOPIC, "t");
+        let m_ent = entity(&m, kinds::MODULE, "m");
+        let x_ent = entity(&x, kinds::EXPORT, "x");
+        let d_ent = entity(&d, kinds::ANNOTATION, "d");
 
         let mut rels = vec![
             rel(1, &a, predicates::CALLS, &b, Provenance::Extracted),
@@ -1348,19 +1348,19 @@ mod tests {
             rel(4, &a, predicates::IMPLEMENTS, &i, Provenance::Extracted),
             rel(5, &i, predicates::IMPLEMENTED_BY, &a, Provenance::Extracted),
             rel(6, &a, predicates::INHERITS, &b, Provenance::Extracted),
-            rel(7, &a, predicates::REGISTERS, c, Provenance::Extracted),
-            rel(8, &a, predicates::PUBLISHES, t, Provenance::Extracted),
-            rel(9, &b, predicates::SUBSCRIBES, t, Provenance::Extracted),
-            rel(10, &a, predicates::OWNS, s, Provenance::Extracted),
-            rel(11, &a, predicates::READS, s, Provenance::Extracted),
-            rel(12, &b, predicates::WRITES, s, Provenance::Extracted),
-            rel(13, &a, predicates::IMPORTS, m, Provenance::Extracted),
-            rel(14, &a, predicates::EXPORTS, x, Provenance::Extracted),
-            rel(15, &a, predicates::DECORATES, d, Provenance::Extracted),
+            rel(7, &a, predicates::REGISTERS, &c, Provenance::Extracted),
+            rel(8, &a, predicates::PUBLISHES, &t, Provenance::Extracted),
+            rel(9, &b, predicates::SUBSCRIBES, &t, Provenance::Extracted),
+            rel(10, &a, predicates::OWNS, &s, Provenance::Extracted),
+            rel(11, &a, predicates::READS, &s, Provenance::Extracted),
+            rel(12, &b, predicates::WRITES, &s, Provenance::Extracted),
+            rel(13, &a, predicates::IMPORTS, &m, Provenance::Extracted),
+            rel(14, &a, predicates::EXPORTS, &x, Provenance::Extracted),
+            rel(15, &a, predicates::DECORATES, &d, Provenance::Extracted),
             // OWNS of a non-state entity must NOT normalize to Write.
-            rel(16, &a, predicates::OWNS, c, Provenance::Extracted),
+            rel(16, &a, predicates::OWNS, &c, Provenance::Extracted),
             // Confidence passthrough.
-            rel(17, &a, predicates::CALLS, d, Provenance::Extracted),
+            rel(17, &a, predicates::CALLS, &d, Provenance::Extracted),
         ];
         rels[16].confidence = 0.7;
         let (_dir, store, graph) = fixture(
@@ -1395,20 +1395,20 @@ mod tests {
         // to A -> I).
         assert_eq!(kinds_between(&a, &i), vec![ReferenceKind::Implement; 2]);
         // registers/publishes/subscribes → Register.
-        assert_eq!(kinds_between(&a, c), vec![ReferenceKind::Register]);
-        assert_eq!(kinds_between(&a, t), vec![ReferenceKind::Register]);
-        assert_eq!(kinds_between(&b, t), vec![ReferenceKind::Register]);
+        assert_eq!(kinds_between(&a, &c), vec![ReferenceKind::Register]);
+        assert_eq!(kinds_between(&a, &t), vec![ReferenceKind::Register]);
+        assert_eq!(kinds_between(&b, &t), vec![ReferenceKind::Register]);
         // owns(state) → Write; reads → Read; writes → Write.
-        let mut as_edges = kinds_between(&a, s);
+        let mut as_edges = kinds_between(&a, &s);
         as_edges.sort();
         assert_eq!(as_edges, vec![ReferenceKind::Read, ReferenceKind::Write]);
-        assert_eq!(kinds_between(&b, s), vec![ReferenceKind::Write]);
+        assert_eq!(kinds_between(&b, &s), vec![ReferenceKind::Write]);
         // imports → Import; exports → Export; decorates → Decorate.
-        assert_eq!(kinds_between(&a, m), vec![ReferenceKind::Import]);
-        assert_eq!(kinds_between(&a, x), vec![ReferenceKind::Export]);
-        assert_eq!(kinds_between(&a, d), vec![ReferenceKind::Call, ReferenceKind::Decorate]);
+        assert_eq!(kinds_between(&a, &m), vec![ReferenceKind::Import]);
+        assert_eq!(kinds_between(&a, &x), vec![ReferenceKind::Export]);
+        assert_eq!(kinds_between(&a, &d), vec![ReferenceKind::Call, ReferenceKind::Decorate]);
         // OWNS of a contract is NOT normalized (no Write A->C).
-        assert!(!kinds_between(&a, c).contains(&ReferenceKind::Write));
+        assert!(!kinds_between(&a, &c).contains(&ReferenceKind::Write));
 
         // Locations: evidence file/line from the subject symbol attrs.
         let call = edges

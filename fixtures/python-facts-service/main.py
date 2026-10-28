@@ -28,7 +28,10 @@ class Item:
 
 class Cart:
     """Shopping cart state."""
-
+    # #26: names that collapse under `sanitize_key` (case/separator)
+    # must stay distinct entities — `foo_bar` vs `FOO_BAR`.
+    foo_bar = 1
+    FOO_BAR = 2
     capacity = 5
     default_items = []
 

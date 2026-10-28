@@ -3094,11 +3094,11 @@ mod tests {
         let db = dir.path().join("scc.db");
         {
             let s = Store::open(&db, &root).unwrap();
-            s.insert_entity(&Entity::new("repo://t/component/a", "component", "A"), &["x.py".into()]).unwrap();
+            s.insert_entity(&Entity::new(&scc_core::component_id("t", "a"), "component", "A"), &["x.py".into()]).unwrap();
         }
         // reopen
         let s = Store::open(&db, &root).unwrap();
-        assert!(s.get_entity("repo://t/component/a").unwrap().is_some());
+        assert!(s.get_entity(&scc_core::component_id("t", "a")).unwrap().is_some());
     }
 
     #[test]
@@ -3246,14 +3246,15 @@ mod tests {
     // trace:exempt reason=internal-detail
     fn entity_roundtrip_and_fts() {
         let (s, _d) = tmp_store();
-        let mut e = Entity::new("repo://r/component/transcript", "component", "transcript-normalizer");
+        let mut e = Entity::new(scc_core::component_id("r", "transcript"), "component", "transcript-normalizer");
         e.attr("responsibility", serde_json::json!(["normalize transcripts"]));
         s.insert_entity(&e, &["src/normalize.py".into()]).unwrap();
-        let got = s.get_entity("repo://r/component/transcript").unwrap().unwrap();
+        let tid = scc_core::component_id("r", "transcript");
+        let got = s.get_entity(&tid).unwrap().unwrap();
         assert_eq!(got.name, "transcript-normalizer");
         let hits = s.search_entities("normalize", 10).unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].id, "repo://r/component/transcript");
+        assert_eq!(hits[0].id, tid);
     }
 
     #[test]
@@ -3283,15 +3284,16 @@ mod tests {
         s.insert_evidence(&Evidence::source("evidence:ent", "src/a.py")).unwrap();
         s.insert_evidence(&Evidence::source("evidence:rel", "src/b.py")).unwrap();
         s.insert_evidence(&Evidence::source("evidence:orphan", "src/c.py")).unwrap();
-
-        let mut e = Entity::new("repo://r/component/keep", "component", "keep");
+        let keep = scc_core::component_id("r", "keep");
+        let mut e = Entity::new(keep.clone(), "component", "keep");
         e.evidence = vec!["evidence:ent".into()];
         s.insert_entity(&e, &["src/a.py".into()]).unwrap();
+        let other = scc_core::component_id("r", "other");
         let rel = Relationship::new(
             "rel:1",
-            "repo://r/component/keep",
+            keep.clone(),
             "calls",
-            "repo://r/component/other",
+            other,
             Provenance::Resolved,
         )
         .with_evidence(vec!["evidence:rel".into()]);
@@ -3304,7 +3306,7 @@ mod tests {
         assert!(s.get_evidence("evidence:orphan").unwrap().is_none());
 
         // drop the entity's reference, sweep again: now it becomes an orphan
-        let e2 = Entity::new("repo://r/component/keep", "component", "keep");
+        let e2 = Entity::new(keep, "component", "keep");
         s.insert_entity(&e2, &["src/a.py".into()]).unwrap();
         assert_eq!(s.sweep_orphan_evidence().unwrap(), 1);
         assert!(s.get_evidence("evidence:ent").unwrap().is_none());
@@ -3338,7 +3340,7 @@ mod tests {
             &["a.py".into()],
         )
         .unwrap();
-        let phantom = "repo://r/file/mockingbird/acquisition/ingest-dsp.py";
+        let phantom = scc_core::entity_id("r", scc_core::kinds::FILE, "mockingbird/acquisition/ingest_dsp.py");
         let external = "repo://r/external_api/argparse";
         let dangling = Relationship::new(
             "rel:dangling",
@@ -3402,7 +3404,8 @@ mod tests {
         s.insert_evidence(&Evidence::source("evidence:gone", "src/c.py")).unwrap();
 
         // component referencing evidence:comp
-        let mut comp = Entity::new("repo://r/component/keep", "component", "keep");
+        let keep = scc_core::component_id("r", "keep");
+        let mut comp = Entity::new(keep.clone(), "component", "keep");
         comp.evidence = vec!["evidence:comp".into()];
         s.replace_components(&[comp]).unwrap();
 
@@ -3415,8 +3418,8 @@ mod tests {
             steps: vec![scc_core::FlowStep {
                 id: "step:1".into(),
                 order: 0,
-                actor: "repo://r/component/keep".into(),
-                operation: "run".into(),
+                actor: keep,
+                operation: "run".to_string(),
                 condition: None,
                 r#async: None,
                 timeout_ms: None,
@@ -3523,12 +3526,12 @@ mod tests {
     fn replace_components_drops_vanished_component_entities() {
         let (s, _d) = tmp_store();
         let merged = Entity::new(
-            "repo://r/component/root-services",
+            scc_core::component_id("r", "root+services"),
             scc_core::kinds::COMPONENT,
             "root+services",
         );
         let root = Entity::new(
-            "repo://r/component/root",
+            scc_core::component_id("r", "root"),
             scc_core::kinds::COMPONENT,
             "root",
         );
@@ -3538,7 +3541,8 @@ mod tests {
         let left = s.entities_by_kind(scc_core::kinds::COMPONENT).unwrap();
         assert_eq!(left.len(), 1, "{left:?}");
         assert_eq!(left[0].name, "root");
-        assert!(s.get_entity("repo://r/component/root-services").unwrap().is_none());
+        let gone = scc_core::component_id("r", "root+services");
+        assert!(s.get_entity(&gone).unwrap().is_none());
     }
 
 // trace:exempt reason=internal-detail
@@ -3602,13 +3606,14 @@ mod tests {
         assert!(s.get_entity(&concept).unwrap().is_none(), "concept gone");
         assert!(s.all_relationships().unwrap().is_empty(), "no dangling edges");
         // unrelated entities with the path in sources still purge
+        let db = scc_core::entity_id("r", "store", "db");
         s.insert_entity(
-            &Entity::new("repo://r/store/db", "store", "db"),
+            &Entity::new(db.clone(), "store", "db"),
             &["a.ts".into()],
         )
         .unwrap();
         s.purge_path("a.ts").unwrap();
-        assert!(s.get_entity("repo://r/store/db").unwrap().is_none());
+        assert!(s.get_entity(&db).unwrap().is_none());
     }
 
     #[test]
@@ -3624,7 +3629,8 @@ mod tests {
     // trace:exempt reason=internal-detail
     fn fts_escapes_punctuation() {
         let (s, _d) = tmp_store();
-        let mut e = Entity::new("repo://r/route/api", "route", "GET /api/v1/items");
+        let rid = scc_core::entity_id("r", "route", "GET /api/v1/items");
+        let mut e = Entity::new(rid, "route", "GET /api/v1/items");
         e.attr("path", serde_json::json!("/api/v1/items"));
         s.insert_entity(&e, &["app.py".into()]).unwrap();
         let hits = s.search_entities("GET /api/v1/items", 10).unwrap();

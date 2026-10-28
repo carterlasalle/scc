@@ -63,6 +63,10 @@ fn python_facts_include_expected_symbols() {
     assert!(has("annotation", "celery.task"), "annotation entity for @celery.task");
     // fields are owned namespaced entities
     assert!(has("field", "Cart.items"), "field entity Cart.items");
+    // #26: case/separator variants that collapse under `sanitize_key`
+    // must surface as distinct field entities, not one merged row.
+    assert!(has("field", "Cart.foo_bar"), "field entity Cart.foo_bar");
+    assert!(has("field", "Cart.FOO_BAR"), "field entity Cart.FOO_BAR");
     // configuration keys
     assert!(has("configuration", "PORT"), "configuration entity PORT");
     assert!(has("configuration", "DATABASE_URL"), "configuration entity DATABASE_URL");

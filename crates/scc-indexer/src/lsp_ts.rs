@@ -790,10 +790,10 @@ mod tests {
         store
             .insert_symbol("src/main.ts", "main", "function", None, 3, 5, true, None)
             .unwrap();
-        let ext = entity_id(&repo, kinds::EXTERNAL_API, "-app/util");
+        let ext = entity_id(&repo, kinds::EXTERNAL_API, "@app/util");
         store
             .insert_entity(
-                &scc_core::Entity::new(ext.clone(), kinds::EXTERNAL_API, "-app/util"),
+                &scc_core::Entity::new(ext.clone(), kinds::EXTERNAL_API, "@app/util"),
                 &["src/main.ts".to_string()],
             )
             .unwrap();

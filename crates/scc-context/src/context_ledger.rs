@@ -184,8 +184,8 @@ mod tests {
         let mut led = led;
         led.visible_symbols.insert("repo://r/symbol/a.py/x".into());
         led.visible_files.insert("a.py".into());
-        led.visible_components.insert("repo://r/component/c".into());
-        led.visible_flows.insert("repo://r/flow/f".into());
+        led.visible_components.insert(scc_core::component_id("r", "c"));
+        led.visible_flows.insert(scc_core::entity_id("r", "flow", "f"));
         led.last_task = Some("fix checkout".into());
         ls.save(&led);
 
@@ -212,15 +212,15 @@ mod tests {
         let mut syms = BTreeSet::new();
         syms.insert("repo://r/symbol/a.py/rendered".into());
         let mut comps = BTreeSet::new();
-        comps.insert("repo://r/component/c".into());
+        comps.insert(scc_core::component_id("r", "c"));
         let mut flows = BTreeSet::new();
-        flows.insert("repo://r/flow/f".into());
+        flows.insert(scc_core::entity_id("r", "flow", "f"));
 
         ls.record_visible(&syms, &BTreeSet::new(), &comps, &flows);
         let led = ls.load();
         assert!(led.visible_symbols.contains("repo://r/symbol/a.py/rendered"));
-        assert!(led.visible_components.contains("repo://r/component/c"));
-        assert!(led.visible_flows.contains("repo://r/flow/f"));
+        assert!(led.visible_components.contains(&scc_core::component_id("r", "c")));
+        assert!(led.visible_flows.contains(&scc_core::entity_id("r", "flow", "f")));
         // only rendered ids were recorded — nothing else leaked in
         assert_eq!(led.visible_symbols.len(), 1);
         assert!(led.visible_files.is_empty());

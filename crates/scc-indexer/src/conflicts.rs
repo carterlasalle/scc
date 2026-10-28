@@ -122,24 +122,25 @@ mod tests {
 
     #[test]
     fn classify_counts_only_target_changes() {
-        let ext = "repo://r/external_api/helper-pkg";
+        let ext = scc_core::entity_id("r", scc_core::kinds::EXTERNAL_API, "helper-pkg");
         let sym = "repo://r/symbol/lib/helper_pkg/impl.py/helper";
         let upgrades = vec![
-            record("helper", ext, sym, 5),             // conflict: external -> symbol
+            record("helper", &ext, sym, 5),             // conflict: external -> symbol
             record("same", sym, sym, 9),               // agreement: unchanged
             record("other", "repo://r/external_api/x", "repo://r/external_api/y", 3), // conflict
         ];
         let report = classify("b.py", &upgrades);
         assert_eq!(report.conflicts, 2);
         assert_eq!(report.records.len(), 2);
+        // message embeds the computed ids verbatim — recompute, never hardcode
         assert_eq!(
             report.records[0],
-            "b.py:5 call to helper resolved by LSP to repo://r/symbol/lib/helper_pkg/impl.py/helper; native index had repo://r/external_api/helper-pkg"
+            format!("b.py:5 call to helper resolved by LSP to {sym}; native index had {ext}")
         );
         // identical records dedupe within one report
         let dup = vec![
-            record("helper", ext, sym, 5),
-            record("helper", ext, sym, 5),
+            record("helper", &ext, sym, 5),
+            record("helper", &ext, sym, 5),
         ];
         assert_eq!(classify("b.py", &dup).conflicts, 1);
     }
@@ -148,11 +149,12 @@ mod tests {
     fn persist_writes_drift_findings_and_dedupes() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("scc.db"), dir.path()).unwrap();
+        let ext = scc_core::entity_id("r", scc_core::kinds::EXTERNAL_API, "helper-pkg");
         let report = classify(
             "b.py",
             &[record(
                 "helper",
-                "repo://r/external_api/helper-pkg",
+                &ext,
                 "repo://r/symbol/lib/helper_pkg/impl.py/helper",
                 5,
             )],
@@ -174,12 +176,13 @@ mod tests {
     fn record_resolution_conflicts_end_to_end() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("scc.db"), dir.path()).unwrap();
+        let ext = scc_core::entity_id("r", scc_core::kinds::EXTERNAL_API, "@app/util");
         let report = record_resolution_conflicts(
             &store,
             "src/main.ts",
             &[record(
                 "helper",
-                "repo://r/external_api/-app/util",
+                &ext,
                 "repo://r/symbol/lib/util/impl.ts/helper",
                 4,
             )],
