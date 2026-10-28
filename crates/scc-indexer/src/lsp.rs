@@ -435,15 +435,89 @@ impl LspResolver {
         self.opened.insert(file.to_string());
     }
 
-    /// Locate the callee name token inside `line_text`; falls back to 0.
-    fn callee_char(line_text: &str, callee: &str) -> usize {
+    /// Locate the callee name token for the call site on `line` (1-based).
+    ///
+    /// The column comes from tree-sitter, not from a text search: the
+    /// extractor records one `calls` edge per call site, so at most one
+    /// EXTRACTED edge on this line matches `callee`; the resolver re-parses
+    /// the file and takes the Nth same-callee call on that line (N = the
+    /// edge's order among same-callee EXTRACTED edges on the line). This
+    /// keeps `a.m() + b.m()` and trailing `# m ...` comments from
+    /// misdirecting the LSP query at the last text occurrence.
+    /// Falls back to 0 when the file cannot be parsed.
+    fn callee_char(source: &str, line: u32, callee: &str, occurrence: usize) -> usize {
         let needle = callee.rsplit('.').next().unwrap_or(callee);
-        if !needle.is_empty() {
-            if let Some(idx) = line_text.rfind(needle) {
-                return idx;
-            }
+        if needle.is_empty() {
+            return 0;
         }
-        0
+        let mut parser = tree_sitter::Parser::new();
+        let language: tree_sitter::Language = tree_sitter_python::LANGUAGE.into();
+        if parser.set_language(&language).is_err() {
+            return 0;
+        }
+        let Some(tree) = parser.parse(source, None) else {
+            return 0;
+        };
+        let mut found = 0;
+        let mut result = None;
+        // Two passes: exact callee-text matches first, bare-needle matches
+        // second. `a.m() + b.m()` stores distinct callees `a.m` / `b.m`;
+        // matching either query against the first same-`m` call would repeat
+        // the bug (issue #34). The needle pass only fires when the recorded
+        // callee appears nowhere verbatim on the line.
+        for exact_only in [true, false] {
+            let mut stack = vec![tree.root_node()];
+            while let Some(node) = stack.pop() {
+                if node.kind() == "call" {
+                    if let Some(function) = node.child_by_field_name("function") {
+                        let text = function
+                            .utf8_text(source.as_bytes())
+                            .unwrap_or("")
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let matched = text == callee
+                            || (!exact_only && text.rsplit('.').next() == Some(needle));
+                        if matched {
+                            let row = node.start_position().row as u32 + 1;
+                            if row == line {
+                                if found == occurrence {
+                                    // Column of the method-name token itself:
+                                    // the `attribute` field of `a.m`, else the
+                                    // function start for a bare `helper()`.
+                                    // (LSP columns are UTF-16 code units; the
+                                    // token is the ASCII `rsplit('.')`
+                                    // segment of a recorded call, so byte and
+                                    // UTF-16 offsets agree here.)
+                                    let col = match function.kind() {
+                                        "attribute" => function
+                                            .child_by_field_name("attribute")
+                                            .map(|a| a.start_position().column)
+                                            .unwrap_or_else(|| function.start_position().column),
+                                        _ => function.start_position().column,
+                                    };
+                                    result = Some(col);
+                                    break;
+                                }
+                                found += 1;
+                            }
+                        }
+                    }
+                }
+                let mut cursor = node.walk();
+                let kids: Vec<_> = node.children(&mut cursor).collect();
+                for child in kids.into_iter().rev() {
+                    stack.push(child);
+                }
+            }
+            if result.is_some() {
+                break;
+            }
+            // The exact pass found nothing on this line: recount from zero
+            // for the needle fallback.
+            found = 0;
+        }
+        result.unwrap_or(0)
     }
 
     /// Query one call site and return the resolved target path + symbol name.
@@ -455,18 +529,11 @@ impl LspResolver {
         file: &str,
         line: u32,
         callee: &str,
+        occurrence: usize,
     ) -> Result<DefOutcome, String> {
         self.open_file(store, file);
-        let line_text = std::fs::read_to_string(store.root.join(file))
-            .ok()
-            .map(|s| {
-                s.lines()
-                    .nth(line.saturating_sub(1) as usize)
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .unwrap_or_default();
-        let char = Self::callee_char(&line_text, callee);
+        let source = std::fs::read_to_string(store.root.join(file)).unwrap_or_default();
+        let char = Self::callee_char(&source, line, callee, occurrence);
 
         // Primary candidate: the LSP-spec 0-based position (evidence lines are
         // 1-based). The same-line character-0 fallback covers servers that
@@ -544,6 +611,17 @@ impl LspResolver {
             .filter(|r| r.predicate == scc_core::predicates::CALLS && r.provenance == Provenance::Extracted && rel_ids.contains(&r.id))
             .collect();
 
+        // The extractor writes one edge per call site, but the evidence id
+        // is (path, kind, callee, line): two same-callee calls on one line
+        // share one evidence row. `occurrence` = this edge's order among
+        // same-(line, callee) candidate edges, so each edge queries its own
+        // call's column instead of every edge hitting the last `m`.
+        let mut seen: std::collections::HashMap<(u32, String), usize> =
+            std::collections::HashMap::new();
+        // New-edge ids created by this run, keyed by the group that may
+        // collide on shared evidence identity: same line + same callee.
+        let mut upgraded_in_group: std::collections::HashSet<(u32, String, String)> =
+            std::collections::HashSet::new();
         for rel in &rels {
             let Some(ev_id) = rel.evidence.first() else {
                 out.unresolved += 1;
@@ -558,10 +636,29 @@ impl LspResolver {
                 continue;
             };
             let callee = ev.symbol.clone().unwrap_or_default();
+            let key = (line, callee.clone());
+            let occurrence = seen.get(&key).copied().unwrap_or(0);
+            seen.insert(key, occurrence + 1);
 
-            match self.definition_for(store, file, line, &callee)? {
+            match self.definition_for(store, file, line, &callee, occurrence)? {
                 DefOutcome::Resolved(target_path, target_name) => {
+                    let repo_id = store.repository().id;
+                    let new_object = scc_core::symbol_id(&repo_id, &target_path, &target_name);
+                    // Never delete a correct edge: same-callee edges on one
+                    // line share an evidence id, so the second upgrade would
+                    // otherwise compute the same new-edge id and delete the
+                    // first upgrade's edge. When the second call resolves to
+                    // the same target the edge already exists — keep it and
+                    // count this edge resolved without re-deleting. A
+                    // different target gets its own edge id and both survive.
+                    let new_id = rel_id(&["calls", &rel.subject, &new_object]);
+                    let group_key = (line, callee.clone(), new_id.clone());
+                    if upgraded_in_group.contains(&group_key) {
+                        out.upgraded += 1;
+                        continue;
+                    }
                     self.apply_upgrade(store, rel, file, &target_path, &target_name, &callee, line)?;
+                    upgraded_in_group.insert(group_key);
                     out.upgraded += 1;
                 }
                 DefOutcome::Error => {
@@ -740,6 +837,29 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // callee column lookup (issue #34: rfind hit the last occurrence)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn callee_char_selects_own_call_site() {
+        let src = "def f(a, b):\n    return a.m() + b.m()\n";
+        // Method-token columns: the `m` of `a.m` at 13, of `b.m` at 21.
+        assert_eq!(LspResolver::callee_char(src, 2, "a.m", 0), 13);
+        assert_eq!(LspResolver::callee_char(src, 2, "b.m", 0), 21);
+        // Same callee twice on one line: occurrence selects the Nth site.
+        let twice = "def f(a):\n    return a.m() + a.m()\n";
+        assert_eq!(LspResolver::callee_char(twice, 2, "a.m", 0), 13);
+        assert_eq!(LspResolver::callee_char(twice, 2, "a.m", 1), 21);
+    }
+
+    #[test]
+    fn callee_char_ignores_trailing_comment() {
+        let src = "def f(a):\n    return a.m()  # m is documented in m.md\n";
+        // Must point at the call's `m` (13), not the comment's `m`s.
+        assert_eq!(LspResolver::callee_char(src, 2, "a.m", 0), 13);
+    }
+
+    // ---------------------------------------------------------------
     // mock-server upgrade test (no pyright required)
     // ---------------------------------------------------------------
 
@@ -828,6 +948,139 @@ mod tests {
 
         // the old EXTRACTED edge is gone
         assert!(!rels.iter().any(|r| r.provenance == Provenance::Extracted));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mock_server_keeps_both_same_line_upgrades() {
+        // Two EXTRACTED edges, same line + same callee needle `m` (the
+        // `a.m() + b.m()` case): the old `rfind` queried the second call
+        // twice and the second upgrade deleted the first. The mock server
+        // answers per-column: column of `a.m` -> A.m, anything else -> B.m.
+        // Both edges must survive as RESOLVED.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.py"), "class A:\n    def m(self):\n        return 1\n").unwrap();
+        std::fs::write(root.join("b.py"), "class B:\n    def m(self):\n        return 2\n").unwrap();
+        std::fs::write(root.join("f.py"), "def f(a, b):\n    return a.m() + b.m()\n").unwrap();
+
+        let db = root.join(".scc-test");
+        std::fs::create_dir_all(&db).unwrap();
+        let store = Store::open(&db.join("scc.db"), root).unwrap();
+        let repo = store.repository().id;
+        for (path, name, start, end) in [("a.py", "A.m", 2, 3), ("b.py", "B.m", 2, 3), ("f.py", "f", 1, 2)] {
+            store
+                .insert_symbol(path, name, "function", None, start, end, true, None)
+                .unwrap();
+        }
+        let f_id = scc_core::symbol_id(&repo, "f.py", "f");
+        let ext_a = entity_id(&repo, kinds::EXTERNAL_API, "a_mod");
+        let ext_b = entity_id(&repo, kinds::EXTERNAL_API, "b_mod");
+        store
+            .insert_entity(
+                &scc_core::Entity::new(f_id.clone(), kinds::SYMBOL, "f"),
+                &["f.py".to_string()],
+            )
+            .unwrap();
+        for ext in [&ext_a, &ext_b] {
+            store
+                .insert_entity(
+                    &scc_core::Entity::new(ext.clone(), kinds::EXTERNAL_API, "ext"),
+                    &["f.py".to_string()],
+                )
+                .unwrap();
+        }
+        // Same line, same callee needle `m`: shared evidence id on purpose.
+        let ev = Evidence {
+            id: evidence_id("f.py", "call", "m", 2),
+            r#type: EvidenceType::Source,
+            path: Some("f.py".to_string()),
+            symbol: Some("m".to_string()),
+            start_line: Some(2),
+            end_line: None,
+            revision: None,
+            content_hash: None,
+            extractor: Some("scc-native".to_string()),
+            extractor_version: Some("0.0.0".to_string()),
+        };
+        store.insert_evidence(&ev).unwrap();
+        for (i, ext) in [&ext_a, &ext_b].iter().enumerate() {
+            let base = rel_id(&["calls", &f_id, ext]);
+            let rel = Relationship::new(
+                format!("{base}-{i}"),
+                f_id.clone(),
+                scc_core::predicates::CALLS,
+                (*ext).clone(),
+                Provenance::Extracted,
+            )
+            .with_confidence(confidence::CONFIRMED_EXTERNAL)
+            .with_evidence(vec![ev.id.clone()]);
+            store.insert_relationship(&rel, "f.py").unwrap();
+        }
+
+        let (client_reader, server_writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (server_reader, client_writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let root_owned = root.to_path_buf();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(server_reader);
+            let mut writer = server_writer;
+            while let Ok(msg) = read_frame(&mut reader) {
+                let method = msg.get("method").and_then(Value::as_str);
+                let id = msg.get("id");
+                if method == Some("initialize") {
+                    let resp = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {"capabilities": {"definitionProvider": true}},
+                    });
+                    let _ = writer.write_all(&encode_frame(&resp));
+                } else if method == Some("textDocument/definition") {
+                    let col = msg
+                        .pointer("/params/position/character")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(99);
+                    // `a.m`'s `m` is at column 13; route per column.
+                    let (target_file, target_line) = if col == 13 { ("a.py", 1) } else { ("b.py", 1) };
+                    let uri = format!("file://{}/{target_file}", root_owned.display());
+                    let resp = json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": [{
+                            "uri": uri,
+                            "range": {
+                                "start": {"line": target_line, "character": 4},
+                                "end": {"line": target_line, "character": 5},
+                            }
+                        }]
+                    });
+                    let _ = writer.write_all(&encode_frame(&resp));
+                }
+                let _ = writer.flush();
+            }
+        });
+
+        let mut resolver = LspResolver::with_io(
+            root,
+            "9.9.9".to_string(),
+            Box::new(client_reader),
+            Box::new(client_writer),
+            None,
+        )
+        .unwrap();
+
+        let result = resolver.resolve_call_definitions(&store, "f.py").unwrap();
+        assert_eq!(result.upgraded, 2, "{result:?}");
+        let rels = store.all_relationships().unwrap();
+        let calls: Vec<_> = rels
+            .iter()
+            .filter(|r| r.predicate == scc_core::predicates::CALLS)
+            .collect();
+        let target_a = scc_core::symbol_id(&repo, "a.py", "A.m");
+        let target_b = scc_core::symbol_id(&repo, "b.py", "B.m");
+        assert!(calls.iter().any(|r| r.object == target_a && r.provenance == Provenance::Resolved));
+        assert!(calls.iter().any(|r| r.object == target_b && r.provenance == Provenance::Resolved));
+        assert_eq!(calls.len(), 2, "both same-line edges must survive: {calls:?}");
+        assert!(!calls.iter().any(|r| r.provenance == Provenance::Extracted));
     }
 
 // trace:v1 id=impl.crates-scc-indexer-src-lsp.seed-store work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
