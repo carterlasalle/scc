@@ -1361,22 +1361,83 @@ fn compression_policy(goal: &str) -> serde_json::Value {
 // component_context
 // ---------------------------------------------------------------------------
 
-// trace:exempt reason=internal-detail
+/// Resolve a component by any of its member paths: the `a+b` cluster name
+/// changes when a member is added, so callers address a component by a
+/// stable path instead — a member dir (`src/flask`), or a file inside a
+/// member dir (`src/flask/app.py`). Longest implementation-dir match wins
+/// (so `src/flask/sansio/x.py` prefers the `src/flask/sansio` member over
+/// the `src/flask` parent); ties keep store order (sorted by name).
+/// Returns the component and whether the match was exact. Deterministic.
+// trace:v1 id=impl.scc.packs.component-member-path-resolve work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-CTX
+fn resolve_component_by_member_path<'a>(
+    comps: &'a [scc_core::Entity],
+    query: &str,
+) -> Option<(&'a scc_core::Entity, bool)> {
+    let q = query.trim().trim_start_matches("./").trim_end_matches('/');
+    if q.is_empty() {
+        return None;
+    }
+    let mut best: Option<(&'a scc_core::Entity, usize, bool)> = None;
+    for c in comps {
+        let paths: Vec<String> = c
+            .attributes
+            .get("implementation")
+            .and_then(|i| i.get("paths"))
+            .and_then(|p| p.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for p in &paths {
+            let p = p.trim_end_matches('/');
+            let (len, exact) = if q == p {
+                (p.len(), true)
+            } else if q.starts_with(&format!("{p}/")) || p.starts_with(&format!("{q}/")) {
+                (p.len(), false)
+            } else {
+                continue;
+            };
+            let take = match &best {
+                None => true,
+                Some((_, blen, bexact)) => (exact && !bexact) || (exact == *bexact && (len > *blen)),
+            };
+            // Deterministic tie-break: longest dir wins; equal length
+            // keeps the earlier component in store order (sorted by name).
+            if take {
+                best = Some((c, len, exact));
+            }
+        }
+    }
+    best.map(|(c, _, exact)| (c, exact))
+}
+
+// trace:v1 id=impl.scc.packs.component-member-path work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-CTX
 pub fn component(ctx: &ContextCompiler, id_or_name: &str, budget: usize, full: bool) -> ContextPack {
     let mut pack = ContextPack::new("component", &ctx.revision());
-    let comp = ctx
-        .store
-        .components()
-        .unwrap_or_default()
-        .into_iter()
-        .find(|c| c.id == id_or_name || c.name == id_or_name);
+    let comps = ctx.store.components().unwrap_or_default();
+    let comp = comps
+        .iter()
+        .find(|c| c.id == id_or_name || c.name == id_or_name)
+        .cloned()
+        .or_else(|| resolve_component_by_member_path(&comps, id_or_name).map(|(c, _)| c).cloned());
     let Some(comp) = comp else {
         pack.content = format!("# COMPONENT NOT FOUND\nNo component matches '{id_or_name}'.\n");
         pack.warnings
             .push(format!("unknown component: {id_or_name}"));
         return pack;
     };
-    pack.entity_ids.push(comp.id.clone());
+    // A member-path query (not the exact component name) is worth one
+    // honest line: the generated `a+b` name changes when a member is
+    // added, so the caller should see what it actually resolved to.
+    if comp.name != id_or_name && comp.id != id_or_name {
+        pack.warnings.push(format!(
+            "resolved member path '{id_or_name}' to component '{}'",
+            comp.name
+        ));
+    }
+     pack.entity_ids.push(comp.id.clone());
 
     let mut sections: Vec<Section> = Vec::new();
 
@@ -1652,7 +1713,7 @@ pub fn impact(
     diff_base: Option<&str>,
     budget: usize,
     full: bool,
-) -> ContextPack {
+) -> Result<ContextPack, String> {
     let mut pack = ContextPack::new("impact", &ctx.revision());
     let mut files = files.to_vec();
     let symbols = symbols.to_vec();
@@ -1660,7 +1721,7 @@ pub fn impact(
         if files.is_empty() && symbols.is_empty() {
             match scc_graph::impact::diff_files(ctx.store, Some(base)) {
                 Ok(d) => files = d,
-                Err(e) => pack.warnings.push(format!("git diff failed: {e}")),
+                Err(e) => return Err(e.to_string()),
             }
         }
     }
@@ -1670,7 +1731,7 @@ pub fn impact(
         Err(e) => {
             pack.content = format!("# IMPACT ERROR\n{e}\n");
             pack.warnings.push(e.to_string());
-            return pack;
+            return Ok(pack);
         }
     };
 
@@ -1860,7 +1921,7 @@ pub fn impact(
     } else {
         finish(&mut pack, sections, budget, ctx_warnings(ctx));
     }
-    pack
+    Ok(pack)
 }
 
 // ---------------------------------------------------------------------------
@@ -1901,19 +1962,35 @@ pub fn verify(ctx: &ContextCompiler, budget: usize, full: bool) -> ContextPack {
     }
     sections.push(Section::new("FRESHNESS", fresh, 10));
     // scan inventory (counts recorded at index time; never paths)
+    // `failed` is the count of index-time extraction failures (paths live
+    // in store meta `index_failures`, shown by `scc status`); failed files
+    // scanned but extracted nothing, so scan `indexed` excludes them and
+    // `discovered == indexed + failed + ignored + unsupported + oversized
+    // + unreadable` holds.
     if let Some(raw) = ctx.store.meta_get("scan_stats").ok().flatten() {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
             let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+            // Straight from store meta: scc-context must not depend on
+            // scc-indexer for one counter.
+            let failed: u64 = ctx
+                .store
+                .meta_get("index_failures")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(&s).ok())
+                .map(|v| v.len() as u64)
+                .unwrap_or(0);
             sections.push(Section::new(
                 "FILES",
                 format!(
-                    "discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={}\n",
+                    "discovered={} indexed={} ignored={} unsupported={} oversized={} unreadable={} failed={}\n",
                     n("discovered"),
                     n("indexed"),
                     n("ignored"),
                     n("unsupported"),
                     n("oversized"),
-                    n("unreadable")
+                    n("unreadable"),
+                    failed
                 ),
                 10,
             ));
@@ -2809,7 +2886,7 @@ mod tests {
             crate::ContextSettings::default(),
             Vec::new(),
         );
-        let pack = impact(&ctx, &["src/a.py".into()], &[], None, 50_000, false);
+        let pack = impact(&ctx, &["src/a.py".into()], &[], None, 50_000, false).unwrap();
         assert!(
             pack.content.contains("FORGOTTEN PARTNERS"),
             "missing section: {}",
@@ -2823,6 +2900,44 @@ mod tests {
             pack.content
         );
         assert!(pack.content.contains("historical; not EXTRACTED impact"));
+    }
+
+    #[test]
+    // trace:exempt reason=unit-test
+    fn impact_pack_bad_diff_base_fails_instead_of_low_risk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        fn git(root: &std::path::Path, args: &[&str]) {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?} {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        git(&root, &["init", "-q"]);
+        git(&root, &["config", "user.email", "test@example.com"]);
+        git(&root, &["config", "user.name", "SCC Test"]);
+        git(&root, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(root.join("src/a.py"), "a = 1\n").unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "one"]);
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let graph = scc_graph::RealityGraph::load(&store).unwrap();
+        let ctx = crate::ContextCompiler::new(
+            &store,
+            &graph,
+            crate::ContextSettings::default(),
+            Vec::new(),
+        );
+        let err = impact(&ctx, &[], &[], Some("nope"), 50_000, false)
+            .expect_err("unknown ref must not produce a LOW-risk pack");
+        assert!(err.contains("unknown revision 'nope'"), "{err}");
     }
 
     #[test]
@@ -2962,6 +3077,88 @@ mod tests {
         let err = crate::structural_source::resolve_handle_to_path(&root, &stale).unwrap_err();
         assert!(err.contains("stale"), "{err}");
     }
+    fn component_entity(store: &Store, name: &str, paths: &[&str]) -> Entity {
+        let mut e = Entity::new(
+            scc_core::entity_id(store.repo_id.as_str(), kinds::COMPONENT, name),
+            kinds::COMPONENT,
+            name,
+        );
+        let owned: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+        e.attr(
+            "implementation",
+            serde_json::json!({"paths": owned, "symbols": []}),
+        );
+        e
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.context.component-member-path verifies=REQ-SCC-CTX exercises=impl.scc.packs.component-member-path-resolve
+    fn component_context_resolves_member_paths() {
+        // #24: the generated `a+b` name changes when a member is added, so
+        // a component must be addressable by any member path — not only by
+        // the exact joined string.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        store
+            .replace_components(&[
+                component_entity(
+                    &store,
+                    "src/flask+src/flask/sansio+tests",
+                    &["src/flask", "src/flask/sansio", "tests"],
+                ),
+                component_entity(&store, "root", &["root"]),
+            ])
+            .unwrap();
+        let graph = scc_graph::RealityGraph::load(&store).unwrap();
+        let ctx = crate::ContextCompiler::new(
+            &store,
+            &graph,
+            crate::ContextSettings::default(),
+            Vec::new(),
+        );
+        // exact name still resolves without a resolution warning
+        let exact = component(&ctx, "src/flask+src/flask/sansio+tests", 50_000, false);
+        assert!(
+            !exact.content.contains("COMPONENT NOT FOUND"),
+            "exact name resolves: {}",
+            exact.content
+        );
+        assert!(
+            !exact.warnings.iter().any(|w| w.contains("resolved member path")),
+            "exact name needs no resolution note: {:?}",
+            exact.warnings
+        );
+        // member dir, nested member dir, and file inside a member all
+        // resolve to the glued component with an honest warning
+        for q in ["src/flask", "src/flask/sansio", "tests", "src/flask/app.py"] {
+            let pack = component(&ctx, q, 50_000, false);
+            assert!(
+                !pack.content.contains("COMPONENT NOT FOUND"),
+                "member path '{q}' resolves: {}",
+                pack.content
+            );
+            assert!(
+                pack.entity_ids.iter().any(|id| id.contains("src")),
+                "member path '{q}' lands on the glued component: {:?}",
+                pack.entity_ids
+            );
+            assert!(
+                pack.warnings.iter().any(|w| w.contains(q)),
+                "member path '{q}' is disclosed: {:?}",
+                pack.warnings
+            );
+        }
+        // unknown paths still miss honestly
+        let miss = component(&ctx, "src/unknown", 50_000, false);
+        assert!(
+            miss.content.contains("COMPONENT NOT FOUND"),
+            "unknown member path still misses: {}",
+            miss.content
+        );
+    }
+
 
     #[test]
     // trace:v1 id=test.scc.context.render-hard-cap verifies=REQ-SCC-CTX exercises=impl.scc.packs

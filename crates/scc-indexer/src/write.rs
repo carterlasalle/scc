@@ -366,8 +366,17 @@ impl<'a> Writer<'a> {
                     if let Some((_, sym_id)) =
                         written.symbol_ids.iter().find(|(n, _)| n == symbol)
                     {
-                        let export_id =
-                            entity_id(self.repo_id, scc_core::kinds::EXPORT, symbol);
+                        // Same-named classes in different files must not
+                        // share one export entity (same rationale as fields
+                        // below). Mirror `symbol_id`'s per-file keying
+                        // exactly (case-preserving `encode_component`, not
+                        // the lossy `sanitize_key` inside `entity_id`).
+                        let export_id = format!(
+                            "repo://{}/export/{}/{}",
+                            scc_core::sanitize_key(self.repo_id),
+                            scc_core::encode_component(path),
+                            scc_core::encode_component(symbol),
+                        );
                         let mut se = scc_core::Entity::new(
                             export_id.clone(),
                             scc_core::kinds::EXPORT,
@@ -416,10 +425,21 @@ impl<'a> Writer<'a> {
                     if let Some((_, owner_id)) =
                         written.symbol_ids.iter().find(|(n, _)| n == owner)
                     {
-                        let field_id = entity_id(
-                            self.repo_id,
-                            scc_core::kinds::FIELD,
-                            &format!("{owner}.{name}"),
+                        // Field identity is per owning symbol, and symbol ids
+                        // already include the file (`symbol/<file>/<name>`).
+                        // Keying the field id by file+owner keeps
+                        // same-named classes in different files (`Config` in
+                        // billing/ vs shipping/) as distinct entities instead
+                        // of merging into one shared `field/config.timeout`.
+                        // Mirror `symbol_id`'s per-file keying exactly
+                        // (case-preserving `encode_component`, not the
+                        // lossy `sanitize_key` inside `entity_id`).
+                        let field_id = format!(
+                            "repo://{}/field/{}/{}.{}",
+                            scc_core::sanitize_key(self.repo_id),
+                            scc_core::encode_component(path),
+                            scc_core::encode_component(owner),
+                            scc_core::encode_component(name),
                         );
                         let mut se = scc_core::Entity::new(
                             field_id.clone(),
@@ -428,6 +448,7 @@ impl<'a> Writer<'a> {
                         );
                         se.attr("mutable", serde_json::json!(mutable));
                         se.attr("owner", serde_json::json!(owner));
+                        se.attr("file", serde_json::json!(path));
                         se.evidence = sym_evidence(owner);
                         self.store.insert_entity(&se, &[path.to_string()])?;
                         let rel = Relationship::new(
@@ -1185,6 +1206,59 @@ mod tests {
                     && r.object.contains("serve.port")),
             "field CONTAINS relationship"
         );
+    }
+
+    #[test]
+    // trace:exempt reason=internal-detail
+    fn same_named_owners_in_different_files_keep_distinct_fields() {
+        // #27: `field/config.timeout` was keyed by class name only, so
+        // `Config` in billing/ and shipping/ merged into one entity.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let store = scc_store::Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let writer = Writer::new(&store, "r", "rev");
+        for path in ["billing/models.py", "shipping/models.py"] {
+            let mut ef = ExtractedFile::default();
+            ef.symbols.push(Symbol {
+                name: "Config".into(),
+                kind: SymbolKind::Class,
+                signature: None,
+                decl_header: None,
+                start_line: 1,
+                end_line: 3,
+                exported: true,
+                docstring: None,
+                parent: None,
+            });
+            ef.facts = vec![
+                SemanticFact::PublicExport {
+                    symbol: "Config".into(),
+                    kind: "class".into(),
+                },
+                SemanticFact::Field {
+                    owner: "Config".into(),
+                    name: "timeout".into(),
+                    mutable: false,
+                },
+            ];
+            writer
+                .write_source(path, "h", &ef, &[], &[], &SymbolIndex::new("r"))
+                .unwrap();
+        }
+        let fields = store.entities_by_kind(scc_core::kinds::FIELD).unwrap();
+        assert_eq!(fields.len(), 2, "{fields:?}");
+        let mut ids: Vec<&str> = fields.iter().map(|f| f.id.as_str()).collect();
+        ids.sort();
+        assert_ne!(ids[0], ids[1], "field ids must differ per file: {ids:?}");
+        for (path, id) in ["billing/models.py", "shipping/models.py"].into_iter().zip(ids.iter()) {
+            assert!(
+                id.contains(&format!("field/{path}/Config.timeout")),
+                "field id carries its file: {id}"
+            );
+        }
+        let exps = store.entities_by_kind(scc_core::kinds::EXPORT).unwrap();
+        assert_eq!(exps.len(), 2, "exports stay per file too: {exps:?}");
     }
 
     #[test]

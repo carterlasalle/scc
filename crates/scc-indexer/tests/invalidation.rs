@@ -156,3 +156,40 @@ fn non_utf8_file_is_recorded_not_perpetually_added() {
         );
     }
 }
+
+#[test]
+// trace:v1 id=test.scc.index.failed-files-named verifies=REQ-SI-NX53P4B7 exercises=impl.scc.index.failed-files
+fn failed_files_are_named_and_counts_agree() {
+    // The django/django report: `1 failed` with no filename is unactionable,
+    // and `indexed` disagreed between the two printed lines. The report now
+    // names every failed path with its reason, the persisted meta survives
+    // for `scc status`, and `discovered == indexed + failed + ignored +
+    // unsupported + oversized + unreadable` holds.
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("ok.py"), "def ok():\n    return 1\n").unwrap();
+    std::fs::write(root.join("bad.py"), b"\xff\xfe def broken():\n    pass\n").unwrap();
+    let (idx, _db) = indexer_for(root);
+    let report = idx.index().unwrap();
+    assert_eq!(report.failed, 1);
+    assert_eq!(report.failed_files.len(), 1, "failed count must name its file");
+    assert_eq!(report.failed_files[0].path, "bad.py");
+    assert!(!report.failed_files[0].reason.is_empty());
+    let s = &report.scan_stats;
+    assert_eq!(
+        s.discovered,
+        s.indexed + report.failed as u64 + s.ignored + s.unsupported + s.oversized + s.unreadable,
+        "scan buckets must partition discovered"
+    );
+    // Same closure the old line broke: the inventory row still carries the
+    // scan hash, and the persisted meta names the file for `scc status`.
+    let persisted = scc_indexer::load_index_failures(&idx.store);
+    assert_eq!(persisted, report.failed_files);
+    // Healing: valid UTF-8 on re-index extracts facts and clears the entry.
+    std::fs::write(root.join("bad.py"), "def fixed():\n    return 1\n").unwrap();
+    let report = idx.index().unwrap();
+    assert_eq!(report.failed, 0);
+    assert!(report.failed_files.is_empty());
+    assert!(scc_indexer::load_index_failures(&idx.store).is_empty());
+    assert!(!idx.store.symbols_in_file("bad.py").unwrap().is_empty());
+}

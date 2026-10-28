@@ -723,3 +723,53 @@ fn operations_describe_shows_schema() {
     let out = run_ok(&workdir(repo.path()), &["operations", "--describe", "nope.nope"]);
     assert!(out.contains("unknown operation"), "{out}");
 }
+
+#[test]
+// trace:v1 id=test.scc-cli-interfaces.rpc-envelope-and-missing-operation verifies=REQ-SCC-API exercises=impl.crates-scc-cli-src-commands.cmd-rpc
+fn rpc_envelope_and_missing_operation() {
+    // `scc rpc --stdio` speaks newline-delimited {"id","operation","input"}
+    // frames — not JSON-RPC 2.0. A request without "operation" names the
+    // missing key and echoes the keys it got instead of `unknown operation ''`.
+    let repo = copy_fixture("http-service-python");
+    let mut child = Command::new(scc())
+        .args(["rpc", "--stdio"])
+        .current_dir(workdir(repo.path()))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let send = |stdin: &mut std::process::ChildStdin, msg: &str| {
+        writeln!(stdin, "{msg}").unwrap();
+        stdin.flush().unwrap();
+    };
+    send(&mut stdin, r#"{"id":1,"op":"operations.list"}"#);
+    send(&mut stdin, r#"{"id":2,"operation":"operations.list","input":{}}"#);
+    drop(stdin);
+
+    let mut stdout = String::new();
+    use std::io::Read;
+    child.stdout.take().unwrap().read_to_string(&mut stdout).unwrap();
+    let _ = child.wait();
+
+    let mut by_id: std::collections::BTreeMap<i64, serde_json::Value> = Default::default();
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        if let Some(id) = v.get("id").and_then(|i| i.as_i64()) {
+            by_id.insert(id, v);
+        }
+    }
+    assert_eq!(by_id.len(), 2, "both requests answered: {stdout}");
+    let err = by_id[&1]["error"].as_str().unwrap();
+    assert!(err.contains(r#"no "operation" key"#), "{err}");
+    assert!(err.contains("op"), "{err}");
+    assert!(!err.contains("unknown operation"), "{err}");
+    let ops = &by_id[&2]["output"]["operations"];
+    assert!(
+        ops.as_array().map(|a| !a.is_empty()).unwrap_or(false),
+        "operations.list answers over rpc: {stdout}"
+    );
+}

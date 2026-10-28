@@ -425,7 +425,7 @@ impl<'a> ContextCompiler<'a> {
         files: &[String],
         symbols: &[String],
         diff_base: Option<&str>,
-    ) -> ContextPack {
+    ) -> Result<ContextPack, String> {
         packs::impact(self, files, symbols, diff_base, self.settings.detail_tokens, false)
     }
 
@@ -435,7 +435,7 @@ impl<'a> ContextCompiler<'a> {
         files: &[String],
         symbols: &[String],
         diff_base: Option<&str>,
-    ) -> ContextPack {
+    ) -> Result<ContextPack, String> {
         packs::impact(self, files, symbols, diff_base, self.settings.detail_tokens, true)
     }
 

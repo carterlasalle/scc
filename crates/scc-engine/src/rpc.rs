@@ -1,9 +1,10 @@
-//! stdio JSON-RPC: newline-delimited requests, same registry.
+//! Structured operation RPC over stdio: newline-delimited requests, same registry.
 //!
 //! Request:  {"id": 1, "operation": "context.task", "input": {...}}
 //! Response: {"id": 1, "output": {...}} | {"id": 1, "error": "..."}
 //! Plus `operations.list` / `operations.describe` meta-operations.
-//! SDK subprocess mode speaks this — never CLI text.
+//! SDK subprocess mode speaks this — never CLI text. This is not
+//! JSON-RPC 2.0 (`scc mcp` is): there is no `jsonrpc`/`method`/`params`.
 
 // trace:exempt reason=internal-detail
 pub fn serve_stdio(root: &std::path::Path) -> crate::Result<()> {
@@ -29,7 +30,18 @@ pub fn serve_stdio(root: &std::path::Path) -> crate::Result<()> {
             }
         };
         let id = msg.get("id").cloned().unwrap_or(serde_json::Value::Null);
-        let op = msg.get("operation").and_then(|o| o.as_str()).unwrap_or("");
+        let Some(op) = msg.get("operation").and_then(|o| o.as_str()) else {
+            let mut keys: Vec<&str> = msg
+                .as_object()
+                .map(|m| m.keys().map(String::as_str).collect())
+                .unwrap_or_default();
+            keys.sort_unstable();
+            println!(
+                "{}",
+                serde_json::json!({"id": id, "error": format!("request has no \"operation\" key (got keys: {})", keys.join(", "))})
+            );
+            continue;
+        };
         let input = msg.get("input").cloned().unwrap_or(serde_json::json!({}));
         if op == "operations.list" {
             let ids: Vec<&str> = crate::ops::ids();

@@ -356,6 +356,7 @@ pub fn build_regions(
 /// service weights). See the module docs for the signal list.
 // trace:v1 id=impl.scc.clustering.merge work=WORK-SCC-005 satisfies=REQ-SCC-IR
 // trace:v1 id=impl.scc.clustering.sizecap work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:v1 id=impl.scc.clustering.prod-test-split work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-IR
 pub fn cluster_components(
     graph: &RealityGraph,
     store: &Store,
@@ -745,6 +746,44 @@ pub fn cluster_components(
         }
         if set.len() >= 2 {
             add_pair_weight(&mut w, &idx, &set, crate::archetype::PRIOR_WEIGHT);
+        }
+    }
+
+    // ---- production/test hard split: a region holding production files
+    // never merges with a region holding no production file (and vice
+    // versa). Test suites import the code they verify — the strongest
+    // signal two things are *different* (the code never imports the
+    // test) — so without this the call/flow/co-change weight between a
+    // suite and its subject glues them into one component and `impact`
+    // answers everything. Unlike the cross-unit soft constraint this is
+    // absolute: the pair's weight is zeroed, so neither pass-1 max-linkage
+    // nor pass-2 sum-linkage can ever merge them. Mixed regions (a flat
+    // package module riding along with its test files) keep merging
+    // normally — only clean-cut cases split. Deterministic: region index
+    // order, and `is_production_path` is a pure path-segment match. ----
+    let mut is_prod_region: Vec<bool> = vec![true; n];
+    for (rname, files) in &files_in_region {
+        let Some(&ri) = idx.get(rname.as_str()) else { continue };
+        let mut has_prod = false;
+        for fid in files {
+            let prod = graph
+                .entities
+                .get(fid)
+                .map(|e| crate::components::is_production_path(&e.name))
+                .unwrap_or(true);
+            if prod {
+                has_prod = true;
+                break;
+            }
+        }
+        is_prod_region[ri] = has_prod;
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if is_prod_region[i] != is_prod_region[j] {
+                w[i][j] = 0;
+                w[j][i] = 0;
+            }
         }
     }
 
@@ -1763,6 +1802,74 @@ mod tests {
         );
         assert_eq!(merged.attributes["layer"], serde_json::json!(LAYER_COMPONENT));
     }
+    #[test]
+    // trace:v1 id=test.scc.clustering.prod-test-split verifies=REQ-SCC-IR exercises=impl.scc.clustering.prod-test-split
+    fn test_region_never_merges_into_production_region() {
+        // #24: a test suite importing the code it verifies must not merge
+        // into the production component — the call (+2) plus shared store
+        // writes (+4) reach MERGE_THRESHOLD, but the one-way test->prod
+        // coupling is the strongest signal two things are *different*.
+        let (store, _t) = store_for();
+        let repo = store.repo_id.clone();
+        let sa = insert_file_with_symbols(&store, "src/app.py", &["create_app"]);
+        let sb = insert_file_with_symbols(&store, "tests/test_app.py", &["test_app"]);
+        let mut te = Entity::new(
+            entity_id(&repo, kinds::TEST, "tests/test_app.py::test_app"),
+            kinds::TEST,
+            "test_app",
+        );
+        te.attr("file", serde_json::json!("tests/test_app.py"));
+        store
+            .insert_entity(&te, &["tests/test_app.py".into()])
+            .unwrap();
+        // shared store writes: app + test write the same store (+4)
+        let db = entity_id(&repo, kinds::DATA_STORE, "db");
+        store
+            .insert_entity(&Entity::new(db.clone(), kinds::DATA_STORE, "db"), &["src/app.py".into()])
+            .unwrap();
+        for (i, sym) in [sa[0].clone(), sb[0].clone()].iter().enumerate() {
+            store
+                .insert_relationship(
+                    &Relationship::new(
+                        format!("rel:w:{i}"),
+                        sym.clone(),
+                        predicates::WRITES,
+                        db.clone(),
+                        Provenance::Extracted,
+                    ),
+                    "src/app.py",
+                )
+                .unwrap();
+        }
+        // test_app -> create_app (the suite imports its subject, +2)
+        store
+            .insert_relationship(
+                &Relationship::new(
+                    "rel:call",
+                    sb[0].clone(),
+                    predicates::CALLS,
+                    sa[0].clone(),
+                    Provenance::Extracted,
+                ),
+                "tests/test_app.py",
+            )
+            .unwrap();
+        let comps = compile(&store);
+        let names: Vec<&str> = comps.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            names.contains(&"src"),
+            "production region stays its own component: {names:?}"
+        );
+        assert!(
+            names.contains(&"tests"),
+            "test region stays its own component: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.contains('+')),
+            "no glued component despite weight 6: {names:?}"
+        );
+    }
+
 
     #[test]
     fn library_architecture_comes_from_exports() {
