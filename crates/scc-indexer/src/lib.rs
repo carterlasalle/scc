@@ -676,7 +676,6 @@ impl Indexer {
         report.mutated = report.changed > 0 || report.removed > 0;
         report.duration_ms = started.elapsed().as_millis() as u64;
         debug_assert_eq!(report.failed, report.failed_files.len());
-        // trace:v1 id=impl.scc.index.persist-failures work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
         persist_index_failures(&self.store, &report.failed_files)?;
         reconcile_scan_stats(&self.store, &mut report.scan_stats, report.failed)?;
         Ok(report)
