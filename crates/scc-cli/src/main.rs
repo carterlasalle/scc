@@ -327,7 +327,7 @@ enum Commands {
     /// Run the MCP server on stdio
     Mcp,
 
-    /// Structured JSON-RPC over stdio (SDK subprocess mode; never CLI text)
+    /// Structured operation RPC over stdio (SDK subprocess mode; never CLI text)
     Rpc {
         /// Force stdio mode (today the only mode)
         #[arg(long)]
