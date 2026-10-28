@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.12] — 2026-10-28
+
+Release-only: ships the injective component-ID fix (#19: commits 8f13177,
+1301031, a5c381c) that postdates the `v0.2.11` tag. Cold `scc index` on
+ordinary repositories failed with `UNIQUE constraint failed:
+components.id`; every `install.sh` / `scc update` install resolved to the
+broken v0.2.11 binary. No new behavior beyond what is already on `main`.
+
 ## [Unreleased]
 
 Benchmark-recovery items from #21. Availability, retrieval placement, and
