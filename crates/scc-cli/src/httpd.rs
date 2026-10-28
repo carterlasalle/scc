@@ -96,6 +96,7 @@ fn handle_request(
 // trace:v1 id=impl.scc.http work=WORK-SCC-001 satisfies=REQ-SCC-API
 
 // trace:v1 id=impl.crates-scc-cli-src-httpd.route
+// trace:v1 id=impl.crates-scc-cli-src-httpd.decode-component-id satisfies=REQ-SCC-API
 fn route(
     root: &Path,
     method: &str,
@@ -175,7 +176,6 @@ fn route(
             Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("GET", p) if p.starts_with("/v1/components/") => {
-            // trace:v1 id=impl.crates-scc-cli-src-httpd.decode-component-id work=WORK-CO-Q8Z1HJJJ satisfies=REQ-SCC-API
             // Path ids arrive percent-encoded (`web%2Fsrc`); decode before
             // lookup so standard clients reach slash-containing components.
             let id = scc_core::decode_component(p.trim_start_matches("/v1/components/"));
