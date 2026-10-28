@@ -17,6 +17,36 @@ fn fingerprint_row<T: serde::Serialize>(row: &T) -> String {
     scc_core::fnv1a64_hex(serde_json::to_string(row).unwrap_or_default().as_bytes())
 }
 
+/// Translate a rendered surface entry id into the canonical store id.
+///
+/// Surface renders name overloads `{logical}#overload{N}` so same-name
+/// overloads stay separate render entries. The store never uses that
+/// suffix: index 0 keeps the bare logical id and N >= 1 uses
+/// `{logical}#{N}`. A snapshot records canonical entity ids — facts the
+/// model can still resolve later — so a rendered overload id is mapped
+/// before it is persisted or looked up. Ids the store does not know are
+/// returned unchanged so genuinely missing facts still report as
+/// invalidated.
+// trace:exempt reason=internal-detail
+fn canonical_entity_id(id: &str, known: &std::collections::BTreeSet<&str>) -> String {
+    if known.contains(id) {
+        return id.to_string();
+    }
+    if let Some((logical, n)) = id.rsplit_once("#overload") {
+        if n.parse::<usize>().is_ok() {
+            let candidate = if n == "0" {
+                logical.to_string()
+            } else {
+                format!("{logical}#{n}")
+            };
+            if known.contains(candidate.as_str()) {
+                return candidate;
+            }
+        }
+    }
+    id.to_string()
+}
+
 /// A durable checkpoint of one rendered artifact.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 // trace:v1 id=impl.crates-scc-store-src-snapshot.context-snapshot work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
@@ -95,7 +125,9 @@ pub struct SnapshotSave<'a> {
     pub revision: i64,
     /// Rendered artifact text (visible knowledge only).
     pub artifact: &'a str,
-    /// Canonical entity ids visible in the artifact.
+    /// Entity ids visible in the artifact. Rendered surface overload ids
+    /// (`{logical}#overload{N}`) are translated to canonical store ids on
+    /// save; ids that resolve to no store entity are dropped.
     pub entity_ids: &'a [String],
     /// Budget the artifact was rendered under.
     pub budget: usize,
@@ -114,12 +146,41 @@ impl Store {
         // Fingerprints resolve against the LIVE model at save time: the
         // snapshot pins content, not just ids. Relationships fingerprinted
         // are those touching the visible set (visible knowledge only).
+        let entities = self.all_entities()?;
+        let known: std::collections::BTreeSet<&str> =
+            entities.iter().map(|e| e.id.as_str()).collect();
+        // Rendered surface entries name overloads `{logical}#overload{N}`;
+        // the store indexes index 0 as the bare id and N >= 1 as
+        // `{logical}#{N}`. Persisting the rendered spelling would make an
+        // unchanged tree look invalidated on the next diff (issue #31), so
+        // translate to canonical ids and keep first-seen order. A rendered
+        // overload id that resolves to no store entity is render-only
+        // syntax, not a persistent fact: drop it rather than poison the
+        // snapshot.
+        let mut seen = std::collections::BTreeSet::new();
+        let entity_ids: Vec<String> = save
+            .entity_ids
+            .iter()
+            .filter_map(|id| {
+                let canonical = canonical_entity_id(id, &known);
+                // Unresolved `#overload{N}` spellings are render-only
+                // syntax: drop them. A known entity whose id happens to
+                // contain that text stays.
+                if !known.contains(canonical.as_str()) && canonical.contains("#overload") {
+                    return None;
+                }
+                if !seen.insert(canonical.clone()) {
+                    return None;
+                }
+                Some(canonical)
+            })
+            .collect();
         let visible: std::collections::BTreeSet<&str> =
-            save.entity_ids.iter().map(|s| s.as_str()).collect();
+            entity_ids.iter().map(|s| s.as_str()).collect();
         let mut entity_fp = std::collections::BTreeMap::new();
         let mut contract_fp = std::collections::BTreeMap::new();
         let mut state_fp = std::collections::BTreeMap::new();
-        for e in self.all_entities()? {
+        for e in entities {
             let fp = fingerprint_row(&e);
             if visible.contains(e.id.as_str()) {
                 entity_fp.insert(e.id.clone(), fp.clone());
@@ -159,7 +220,7 @@ impl Store {
             revision: save.revision,
             artifact: save.artifact.to_string(),
             artifact_hash: scc_core::fnv1a64_hex(save.artifact.as_bytes()),
-            entity_ids: save.entity_ids.to_vec(),
+            entity_ids,
             entity_fp,
             rel_fp,
             contract_fp,
@@ -248,21 +309,38 @@ impl Store {
         let Some(snap) = self.load_snapshot(id)? else {
             return Ok(None);
         };
+        let live_entities = self.all_entities()?;
+        let known: std::collections::BTreeSet<&str> =
+            live_entities.iter().map(|e| e.id.as_str()).collect();
         let mut live_fp = std::collections::BTreeMap::new();
-        for e in self.all_entities()? {
-            live_fp.insert(e.id.clone(), fingerprint_row(&e));
+        for e in &live_entities {
+            live_fp.insert(e.id.clone(), fingerprint_row(e));
         }
         let mut still_valid = Vec::new();
         let mut invalidated = Vec::new();
         let mut modified_entities = Vec::new();
+        // Snapshots saved before the canonical-id fix recorded rendered
+        // surface ids (`#overload{N}`), which the store never indexes.
+        // Translate them on lookup so an unchanged tree stops reporting
+        // phantom invalidations; genuinely missing facts still surface.
+        let mut seen = std::collections::BTreeSet::new();
         for eid in &snap.entity_ids {
-            match live_fp.get(eid) {
-                None => invalidated.push(eid.clone()),
+            let canonical = canonical_entity_id(eid, &known);
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
+            match live_fp.get(&canonical) {
+                None => invalidated.push(canonical),
                 Some(fp) => {
-                    if snap.entity_fp.get(eid).map(|s| s == fp).unwrap_or(true) {
-                        still_valid.push(eid.clone());
+                    if snap
+                        .entity_fp
+                        .get(&canonical)
+                        .map(|s| s == fp)
+                        .unwrap_or(true)
+                    {
+                        still_valid.push(canonical);
                     } else {
-                        modified_entities.push(eid.clone());
+                        modified_entities.push(canonical);
                     }
                 }
             }
@@ -449,5 +527,96 @@ mod tests {
         assert!(d2.artifact_changed, "visible rows changed: re-render would differ");
         // unknown id: honest None, not an error
         assert!(s.diff_snapshot("snap-0-deadbeef").unwrap().is_none());
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.store.snapshot-canonicalizes-overloads verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-store-src-snapshot.save-snapshot
+    fn snapshot_canonicalizes_rendered_overload_ids() {
+        let (s, _d) = tmp_store();
+        s.upsert_file("a.py", "h1", "python", "source", 10).unwrap();
+        for id in ["repo://t/symbol/a.py/f", "repo://t/symbol/a.py/f#1"] {
+            s.insert_entity(&Entity::new(id, "symbol", "f"), &["a.py".into()])
+                .unwrap();
+        }
+        let r = s.record_current_revision().unwrap();
+        let snap = s
+            .save_snapshot(SnapshotSave {
+                task: "overloads",
+                epoch: "epoch:overload",
+                revision: r.rev,
+                artifact: "pack showing f overloads",
+                // Rendered surface ids: index 0 and 1 for the same logical
+                // symbol, plus a duplicate that must collapse.
+                entity_ids: &[
+                    "repo://t/symbol/a.py/f#overload0".into(),
+                    "repo://t/symbol/a.py/f#overload1".into(),
+                    "repo://t/symbol/a.py/f#overload0".into(),
+                ],
+                budget: 10,
+                warnings: &[],
+            })
+            .unwrap();
+        assert_eq!(
+            snap.entity_ids,
+            vec![
+                "repo://t/symbol/a.py/f".to_string(),
+                "repo://t/symbol/a.py/f#1".to_string(),
+            ]
+        );
+        assert!(snap.entity_ids.iter().all(|id| !id.contains("#overload")));
+        // An unchanged tree must produce an empty invalidation set (issue #31).
+        let d = s.diff_snapshot(&snap.id).unwrap().unwrap();
+        assert!(d.invalidated.is_empty(), "{d:?}");
+        assert!(d.modified_entities.is_empty(), "{d:?}");
+        assert_eq!(d.still_valid.len(), 2);
+        assert!(!d.artifact_changed);
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.store.snapshot-legacy-overload-tolerance verifies=REQ-SI-503JSBGP exercises=impl.crates-scc-store-src-snapshot.diff-snapshot
+    fn legacy_snapshot_overload_ids_resolve_on_diff() {
+        let (s, _d) = tmp_store();
+        s.upsert_file("a.py", "h1", "python", "source", 10).unwrap();
+        for id in ["repo://t/symbol/a.py/f", "repo://t/symbol/a.py/f#1"] {
+            s.insert_entity(&Entity::new(id, "symbol", "f"), &["a.py".into()])
+                .unwrap();
+        }
+        let r = s.record_current_revision().unwrap();
+        let snap = s
+            .save_snapshot(SnapshotSave {
+                task: "legacy overloads",
+                epoch: "epoch:legacy",
+                revision: r.rev,
+                artifact: "old pack",
+                entity_ids: &["repo://t/symbol/a.py/f".into()],
+                budget: 10,
+                warnings: &[],
+            })
+            .unwrap();
+        // Simulate a snapshot persisted before the canonical-id fix: the
+        // row carries rendered surface ids the store never indexes.
+        s.conn
+            .execute(
+                "UPDATE context_snapshots SET entity_ids = ?1 WHERE id = ?2",
+                rusqlite::params![
+                    serde_json::to_string(&vec![
+                        "repo://t/symbol/a.py/f#overload0".to_string(),
+                        "repo://t/symbol/a.py/f#overload1".to_string(),
+                    ])
+                    .unwrap(),
+                    snap.id
+                ],
+            )
+            .unwrap();
+        let d = s.diff_snapshot(&snap.id).unwrap().unwrap();
+        assert!(d.invalidated.is_empty(), "{d:?}");
+        assert!(d.modified_entities.is_empty(), "{d:?}");
+        assert_eq!(
+            d.still_valid,
+            vec![
+                "repo://t/symbol/a.py/f".to_string(),
+                "repo://t/symbol/a.py/f#1".to_string(),
+            ]
+        );
     }
 }

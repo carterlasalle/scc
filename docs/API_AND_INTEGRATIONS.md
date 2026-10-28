@@ -127,7 +127,34 @@ scc setup claude
 scc setup omp
 scc setup codex
 scc mcp
+scc rpc --stdio
 ```
+### RPC transport (`scc rpc --stdio`)
+
+One persistent `scc rpc --stdio` child per SDK client; every call speaks
+the operation registry (no CLI-text scraping). Framing is
+newline-delimited JSON over stdio — **not** JSON-RPC 2.0 (there is no
+`jsonrpc`/`method`/`params` envelope; `scc mcp` is the JSON-RPC 2.0
+surface).
+
+Request (one object per line; `input` defaults to `{}`):
+
+```json
+{"id": 1, "operation": "context.task", "input": {"goal": "..."}}
+```
+
+Response (echoes `id`):
+
+```json
+{"id": 1, "output": {...}}
+{"id": 1, "error": "..."}
+```
+
+`operations.list` and `operations.describe` are meta-operations over the
+same registry. A request without an `"operation"` key fails with
+`request has no "operation" key (got keys: id, op)` — use `"operation"`,
+not `"op"` or `"method"`.
+
 
 ## 5. Claude Code
 
