@@ -1713,7 +1713,7 @@ pub fn impact(
     diff_base: Option<&str>,
     budget: usize,
     full: bool,
-) -> ContextPack {
+) -> Result<ContextPack, String> {
     let mut pack = ContextPack::new("impact", &ctx.revision());
     let mut files = files.to_vec();
     let symbols = symbols.to_vec();
@@ -1721,7 +1721,7 @@ pub fn impact(
         if files.is_empty() && symbols.is_empty() {
             match scc_graph::impact::diff_files(ctx.store, Some(base)) {
                 Ok(d) => files = d,
-                Err(e) => pack.warnings.push(format!("git diff failed: {e}")),
+                Err(e) => return Err(e.to_string()),
             }
         }
     }
@@ -1731,7 +1731,7 @@ pub fn impact(
         Err(e) => {
             pack.content = format!("# IMPACT ERROR\n{e}\n");
             pack.warnings.push(e.to_string());
-            return pack;
+            return Ok(pack);
         }
     };
 
@@ -1921,7 +1921,7 @@ pub fn impact(
     } else {
         finish(&mut pack, sections, budget, ctx_warnings(ctx));
     }
-    pack
+    Ok(pack)
 }
 
 // ---------------------------------------------------------------------------
@@ -2886,7 +2886,7 @@ mod tests {
             crate::ContextSettings::default(),
             Vec::new(),
         );
-        let pack = impact(&ctx, &["src/a.py".into()], &[], None, 50_000, false);
+        let pack = impact(&ctx, &["src/a.py".into()], &[], None, 50_000, false).unwrap();
         assert!(
             pack.content.contains("FORGOTTEN PARTNERS"),
             "missing section: {}",
@@ -2900,6 +2900,44 @@ mod tests {
             pack.content
         );
         assert!(pack.content.contains("historical; not EXTRACTED impact"));
+    }
+
+    #[test]
+    // trace:exempt reason=unit-test
+    fn impact_pack_bad_diff_base_fails_instead_of_low_risk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        fn git(root: &std::path::Path, args: &[&str]) {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?} {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        git(&root, &["init", "-q"]);
+        git(&root, &["config", "user.email", "test@example.com"]);
+        git(&root, &["config", "user.name", "SCC Test"]);
+        git(&root, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(root.join("src/a.py"), "a = 1\n").unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "one"]);
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let graph = scc_graph::RealityGraph::load(&store).unwrap();
+        let ctx = crate::ContextCompiler::new(
+            &store,
+            &graph,
+            crate::ContextSettings::default(),
+            Vec::new(),
+        );
+        let err = impact(&ctx, &[], &[], Some("nope"), 50_000, false)
+            .expect_err("unknown ref must not produce a LOW-risk pack");
+        assert!(err.contains("unknown revision 'nope'"), "{err}");
     }
 
     #[test]

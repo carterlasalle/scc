@@ -40,6 +40,11 @@ noise-model fixes — no new features.
   framing (not JSON-RPC 2.0), and a request without `"operation"` reports
   `request has no "operation" key (got keys: ...)` instead of
   `unknown operation ''`.
+- **Impact `--diff` fails on unresolvable refs.** `scc impact --diff <ref>`
+  no longer reports `RISK LOW` with exit 0 when the ref does not exist.
+  `git diff` failures (bad ref, shallow checkout with no `HEAD~N`, missing
+  `origin/main`) now exit non-zero with `unknown revision '<ref>'` on
+  stderr, in both text and `--json` modes.
 
 ## [0.2.11] — 2026-10-06
 
