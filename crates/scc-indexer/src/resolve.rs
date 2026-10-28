@@ -431,6 +431,85 @@ impl SymbolIndex {
         )
     }
 
+    /// Dot-only relative package (`from . import util`): the module is the
+    /// enclosing package itself, but each named member is a submodule file
+    /// (`util` -> `pkg/util.py`). One row per resolved member so
+    /// `u.helper()` binds through the alias while `from . import a, b`
+    /// targets both files without cross-wiring `a` to `b.py`. Members
+    /// with no submodule file keep the package fallback in a leftover
+    /// row, preserving today's `__init__.py` behavior for names defined
+    /// there. Ambiguous members degrade the same way (no spray). Returns
+    /// None when nothing expanded so the caller keeps the exact old
+    /// single-row path.
+    fn resolve_python_dot_package_rows(
+        &self,
+        from_file: &str,
+        import: &Import,
+    ) -> Option<Vec<ResolvedImport>> {
+        if import.r#type != ImportType::Member || import.names.is_empty() {
+            return None;
+        }
+        let n_dots = import.module.bytes().take_while(|&b| b == b'.').count();
+        if n_dots == 0 || !import.module[n_dots..].is_empty() {
+            return None;
+        }
+        let UniqueHit::One(pkg_file) = self.resolve_python_import(from_file, &import.module)
+        else {
+            return None;
+        };
+        let pkg_dir = pkg_file.rsplit_once('/').map(|(d, _)| d.to_string())?;
+        let mut rows: Vec<ResolvedImport> = Vec::new();
+        let mut leftover: Vec<(String, String)> = Vec::new();
+        for (local, imported) in &import.names {
+            if imported == "*" || local == "*" {
+                leftover.push((local.clone(), imported.clone()));
+                continue;
+            }
+            let member = imported.replace('.', "/");
+            let cands = python_probe_pair(&pkg_dir, "", &member);
+            match self.unique_existing(cands) {
+                UniqueHit::One(f) => {
+                    rows.push(ResolvedImport {
+                        local_file: from_file.to_string(),
+                        module: import.module.clone(),
+                        names: vec![(local.clone(), imported.clone())],
+                        line: import.line,
+                        target: ImportTarget::Internal {
+                            file: f,
+                            name_map: HashMap::new(),
+                            namespace: true,
+                        },
+                    });
+                }
+                // No hit or ambiguous: keep the package fallback for this
+                // member instead of dropping it (no spray).
+                _ => leftover.push((local.clone(), imported.clone())),
+            }
+        }
+        if rows.is_empty() {
+            return None;
+        }
+        if !leftover.is_empty() {
+            // Leftover members (no submodule file, ambiguous, or wildcard)
+            // keep the package fallback directly. Do NOT re-run
+            // `resolve_import` on the full import here: its member-submodule
+            // probe would re-hit an already-expanded member's file and
+            // misbind the leftover names to it.
+            rows.push(ResolvedImport {
+                local_file: from_file.to_string(),
+                module: import.module.clone(),
+                names: leftover,
+                line: import.line,
+                target: ImportTarget::Internal {
+                    file: pkg_file,
+                    name_map: HashMap::new(),
+                    namespace: false,
+                },
+            });
+        }
+        Some(rows)
+    }
+
     /// Ripwire `resolvePythonImport`: unique-or-degrade path-precise Step-A.
     /// Dots→slashes; probe `mod.py` then `mod/__init__.py`. Relative: includer
     /// dir only. Absolute: file-relative, repo-root, and unique SCC source-root
@@ -501,10 +580,10 @@ impl SymbolIndex {
         self.unique_existing(cands)
     }
 
+    // trace:v1 id=impl.scc.resolve.import-expanded work=WORK-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step satisfies=REQ-implement-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step
     /// Expand one extracted import to one or more resolve targets.
     /// Go packages with several production `.go` files become one Internal
     /// per file so Rule 3 sees the whole package. Other languages stay 1:1.
-    // trace:v1 id=impl.scc.resolve.import-expanded work=WORK-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step satisfies=REQ-implement-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language implements=PLAN-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step
     pub fn resolve_import_expanded(&self, from_file: &str, import: &Import) -> Vec<ImportTarget> {
         if from_file.ends_with(".go") {
             return self.resolve_go_import_targets(from_file, import);
@@ -513,20 +592,27 @@ impl SymbolIndex {
     }
 
     pub fn resolved_imports(&self, from_file: &str, imports: &[Import]) -> Vec<ResolvedImport> {
-        imports
-            .iter()
-            .flat_map(|imp| {
-                self.resolve_import_expanded(from_file, imp)
-                    .into_iter()
-                    .map(|target| ResolvedImport {
-                        local_file: from_file.to_string(),
-                        module: imp.module.clone(),
-                        names: imp.names.clone(),
-                        line: imp.line,
-                        target,
-                    })
-            })
-            .collect()
+        // Python dot-only package rows (`from . import a, b`) fan out one
+        // ResolvedImport per member in the helper above.
+        let mut out = Vec::new();
+        for imp in imports {
+            if from_file.ends_with(".py") {
+                if let Some(rows) = self.resolve_python_dot_package_rows(from_file, imp) {
+                    out.extend(rows);
+                    continue;
+                }
+            }
+            for target in self.resolve_import_expanded(from_file, imp) {
+                out.push(ResolvedImport {
+                    local_file: from_file.to_string(),
+                    module: imp.module.clone(),
+                    names: imp.names.clone(),
+                    line: imp.line,
+                    target,
+                });
+            }
+        }
+        out
     }
 
     fn resolve_go_import_target(&self, from_file: &str, import: &Import) -> ImportTarget {
@@ -869,12 +955,9 @@ fn field_chain_root_callee(
                 ResolutionClass::ConfirmedExternal,
             ));
         }
-        let id = index
-            .files
-            .get(target_file.as_str())
-            .and_then(|fs| fs.by_name.get(exported).map(|(_, id)| id.clone()))
-            .unwrap_or_else(|| scc_core::symbol_id(repo_id, target_file, exported));
-        return Some((id, ResolutionClass::UnresolvedLikelyInternal));
+        let fs = index.files.get(target_file.as_str())?;
+        let (_, id) = fs.by_name.get(exported)?;
+        return Some((id.clone(), ResolutionClass::UnresolvedLikelyInternal));
     }
     if let Some(ns_files) = namespaces.get(root) {
         let ns_file = match ns_files.as_slice() {
@@ -5277,5 +5360,205 @@ class Svc {
             Some(scc_core::symbol_id("repo", "a.py", "helper"))
         );
         assert_eq!(hit.class, ResolutionClass::ResolvedInternal);
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.resolve.dot-package-alias verifies=REQ-SI-503JSBGP exercises=impl.scc.resolve.python-import
+    fn python_dot_package_alias_binds_submodule_file() {
+        // `from . import util as u` inside pkg/main.py: `u` is the
+        // pkg/util.py namespace, not the pkg/__init__.py member.
+        let mut idx = SymbolIndex::new("repo");
+        idx.add_file("pkg/__init__.py", &[]);
+        idx.add_file(
+            "pkg/util.py",
+            &[mk_symbol("helper", SymbolKind::Function)],
+        );
+        let run = mk_symbol("run", SymbolKind::Function);
+        idx.add_file("pkg/main.py", std::slice::from_ref(&run));
+        let import = Import {
+            module: ".".into(),
+            names: vec![("u".into(), "util".into())],
+            line: 1,
+            r#type: ImportType::Member,
+        };
+        let resolved = idx.resolved_imports("pkg/main.py", std::slice::from_ref(&import));
+        assert_eq!(resolved.len(), 1, "one namespace row, got {resolved:?}");
+        assert_eq!(resolved[0].names, vec![("u".into(), "util".into())]);
+        match &resolved[0].target {
+            ImportTarget::Internal { file, namespace, .. } => {
+                assert_eq!(file, "pkg/util.py");
+                assert!(namespace, "alias binds the module namespace");
+            }
+            other => panic!("expected Internal pkg/util.py, got {other:?}"),
+        }
+        let call = Call {
+            caller: Some("run".into()),
+            callee: "u.helper".into(),
+            line: 5,
+            known_receiver: true,
+            ..Default::default()
+        }
+        .finish();
+        let out = resolve_calls(
+            "pkg/main.py",
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&run),
+            &resolved,
+            &idx,
+            "repo",
+        );
+        assert_eq!(
+            out[0].callee_id,
+            Some(scc_core::symbol_id("repo", "pkg/util.py", "helper")),
+            "u.helper() must pin pkg/util.py/helper"
+        );
+        assert_eq!(out[0].class, ResolutionClass::ResolvedInternal);
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.resolve.dot-package-multi verifies=REQ-SI-503JSBGP exercises=impl.scc.resolve.python-import
+    fn python_dot_package_plain_and_multi_expand() {
+        // `from . import util` (no alias) and `from . import a, b` (multi)
+        // each resolve per-member submodule files, never __init__.py.
+        let mut idx = SymbolIndex::new("repo");
+        idx.add_file("pkg/__init__.py", &[]);
+        idx.add_file(
+            "pkg/util.py",
+            &[mk_symbol("helper", SymbolKind::Function)],
+        );
+        idx.add_file("pkg/other.py", &[mk_symbol("go", SymbolKind::Function)]);
+        let plain = Import {
+            module: ".".into(),
+            names: vec![("util".into(), "util".into())],
+            line: 1,
+            r#type: ImportType::Member,
+        };
+        match idx.resolved_imports("pkg/main.py", std::slice::from_ref(&plain)).as_slice() {
+            [ri] => match &ri.target {
+                ImportTarget::Internal { file, namespace, .. } => {
+                    assert_eq!(file, "pkg/util.py");
+                    assert!(namespace);
+                    assert_eq!(ri.names, vec![("util".into(), "util".into())]);
+                }
+                other => panic!("expected Internal pkg/util.py, got {other:?}"),
+            },
+            other => panic!("expected one Internal pkg/util.py, got {other:?}"),
+        }
+        let multi = Import {
+            module: ".".into(),
+            names: vec![("a".into(), "a".into()), ("b".into(), "b".into())],
+            line: 2,
+            r#type: ImportType::Member,
+        };
+        // `a`/`b` do not exist yet: no expansion, falls back to package.
+        match idx.resolve_import("pkg/main.py", &multi) {
+            ImportTarget::Internal { file, .. } => assert_eq!(file, "pkg/__init__.py"),
+            other => panic!("missing members must keep the package target, got {other:?}"),
+        }
+        idx.add_file("pkg/a.py", &[mk_symbol("x", SymbolKind::Function)]);
+        idx.add_file("pkg/b.py", &[mk_symbol("y", SymbolKind::Function)]);
+        let expanded = idx.resolved_imports("pkg/main.py", std::slice::from_ref(&multi));
+        // Per-member rows: `a` binds only a.py, `b` binds only b.py — no
+        // cross-wiring where `a.method_from_b()` would resolve into b.py.
+        assert_eq!(expanded.len(), 2, "one row per member, got {expanded:?}");
+        for ri in &expanded {
+            match &ri.target {
+                ImportTarget::Internal { file, namespace, .. } => {
+                    assert!(namespace, "members bind namespaces");
+                    match file.as_str() {
+                        "pkg/a.py" => {
+                            assert_eq!(ri.names, vec![("a".into(), "a".into())]);
+                        }
+                        "pkg/b.py" => {
+                            assert_eq!(ri.names, vec![("b".into(), "b".into())]);
+                        }
+                        other => panic!("unexpected expansion target {other}"),
+                    }
+                }
+                other => panic!("expected Internal, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.resolve.seed-chain-unknown verifies=REQ-SI-503JSBGP exercises=impl.scc.resolve
+    fn seeded_chain_through_unknown_member_stays_unresolved() {
+        // Chained call through an imported-but-absent member
+        // (`from . import eco` where `eco` is not a file and only the
+        // `__init__.py` package resolved): the seeded root must be
+        // unresolved with NO callee id — emitting a synthesized
+        // `symbol/<pkg>/__init__.py/<member>` id would be a dangling
+        // target that fails `scc check-invariants`.
+        let mut idx = SymbolIndex::new("repo");
+        idx.add_file("pkg/__init__.py", &[]);
+        let run = mk_symbol("run", SymbolKind::Function);
+        idx.add_file("pkg/main.py", std::slice::from_ref(&run));
+        let import = Import {
+            module: ".".into(),
+            names: vec![("eco".into(), "eco".into())],
+            line: 1,
+            r#type: ImportType::Member,
+        };
+        // No pkg/eco.py: no expansion, plain package binding for `eco`.
+        let resolved = idx.resolved_imports("pkg/main.py", std::slice::from_ref(&import));
+        assert_eq!(resolved.len(), 1);
+        let call = Call {
+            caller: Some("run".into()),
+            callee: "eco.transitive.graph".into(),
+            line: 5,
+            known_receiver: true,
+            ..Default::default()
+        }
+        .finish();
+        let out = resolve_calls(
+            "pkg/main.py",
+            std::slice::from_ref(&call),
+            std::slice::from_ref(&run),
+            &resolved,
+            &idx,
+            "repo",
+        );
+        assert_eq!(out[0].callee_id, None, "must not synthesize a dangling target");
+        assert_eq!(out[0].class, ResolutionClass::UnresolvedLikelyInternal);
+    }
+
+    #[test]
+    // trace:v1 id=test.scc.resolve.dot-package-mixed-fallback verifies=REQ-SI-503JSBGP exercises=impl.scc.resolve.python-import
+    fn python_dot_package_mixed_found_and_missing() {
+        // `from . import util, missing`: `util` expands to its submodule
+        // file while `missing` keeps the package fallback — and must NOT
+        // be rebound to `util.py` by the member-submodule probe.
+        let mut idx = SymbolIndex::new("repo");
+        idx.add_file("pkg/__init__.py", &[]);
+        idx.add_file(
+            "pkg/util.py",
+            &[mk_symbol("helper", SymbolKind::Function)],
+        );
+        let run = mk_symbol("run", SymbolKind::Function);
+        idx.add_file("pkg/main.py", std::slice::from_ref(&run));
+        let import = Import {
+            module: ".".into(),
+            names: vec![("util".into(), "util".into()), ("missing".into(), "missing".into())],
+            line: 1,
+            r#type: ImportType::Member,
+        };
+        let rows = idx.resolved_imports("pkg/main.py", std::slice::from_ref(&import));
+        assert_eq!(rows.len(), 2, "expanded + fallback rows, got {rows:?}");
+        let expanded = rows.iter().find(|r| r.names == vec![("util".into(), "util".into())]).expect("util row");
+        match &expanded.target {
+            ImportTarget::Internal { file, namespace, .. } => {
+                assert_eq!(file, "pkg/util.py");
+                assert!(namespace);
+            }
+            other => panic!("expected Internal pkg/util.py, got {other:?}"),
+        }
+        let fallback = rows.iter().find(|r| r.names == vec![("missing".into(), "missing".into())]).expect("missing row");
+        match &fallback.target {
+            ImportTarget::Internal { file, namespace, .. } => {
+                assert_eq!(file, "pkg/__init__.py", "leftover must keep the package, not util.py");
+                assert!(!namespace);
+            }
+            other => panic!("expected Internal pkg/__init__.py, got {other:?}"),
+        }
     }
 }
