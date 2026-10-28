@@ -36,7 +36,8 @@ pub struct ResolveReport {
     pub remaining_candidates: usize,
     /// Backends that were available and used.
     pub backends_used: Vec<String>,
-    /// Backends unavailable (not installed) — degraded, not fatal.
+    /// Backends unavailable (binary or runtime not installed: no pyright,
+    /// no usable TypeScript for tsserver) — degraded, not fatal.
     pub backends_missing: Vec<String>,
 }
 
@@ -118,7 +119,11 @@ pub fn resolve_repository(
                 let r = crate::lsp_ts::start_tsserver(root);
                 match r {
                     Ok(r) => Box::new(r),
-                    Err(e) if e.contains("tsserver not found") => {
+                    Err(e)
+                        if e.contains("tsserver not found")
+                            || e.contains("Could not find a valid TypeScript installation")
+                            || e.contains("no other valid TypeScript installation was found") =>
+                    {
                         report.backends_missing.push("tsserver".into());
                         return Ok(());
                     }

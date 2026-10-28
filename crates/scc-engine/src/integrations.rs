@@ -241,10 +241,22 @@ pub fn doctor_report(
                 }
                 "lsp-tsserver" => {
                     let bin = on_path("tsserver") || on_path("typescript-language-server");
-                    if !bin {
+                    // The binary alone is not enough: the server refuses
+                    // `initialize` without a usable TypeScript (workspace
+                    // install, `SCC_TSSERVER_PATH`, or server-bundled). Report
+                    // what `--resolve` needs; a present-but-unusable setup is
+                    // a warning, never a green check.
+                    let ts = scc_indexer::lsp_ts::typescript_status(root);
+                    let usable = scc_indexer::lsp_ts::find_typescript_server(root).is_some();
+                    if !bin || !usable {
                         warnings += 1;
                     }
-                    (true, if deep { Some(bin) } else { None }, bin, if bin { "binary on PATH (resolver available)".into() } else { "not installed".into() })
+                    let detail = if bin {
+                        format!("binary on PATH; {ts}")
+                    } else {
+                        format!("not installed; {ts}")
+                    };
+                    (true, if deep { Some(bin && usable) } else { None }, bin && usable, detail)
                 }
                 "runtime" => {
                     (false, None, false, "ingestion source available (`scc ingest`)".into())
