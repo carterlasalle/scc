@@ -356,6 +356,7 @@ pub fn build_regions(
 /// service weights). See the module docs for the signal list.
 // trace:v1 id=impl.scc.clustering.merge work=WORK-SCC-005 satisfies=REQ-SCC-IR
 // trace:v1 id=impl.scc.clustering.sizecap work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
+// trace:v1 id=impl.scc.clustering.prod-test-split work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-IR
 pub fn cluster_components(
     graph: &RealityGraph,
     store: &Store,
@@ -760,7 +761,6 @@ pub fn cluster_components(
     // package module riding along with its test files) keep merging
     // normally — only clean-cut cases split. Deterministic: region index
     // order, and `is_production_path` is a pure path-segment match. ----
-    // trace:v1 id=impl.scc.clustering.prod-test-split work=WORK-SI-MMMJA4G6 satisfies=REQ-SCC-IR
     let mut is_prod_region: Vec<bool> = vec![true; n];
     for (rname, files) in &files_in_region {
         let Some(&ri) = idx.get(rname.as_str()) else { continue };
