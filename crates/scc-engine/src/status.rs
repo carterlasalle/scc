@@ -16,6 +16,12 @@ pub struct Status {
     pub analysis_quality: Option<String>,
     pub scan_stats: Option<serde_json::Value>,
     pub indexed: bool,
+    /// Index-time snapshot of files that extracted no facts (path +
+    /// reason). Empty when `failed == 0` or on pre-fix indexes (meta
+    /// absent deserializes to empty).
+    // trace:v1 id=impl.scc.engine.status-failures work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
+    #[serde(default)]
+    pub index_failures: Vec<scc_indexer::FailedFile>,
 }
 
 // trace:exempt reason=internal-detail
@@ -39,6 +45,7 @@ pub fn status(store: &scc_store::Store) -> crate::Result<Status> {
                 .meta_get("scan_stats")?
                 .and_then(|raw| serde_json::from_str(&raw).ok()),
             indexed: true,
+            index_failures: scc_indexer::load_index_failures(store),
         },
         None => Status {
             repository: repo.name,
@@ -54,6 +61,7 @@ pub fn status(store: &scc_store::Store) -> crate::Result<Status> {
             analysis_quality: None,
             scan_stats: None,
             indexed: false,
+            index_failures: vec![],
         },
     })
 }
@@ -91,7 +99,28 @@ pub fn scan(
         .collect();
     let skipped_capped = skipped_total.saturating_sub(skipped.len());
     let st = &exp.stats;
-    Ok(serde_json::json!({"indexed": indexed, "skipped": skipped,
+    // Index-time failure snapshot (files that scanned but extracted no
+    // facts): naming the path needs the store, which a bare `scc scan`
+    // on a never-indexed repo lacks — so this is empty there, and the
+    // live walk below still names the unreadable path directly. Never
+    // create state as a side effect of a read-only diagnostic: open the
+    // DB file only when it already exists.
+    let failed: Vec<serde_json::Value> = {
+        let db = crate::workspace::db_path(root);
+        if db.is_file() {
+            scc_store::Store::open(&db, root)
+                .ok()
+                .map(|store| scc_indexer::load_index_failures(&store))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+        .into_iter()
+        .filter(|f| path.filter(|p| !p.is_empty()).map(|p| f.path == *p || f.path.starts_with(p)).unwrap_or(true))
+        .map(|f| serde_json::json!({"path": f.path, "reason": f.reason}))
+        .collect()
+    };
+    Ok(serde_json::json!({"indexed": indexed, "skipped": skipped, "failed": failed,
         "skipped_detail_capped": skipped_capped,
         "stats": {"discovered": st.discovered, "indexed": st.indexed, "ignored": st.ignored,
                   "unsupported": st.unsupported, "oversized": st.oversized, "unreadable": st.unreadable,
