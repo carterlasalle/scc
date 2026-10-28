@@ -19,12 +19,11 @@ pub struct Status {
     /// Index-time snapshot of files that extracted no facts (path +
     /// reason). Empty when `failed == 0` or on pre-fix indexes (meta
     /// absent deserializes to empty).
-    // trace:v1 id=impl.scc.engine.status-failures work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
     #[serde(default)]
     pub index_failures: Vec<scc_indexer::FailedFile>,
 }
 
-// trace:exempt reason=internal-detail
+// trace:v1 id=impl.scc.engine.status-failures work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-NX53P4B7
 pub fn status(store: &scc_store::Store) -> crate::Result<Status> {
     let repo = store.repository();
     let stale = crate::workspace::stale_paths(store)?;
