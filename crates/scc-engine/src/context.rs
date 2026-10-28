@@ -215,11 +215,13 @@ impl SccContext<'_> {
     // trace:exempt reason=internal-detail
     pub fn impact(&self, req: &ImpactRequest) -> crate::Result<scc_context::ContextPack> {
         let ctx = self.engine.ctx();
-        Ok(if req.unbounded {
+        if req.unbounded {
             ctx.impact_context_full(&req.files, &req.symbols, req.diff.as_deref())
+                .map_err(crate::EngineError::Other)
         } else {
             ctx.impact_context(&req.files, &req.symbols, req.diff.as_deref())
-        })
+                .map_err(crate::EngineError::Other)
+        }
     }
 
     // trace:exempt reason=internal-detail

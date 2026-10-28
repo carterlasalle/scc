@@ -26,7 +26,11 @@ noise-model fixes — no new features.
   tables, link-only rows, bare URLs, and install commands, takes the first
   meaningful paragraph only, and caps at 500 chars.
 - **Python public API.** Module-level `test_*` functions are no longer
-  emitted as `PublicExport` (they are already `TEST` entities).
+- **Impact `--diff` fails on unresolvable refs.** `scc impact --diff <ref>`
+  no longer reports `RISK LOW` with exit 0 when the ref does not exist.
+  `git diff` failures (bad ref, shallow checkout with no `HEAD~N`, missing
+  `origin/main`) now exit non-zero with `unknown revision '<ref>'` on
+  stderr, in both text and `--json` modes.
 
 ## [0.2.11] — 2026-10-06
 

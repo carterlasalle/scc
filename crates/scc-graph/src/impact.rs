@@ -627,6 +627,21 @@ fn component_candidates(comps: &[scc_core::Entity]) -> Vec<crate::components::Co
 // trace:exempt reason=internal-detail
 pub fn diff_files(store: &Store, base: Option<&str>) -> Result<Vec<String>> {
     let root = &store.root;
+    if let Some(b) = base {
+        let verify = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "--quiet", &format!("{b}^{{commit}}")])
+            .current_dir(root)
+            .output()
+            .map_err(|e| crate::GraphError::Impact(format!("cannot run git rev-parse: {e}")))?;
+        if !verify.status.success() {
+            let detail = String::from_utf8_lossy(&verify.stderr).trim().to_string();
+            return Err(crate::GraphError::Impact(if detail.is_empty() {
+                format!("unknown revision '{b}'")
+            } else {
+                format!("git diff failed for base '{b}': {detail}")
+            }));
+        }
+    }
     let mut cmd = std::process::Command::new("git");
     cmd.args(["diff", "--name-only", "--diff-filter=ACMRT"]);
     if let Some(b) = base {
@@ -635,10 +650,19 @@ pub fn diff_files(store: &Store, base: Option<&str>) -> Result<Vec<String>> {
         cmd.arg("HEAD");
     }
     cmd.arg("--");
+    let base_label = base.unwrap_or("HEAD");
     let out = cmd
         .current_dir(root)
         .output()
-        .map_err(|e| scc_store::StoreError::NotInitialized(format!("git diff failed: {e}")))?;
+        .map_err(|e| crate::GraphError::Impact(format!("cannot run git diff: {e}")))?;
+    if !out.status.success() {
+        let detail = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(crate::GraphError::Impact(if detail.is_empty() {
+            format!("git diff failed for base '{base_label}'")
+        } else {
+            format!("git diff failed for base '{base_label}': {detail}")
+        }));
+    }
     let mut files = Vec::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         let line = line.trim();
@@ -774,5 +798,38 @@ mod tests {
             none.is_empty(),
             "partners already in the change set are not forgotten"
         );
+    }
+
+    #[test]
+    // trace:exempt reason=unit-test
+    fn diff_files_unknown_ref_fails_instead_of_empty() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "SCC Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(root.join("a.py"), "a = 1\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "one"]);
+        let store = Store::open(&dir.path().join("scc.db"), &root).unwrap();
+        let err = diff_files(&store, Some("nope"))
+            .expect_err("unknown ref must not report an empty diff");
+        assert!(err.to_string().contains("unknown revision 'nope'"), "{err}");
+        let files = diff_files(&store, Some("HEAD")).unwrap();
+        assert!(files.is_empty(), "{files:?}");
     }
 }
