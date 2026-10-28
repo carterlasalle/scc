@@ -175,7 +175,10 @@ fn route(
             Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("GET", p) if p.starts_with("/v1/components/") => {
-            let id = p.trim_start_matches("/v1/components/");
+            // trace:v1 id=impl.crates-scc-cli-src-httpd.decode-component-id work=WORK-CO-Q8Z1HJJJ satisfies=REQ-SCC-API
+            // Path ids arrive percent-encoded (`web%2Fsrc`); decode before
+            // lookup so standard clients reach slash-containing components.
+            let id = scc_core::decode_component(p.trim_start_matches("/v1/components/"));
             let store = crate::open_store(root)?;
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed".into());
@@ -185,7 +188,9 @@ fn route(
             Ok((200, "application/json".to_string(), serde_json::to_string(&output)?))
         }
         ("GET", p) if p.starts_with("/v1/flows/") => {
-            let id = p.trim_start_matches("/v1/flows/");
+            // Same decoding contract as the component route above: flow ids
+            // may carry encoded separators too.
+            let id = scc_core::decode_component(p.trim_start_matches("/v1/flows/"));
             let store = crate::open_store(root)?;
             if store.snapshot_status()?.is_none() {
                 return json_err(409, "not indexed".into());
@@ -540,6 +545,47 @@ mod tests {
         assert!(
             files.iter().any(|p| p == "fresh.py" || p.ends_with("/fresh.py")),
             "new file must be indexed: {files:?}"
+        );
+    }
+    #[test]
+    // trace:v1 id=test.scc.cli.component-route-decodes-id verifies=REQ-SCC-API exercises=impl.crates-scc-cli-src-httpd.decode-component-id
+    fn component_route_decodes_percent_encoded_id() {
+        let fixtures = locate_fixtures_dir().expect("fixtures");
+        let src = fixtures.join("behavior-native");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("repo");
+        copy_fixture(&src, &root);
+        crate::commands::cmd_index(&root, true).unwrap();
+        let store = crate::open_store(&root).unwrap();
+        let comps = store.components().unwrap();
+        assert!(!comps.is_empty(), "fixture must yield at least one component");
+        // Component ids always contain `/` and `:` (e.g.
+        // `repo://repo/component/web~a1b2c3`), so encoding them the way a
+        // standard HTTP client encodes a path segment exercises the bug
+        // regardless of fixture component names.
+        let id = comps[0].id.clone();
+        drop(store);
+        let encoded: String = id
+            .bytes()
+            .map(|b| {
+                if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                    (b as char).to_string()
+                } else {
+                    format!("%{b:02X}")
+                }
+            })
+            .collect();
+        assert_ne!(encoded, id, "encoded id must differ from the raw id");
+        let (plain_status, _, plain) =
+            route(&root, "GET", &format!("/v1/components/{id}"), "", "127.0.0.1:7777").unwrap();
+        let (enc_status, _, enc) =
+            route(&root, "GET", &format!("/v1/components/{encoded}"), "", "127.0.0.1:7777").unwrap();
+        assert_eq!(plain_status, 200);
+        assert_eq!(enc_status, 200);
+        assert_eq!(enc, plain, "encoded and unencoded ids must resolve identically");
+        assert!(
+            !enc.contains("COMPONENT NOT FOUND"),
+            "encoded id must resolve the component: {enc}"
         );
     }
 }
