@@ -186,7 +186,9 @@ enum Commands {
 
     /// Multi-repo system: semantic stitches across member checkouts
     System {
-        /// Member checkout roots (each already indexed)
+        /// Member checkout roots (each already indexed in-repo:
+        /// `<member>/.scc/scc.db`; a per-process `SCC_STATE_DIR` is not
+        /// consulted per member)
         #[arg(long, required = true)]
         member: Vec<PathBuf>,
         #[arg(long)]

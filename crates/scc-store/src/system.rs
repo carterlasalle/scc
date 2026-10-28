@@ -151,8 +151,12 @@ fn topic_sides(store: &Store, topic_id: &str) -> Result<(bool, bool), StoreError
 // trace:exempt reason=internal-detail
 impl System {
     /// Open a system over member checkout roots. Each member database is
-    /// `<root>/.scc/scc.db` (the default state dir); members must already
-    /// be indexed. Stitching is read-only over member graphs.
+    /// `<root>/.scc/scc.db` (the in-repo state dir); members must already
+    /// be indexed there. Stitching is read-only over member graphs.
+    ///
+    /// Members must use in-repo state: an external `SCC_STATE_DIR` is not
+    /// consulted per member (one variable cannot address several member
+    /// databases), so a member indexed elsewhere reads as unindexed here.
     // trace:v1 id=impl.crates-scc-store-src-system-system.open work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
     pub fn open(roots: &[&Path]) -> Result<System, StoreError> {
         let mut members = Vec::with_capacity(roots.len());
@@ -160,10 +164,15 @@ impl System {
             let db = root.join(".scc").join("scc.db");
             // Read-only command surface: never conjure an empty database for
             // an unindexed member (that would silently omit it from stitches).
+            // A missing database is "not initialized", never corruption:
+            // Corrupt would accuse the user of damaged data and arm the
+            // quarantine/rebuild path for a repo that was simply never indexed.
             if !db.is_file() {
-                return Err(StoreError::Corrupt(format!(
-                    "system member not indexed (no {}): run `scc index` there first",
-                    db.display()
+                return Err(StoreError::NotInitialized(format!(
+                    "member '{}' has no index (looked for {}); run `scc --root {}` index",
+                    root.display(),
+                    db.display(),
+                    root.display()
                 )));
             }
             let store = Store::open(&db, root)?;
@@ -579,8 +588,15 @@ mod tests {
         let bare = dir.path().join("bare");
         std::fs::create_dir_all(&bare).unwrap();
         let err = System::open(&[bare.as_path()]).unwrap_err();
-        assert!(err.to_string().contains("not indexed"), "{err}");
-        assert!(!bare.join(".scc").exists(), "no side-effect database");
+        assert!(
+            matches!(err, StoreError::NotInitialized(_)),
+            "missing index must not read as corruption, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("has no index"), "{msg}");
+        assert!(msg.contains(&bare.join(".scc").join("scc.db").display().to_string()), "{msg}");
+        assert!(msg.contains("scc --root"), "{msg}");
+        assert!(!msg.contains("corrupt"), "{msg}");
     }
 
     #[test]
