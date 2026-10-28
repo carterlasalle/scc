@@ -67,7 +67,7 @@ enum QueryOutcome {
 }
 
 /// JSON-RPC/LSP client driving one typescript-language-server process.
-// trace:v1 id=impl.crates-scc-indexer-src-lsp-ts.ts-lsp-resolver work=WORK-CO-Q8Z1HJJJ satisfies=REQ-CO-T692W95P
+// trace:v1 id=impl.crates-scc-indexer-src-lsp-ts.ts-lsp-resolver
 pub struct TsLspResolver {
     child: Option<Child>,
     writer: Box<dyn Write + Send>,
