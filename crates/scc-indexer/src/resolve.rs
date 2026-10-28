@@ -580,7 +580,7 @@ impl SymbolIndex {
         self.unique_existing(cands)
     }
 
-    // trace:v1 id=impl.scc.resolve.import-expanded work=WORK-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step satisfies=REQ-implement-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step
+    // trace:v1 id=impl.scc.resolve.import-expanded work=WORK-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step satisfies=REQ-implement-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language implements=PLAN-phase-29-of-scc-x-ripwire-lessons-absorb-remaining-language-gated-step
     /// Expand one extracted import to one or more resolve targets.
     /// Go packages with several production `.go` files become one Internal
     /// per file so Rule 3 sees the whole package. Other languages stay 1:1.
