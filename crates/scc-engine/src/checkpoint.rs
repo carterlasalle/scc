@@ -295,7 +295,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // trace:v1 id=test.scc-engine-checkpoint.porcelain-keeps-dotfile-dot work=WORK-CO-Q8Z1HJJJ verifies=impl.scc.checkpoint exercises=impl.scc.checkpoint
+    // trace:v1 id=test.scc-engine-checkpoint.porcelain-keeps-dotfile-dot verifies=impl.scc.checkpoint exercises=impl.scc.checkpoint
     fn porcelain_keeps_leading_dot_of_dotfiles() {
         // ` M .gitignore`: column 1 is a real (space) status, so the path
         // slice must start at byte 3 without left-trimming first.
@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    // trace:v1 id=test.scc-engine-checkpoint.porcelain-skips-untracked work=WORK-CO-Q8Z1HJJJ verifies=impl.scc.checkpoint exercises=impl.scc.checkpoint
+    // trace:v1 id=test.scc-engine-checkpoint.porcelain-skips-untracked verifies=impl.scc.checkpoint exercises=impl.scc.checkpoint
     fn porcelain_skips_untracked_and_state_dir() {
         assert_eq!(parse_porcelain_line("?? new.py"), None);
         assert_eq!(parse_porcelain_line(" M .scc/checkpoint.json"), None);
