@@ -326,15 +326,92 @@ impl TsLspResolver {
         self.opened.insert(file.to_string());
     }
 
-    /// Locate the callee name token inside `line_text`; falls back to 0.
-    fn callee_char(line_text: &str, callee: &str) -> usize {
+    /// Locate the callee name token for the call site on `line` (1-based).
+    ///
+    /// The column comes from tree-sitter, not from a text search (see
+    /// `LspResolver::callee_char`): re-parse the file and take the Nth
+    /// same-callee call on that line, so trailing comments and repeated
+    /// method names cannot misdirect the query. Falls back to 0 when the
+    /// file cannot be parsed.
+    fn callee_char(source: &str, line: u32, callee: &str, occurrence: usize) -> usize {
         let needle = callee.rsplit('.').next().unwrap_or(callee);
-        if !needle.is_empty() {
-            if let Some(idx) = line_text.rfind(needle) {
-                return idx;
-            }
+        if needle.is_empty() {
+            return 0;
         }
-        0
+        let mut parser = tree_sitter::Parser::new();
+        let language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        if parser.set_language(&language).is_err() {
+            return 0;
+        }
+        let Some(tree) = parser.parse(source, None) else {
+            return 0;
+        };
+        let mut found = 0;
+        let mut result = None;
+        // Two passes like the pyright adapter: exact callee-text matches
+        // first, bare-needle matches second (issue #34).
+        for exact_only in [true, false] {
+            let mut stack = vec![tree.root_node()];
+            while let Some(node) = stack.pop() {
+                if node.kind() == "call_expression" {
+                    if let Some(function) = node.child_by_field_name("function") {
+                        // Character-for-character mirror of the extractor's
+                        // `normalize_callee`: drop whitespace around `.`,
+                        // collapse it elsewhere.
+                        let raw = function.utf8_text(source.as_bytes()).unwrap_or("");
+                        let mut normalized = String::with_capacity(raw.len());
+                        let mut ws = false;
+                        let mut prev: Option<char> = None;
+                        for ch in raw.chars() {
+                            if ch.is_whitespace() {
+                                ws = true;
+                                continue;
+                            }
+                            if ws {
+                                if prev != Some('.') && ch != '.' {
+                                    normalized.push(' ');
+                                }
+                                ws = false;
+                            }
+                            normalized.push(ch);
+                            prev = Some(ch);
+                        }
+                        let matched = normalized == callee
+                            || (!exact_only && normalized.rsplit('.').next() == Some(needle));
+                        if matched {
+                            let row = node.start_position().row as u32 + 1;
+                            if row == line {
+                                if found == occurrence {
+                                    // Column of the method-name token itself:
+                                    // the `property` field of `a.m()`, else the
+                                    // function start for a bare `helper()`.
+                                    let col = match function.kind() {
+                                        "member_expression" => function
+                                            .child_by_field_name("property")
+                                            .map(|p| p.start_position().column)
+                                            .unwrap_or_else(|| function.start_position().column),
+                                        _ => function.start_position().column,
+                                    };
+                                    result = Some(col);
+                                    break;
+                                }
+                                found += 1;
+                            }
+                        }
+                    }
+                }
+                let mut cursor = node.walk();
+                let kids: Vec<_> = node.children(&mut cursor).collect();
+                for child in kids.into_iter().rev() {
+                    stack.push(child);
+                }
+            }
+            if result.is_some() {
+                break;
+            }
+            found = 0;
+        }
+        result.unwrap_or(0)
     }
 
     /// Query one call site and return the resolved target path + symbol name.
@@ -353,12 +430,13 @@ impl TsLspResolver {
         file: &str,
         line: u32,
         callee: &str,
+        occurrence: usize,
     ) -> Result<DefOutcome, String> {
-        let mut outcome = self.definition_once(store, file, line, callee)?;
+        let mut outcome = self.definition_once(store, file, line, callee, occurrence)?;
         while matches!(outcome, DefOutcome::Empty) && self.cold_retries > 0 {
             self.cold_retries -= 1;
             std::thread::sleep(Duration::from_millis(400));
-            outcome = self.definition_once(store, file, line, callee)?;
+            outcome = self.definition_once(store, file, line, callee, occurrence)?;
         }
         // A cross-file resolution proves the configured project is warm;
         // stop spending the cold-start budget. Same-file resolutions (local
@@ -382,19 +460,11 @@ impl TsLspResolver {
         file: &str,
         line: u32,
         callee: &str,
+        occurrence: usize,
     ) -> Result<DefOutcome, String> {
         self.open_file(store, file);
-        let line_text = std::fs::read_to_string(store.root.join(file))
-            .ok()
-            .map(|s| {
-                s.lines()
-                    .nth(line.saturating_sub(1) as usize)
-                    .unwrap_or_default()
-                    .to_string()
-            })
-            .unwrap_or_default();
-        let char = Self::callee_char(&line_text, callee);
-
+        let source = std::fs::read_to_string(store.root.join(file)).unwrap_or_default();
+        let char = Self::callee_char(&source, line, callee, occurrence);
         // Primary candidate: the LSP-spec 0-based position (evidence lines are
         // 1-based). The same-line character-0 fallback covers servers that
         // fail to honor the callee token column. A next-line fallback is
@@ -408,7 +478,6 @@ impl TsLspResolver {
         };
         push(&mut candidates, line.saturating_sub(1), char);
         push(&mut candidates, line.saturating_sub(1), 0);
-
         for (qline, qchar) in candidates {
             let mut target = match self.query_def(file, qline, qchar)? {
                 QueryOutcome::Target(t) => t,
@@ -509,6 +578,17 @@ impl TsLspResolver {
             })
             .collect();
 
+        // Same per-call-site occurrence indexing as the pyright adapter
+        // (see `LspResolver::resolve_call_definitions`): the extractor
+        // emits one edge per call, but evidence identity is
+        // (path, kind, callee, line), so same-callee calls on one line
+        // share evidence. Each edge queries its own column, and a repeat
+        // upgrade to an already-created edge counts resolved without
+        // deleting the earlier upgrade.
+        let mut seen: std::collections::HashMap<(u32, String), usize> =
+            std::collections::HashMap::new();
+        let mut upgraded_in_group: std::collections::HashSet<(u32, String, String)> =
+            std::collections::HashSet::new();
         for rel in &rels {
             let Some(ev_id) = rel.evidence.first() else {
                 out.unresolved += 1;
@@ -523,10 +603,22 @@ impl TsLspResolver {
                 continue;
             };
             let callee = ev.symbol.clone().unwrap_or_default();
+            let key = (line, callee.clone());
+            let occurrence = seen.get(&key).copied().unwrap_or(0);
+            seen.insert(key, occurrence + 1);
 
-            match self.definition_for(store, file, line, &callee)? {
+            match self.definition_for(store, file, line, &callee, occurrence)? {
                 DefOutcome::Resolved(target_path, target_name) => {
+                    let repo_id = store.repository().id;
+                    let new_object = scc_core::symbol_id(&repo_id, &target_path, &target_name);
+                    let new_id = rel_id(&["calls", &rel.subject, &new_object]);
+                    let group_key = (line, callee.clone(), new_id.clone());
+                    if upgraded_in_group.contains(&group_key) {
+                        out.upgraded += 1;
+                        continue;
+                    }
                     self.apply_upgrade(store, rel, file, &target_path, &target_name, &callee, line)?;
+                    upgraded_in_group.insert(group_key);
                     out.upgraded += 1;
                 }
                 DefOutcome::Error => {
@@ -661,9 +753,28 @@ mod tests {
     use scc_core::kinds;
 
     // ---------------------------------------------------------------
-    // mock-server upgrade test (no tsserver required)
+    // callee column lookup (issue #34: rfind hit the last occurrence)
     // ---------------------------------------------------------------
 
+    #[test]
+    fn callee_char_selects_own_call_site() {
+        let src = "function f(a: any, b: any) {\n    return a.m() + b.m();\n}\n";
+        assert_eq!(TsLspResolver::callee_char(src, 2, "a.m", 0), 13);
+        assert_eq!(TsLspResolver::callee_char(src, 2, "b.m", 0), 21);
+        let twice = "function f(a: any) {\n    return a.m() + a.m();\n}\n";
+        assert_eq!(TsLspResolver::callee_char(twice, 2, "a.m", 0), 13);
+        assert_eq!(TsLspResolver::callee_char(twice, 2, "a.m", 1), 21);
+    }
+
+    #[test]
+    fn callee_char_ignores_trailing_comment() {
+        let src = "function f(a: any) {\n    return a.m(); // m documented in m.md\n}\n";
+        assert_eq!(TsLspResolver::callee_char(src, 2, "a.m", 0), 13);
+    }
+
+    // ---------------------------------------------------------------
+    // mock-server upgrade test (no tsserver required)
+    // ---------------------------------------------------------------
     #[cfg(unix)]
     #[test]
     fn mock_server_upgrades_extracted_edge() {
