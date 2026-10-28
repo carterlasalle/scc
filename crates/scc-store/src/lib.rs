@@ -3094,7 +3094,7 @@ mod tests {
         let db = dir.path().join("scc.db");
         {
             let s = Store::open(&db, &root).unwrap();
-            s.insert_entity(&Entity::new(&scc_core::component_id("t", "a"), "component", "A"), &["x.py".into()]).unwrap();
+            s.insert_entity(&Entity::new(scc_core::component_id("t", "a"), "component", "A"), &["x.py".into()]).unwrap();
         }
         // reopen
         let s = Store::open(&db, &root).unwrap();
