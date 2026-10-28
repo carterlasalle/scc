@@ -263,20 +263,52 @@ fn git_modified(root: &Path) -> Vec<String> {
     }
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .filter_map(|l| {
-            let l = l.trim_start();
-            if l.len() < 4 {
-                return None;
-            }
-            let (status, path) = l.split_at(3);
-            if status.contains('?') {
-                return None;
-            }
-            let path = path.trim();
-            if path.is_empty() || path.starts_with(".scc/") {
-                return None;
-            }
-            Some(path.to_string())
-        })
+        .filter_map(|l| parse_porcelain_line(l).map(str::to_string))
         .collect()
+}
+
+// Porcelain v1 is fixed-width: two status columns, a space, then the path.
+// Column 1 is a real status (` ` = index-clean), so the line must never be
+// left-trimmed first: trimming ` M .gitignore` shifts the columns and the
+// subsequent `split_at(3)` eats the dotfile's leading dot (`gitignore`).
+// trace:exempt reason=internal-detail
+fn parse_porcelain_line(l: &str) -> Option<&str> {
+    let b = l.as_bytes();
+    if b.len() < 4 || b[2] != b' ' {
+        return None;
+    }
+    let (status, path) = (&l[..2], l[3..].trim());
+    if status.contains('?') {
+        return None;
+    }
+    // Rename/copy entries read `R  old -> new`; the checkpoint wants the
+    // destination path.
+    let path = path.rsplit(" -> ").next().unwrap_or(path).trim();
+    if path.is_empty() || path.starts_with(".scc/") {
+        return None;
+    }
+    Some(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    // trace:v1 id=test.scc-engine-checkpoint.porcelain-keeps-dotfile-dot work=WORK-CO-Q8Z1HJJJ verifies=impl.scc.checkpoint exercises=impl.scc.checkpoint
+    fn porcelain_keeps_leading_dot_of_dotfiles() {
+        // ` M .gitignore`: column 1 is a real (space) status, so the path
+        // slice must start at byte 3 without left-trimming first.
+        assert_eq!(parse_porcelain_line(" M .gitignore"), Some(".gitignore"));
+        assert_eq!(parse_porcelain_line("M  .env"), Some(".env"));
+        assert_eq!(parse_porcelain_line(" M a.py"), Some("a.py"));
+    }
+
+    #[test]
+    // trace:v1 id=test.scc-engine-checkpoint.porcelain-skips-untracked work=WORK-CO-Q8Z1HJJJ verifies=impl.scc.checkpoint exercises=impl.scc.checkpoint
+    fn porcelain_skips_untracked_and_state_dir() {
+        assert_eq!(parse_porcelain_line("?? new.py"), None);
+        assert_eq!(parse_porcelain_line(" M .scc/checkpoint.json"), None);
+        assert_eq!(parse_porcelain_line("short"), None);
+    }
 }
