@@ -27,6 +27,11 @@ noise-model fixes — no new features.
   meaningful paragraph only, and caps at 500 chars.
 - **Python public API.** Module-level `test_*` functions are no longer
   emitted as `PublicExport` (they are already `TEST` entities).
+- **`scc rpc` request envelope documented.** `docs/API_AND_INTEGRATIONS.md`
+  §4 now documents the `{"id", "operation", "input"}` newline-delimited
+  framing (not JSON-RPC 2.0), and a request without `"operation"` reports
+  `request has no "operation" key (got keys: ...)` instead of
+  `unknown operation ''`.
 
 ## [0.2.11] — 2026-10-06
 

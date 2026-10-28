@@ -1859,7 +1859,7 @@ pub fn cmd_view(root: &Path, port: Option<u16>, no_open: bool) -> crate::Result<
     Ok(())
 }
 
-/// `scc rpc --stdio`: structured JSON-RPC (SDK subprocess mode).
+/// `scc rpc --stdio`: structured operation RPC (SDK subprocess mode).
 // trace:v1 id=impl.crates-scc-cli-src-commands.cmd-rpc work=WORK-SI-MMMJA4G6 satisfies=REQ-SI-503JSBGP
 pub fn cmd_rpc(root: &Path, _stdio: bool) -> crate::Result<()> {
     scc_engine::rpc::serve_stdio(root).map_err(engine_err)
